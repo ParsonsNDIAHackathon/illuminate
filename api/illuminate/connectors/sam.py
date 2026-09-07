@@ -1,5 +1,7 @@
 """SAM.gov Entity Management and Exclusions — the vendor spine and the authoritative
-negative of 'approved'. Needs a free api.data.gov key (email verification)."""
+negative of 'approved'. Needs a SAM.gov *personal* API key (SAM.gov workspace → Profile →
+API Key, behind a login.gov sign-in). api.data.gov keys are NOT accepted — the edge
+answers every request with a bare 404 (verified 2026-09-07)."""
 from __future__ import annotations
 
 from ..ids import location_id
@@ -17,8 +19,8 @@ class SAMConnector(Connector):
     description = "Registered vendors (UEI, CAGE, status, NAICS) and debarment/exclusion screen"
     trust = "authoritative"
     key_name = "sam"
-    key_url = "https://api.data.gov/signup/"
-    key_note = "Free api.data.gov key; the public tier works for entity lookups. Email verification required."
+    key_url = "https://sam.gov/workspace/profile"
+    key_note = "SAM.gov personal API key: sign in (login.gov), create an Individual account, then Workspace → Profile → API Key. api.data.gov keys do not work here."
 
     async def enrich(self, entity: dict, user: str) -> list[Fact]:
         key = vault().get(user, self.key_name)
