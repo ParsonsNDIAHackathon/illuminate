@@ -1,0 +1,18 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+api/.venv/
+.pytest_cache/
+*.egg-info/
+# node
+node_modules/
+web/dist/
+# env / secrets
+.env
+*.local
+api/data/
+# neo4j volume
+.neo4j/
+# misc
+.DS_Store
