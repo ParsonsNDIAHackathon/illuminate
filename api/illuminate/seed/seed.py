@@ -354,7 +354,7 @@ def main() -> None:
     ap.add_argument("--agency", default="Department of Defense")
     ap.add_argument("--since", default="2019-10-01")
     ap.add_argument("--until", default="2026-09-30")
-    ap.add_argument("--primes", type=int, default=100)
+    ap.add_argument("--primes", type=int, default=20)
     ap.add_argument("--subs", type=int, default=60)
     ap.add_argument("--people", type=int, default=10, help="how many top suppliers get the people layer")
     ap.add_argument("--reset", action="store_true")
