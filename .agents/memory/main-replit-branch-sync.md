@@ -30,20 +30,15 @@ while a bounded loop avoids silently chasing a branch that never settles.
 pushing. If the fetched tip is not an ancestor, merge it and revalidate; retry only
 a small fixed number of times, and stop for review if the remote keeps advancing.
 
-Replit's concurrent-task integration may rebuild workspace `main` by rebasing it
-onto the platform-owned `main-repl/main` base. A merge made only on workspace
-`main` can disappear while its file changes survive as patch-equivalent commits.
-Locally changing that base is not durable because the platform force-refreshes it
-from its authoritative remote.
+Treat Replit's platform-owned `main-repl/main` as a read-only integration ref.
+Task completion may rebase workspace `main` onto it and replay local merge content.
 
-**Why:** Repeated history-preserving merges were replaced during completion review
-because active task integration rebased `main`; a later attempt to update the local
-base was itself replaced by a forced fetch.
+**Why:** Local changes to the integration ref can be replaced by forced platform
+refreshes, while task-completion rebases can change the candidate commit history.
 
-**How to apply:** Confirm the reflog before repeating a vanished merge. If it shows
-automatic rebases and forced base refreshes, do not modify the local integration
-base or keep racing it. Coordinate with the integration owner or wait until active
-task merges settle, then reconcile workspace `main` and recheck ancestry immediately.
+**How to apply:** Wait for active integrations to settle, use the platform conflict
+flow during completion, then rerun validation and GitHub synchronization against
+the rebased candidate. Never try to make the integration ref authoritative locally.
 
 Treat any credential-delivery channel as readable by the whole Git process tree,
 not just the intended credential prompt.
