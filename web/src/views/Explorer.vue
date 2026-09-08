@@ -75,7 +75,6 @@ const q = ref(''); const hits = ref<any[]>([]); const searching = ref(false); co
 // The programs the canvas can be narrowed to. The store keeps this current from live
 // deltas, so a program added while this view is open shows up here without a reload.
 const focusItems = computed(() => [{ id: null, name: 'Everything' }, ...graph.programs])
-const hasSimulation = computed(() => graph.nodeList.some(n => n.props?.simulated) || graph.edgeList.some(e => e.props?.simulated))
 const presetRunning = ref(false)
 let t: any
 let lastMissionPreset = ''

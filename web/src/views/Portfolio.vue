@@ -82,7 +82,7 @@
             <tr v-for="(row, index) in filtered" :key="row.entity.id" :class="[profileClass(row), { unavailable: !row.contract && !row.pending }]">
               <td class="rank">{{ String(index + 1).padStart(2, '0') }}</td>
               <td class="vendor"><router-link :to="`/entities/${row.entity.id}`">{{ row.entity.name }}</router-link>
-                <div><span v-if="row.entity.simulated" class="tag sim">SIMULATED</span><span v-if="row.pending" class="tag pending">ASSESSING</span><span v-else-if="!row.contract" class="tag missing">REPORT UNAVAILABLE</span><span v-else class="version">{{ row.contract.contract_version || 'unversioned contract' }}</span></div>
+                <div><span v-if="row.pending" class="tag pending">ASSESSING</span><span v-else-if="!row.contract" class="tag missing">REPORT UNAVAILABLE</span><span v-else class="version">{{ row.contract.contract_version || 'unversioned contract' }}</span></div>
               </td>
               <td class="mono">{{ row.entity.tier ?? '—' }}</td>
               <td><div class="score" :class="riskClass(row)">{{ number(row.contract?.score) }}</div></td>

@@ -3,7 +3,6 @@
     <div class="d-flex align-center ga-2 mb-1">
       <v-btn icon="mdi-arrow-left" variant="text" @click="router.back()" />
       <h2 class="text-h6">{{ rep.identity.name }}</h2>
-      <v-chip v-if="rep.identity.simulated" size="x-small" color="warning" variant="tonal">SIMULATED</v-chip>
       <v-chip v-if="rep.entity.flagged" size="x-small" color="error" variant="tonal">flagged</v-chip>
       <v-spacer />
       <v-btn prepend-icon="mdi-compare-horizontal" :to="`/compare/vendors?left=${encodeURIComponent(props.id)}`">Compare</v-btn>
@@ -38,7 +37,7 @@
               <span class="section">Supply relationships</span>
               <v-table density="compact"><thead><tr><th>Supplies</th><th>Tier</th><th>PSC</th><th>Sole source</th><th>Amount</th><th>Contract</th><th>Source</th></tr></thead>
                 <tbody><template v-for="s in rep.supply.supplies" :key="s.edge_id || s.id + s.contract_ref"><tr><td><router-link :to="`/entities/${s.id}`">{{ s.name }}</router-link></td><td>{{ s.tier }}</td><td>{{ s.psc }}</td><td>{{ formatSoleSource(s.sole_source) }}</td><td>{{ s.amount ? '$' + Number(s.amount).toLocaleString() : '—' }}</td><td>{{ s.contract_ref || '—' }}</td><td><a v-if="s.source_url" :href="s.source_url" target="_blank" rel="noopener">{{ s.source }}</a><span v-else>{{ s.source || 'Unavailable' }}</span></td></tr>
-                  <tr class="lineage-row"><td colspan="7"><div class="lineage"><TruthBadge :value="supplyTruthStatus(s)" /><span>Retrieved {{ formatDate(supplyEvidence(s)?.retrieved_at) }}</span><span>Method {{ supplyEvidence(s)?.method || 'Unavailable' }}</span><span>Rule <span class="mono">{{ supplyFactor(s)?.rule_id || 'Unavailable' }}</span></span><span>Confidence {{ formatConfidence(supplyEvidence(s)?.confidence) }}</span><span>Freshness <TruthBadge :value="supplyFactor(s)?.freshness || 'unavailable'" /></span><span v-if="supplySimulated(s)" class="simulation-copy">Training scenario only — not a real allegation.</span><router-link v-if="supplyEvidence(s)?.claim_id" :to="{ path: '/claims', query: { entity_id: props.id, status: supplyEvidence(s)?.claim_status || 'committed' } }">Review claim</router-link><span v-else>No backing claim available</span></div></td></tr>
+                  <tr class="lineage-row"><td colspan="7"><div class="lineage"><TruthBadge :value="supplyTruthStatus(s)" /><span>Retrieved {{ formatDate(supplyEvidence(s)?.retrieved_at) }}</span><span>Method {{ supplyEvidence(s)?.method || 'Unavailable' }}</span><span>Rule <span class="mono">{{ supplyFactor(s)?.rule_id || 'Unavailable' }}</span></span><span>Confidence {{ formatConfidence(supplyEvidence(s)?.confidence) }}</span><span>Freshness <TruthBadge :value="supplyFactor(s)?.freshness || 'unavailable'" /></span><router-link v-if="supplyEvidence(s)?.claim_id" :to="{ path: '/claims', query: { entity_id: props.id, status: supplyEvidence(s)?.claim_status || 'committed' } }">Review claim</router-link><span v-else>No backing claim available</span></div></td></tr>
                 </template></tbody></v-table>
             </v-card-text></v-card>
           </v-col>
@@ -97,9 +96,6 @@
         </template>
       </v-window-item>
       <v-window-item value="risk">
-        <v-alert v-if="rep.identity.simulated || rep.risk.indicators.some((i:any) => i.simulated)" type="warning" variant="tonal" density="compact" class="mb-2">
-          <strong>SIMULATION SCENARIO.</strong> These indicators are training material, not allegations or verified findings.
-        </v-alert>
         <v-card variant="outlined" class="mb-3 recommendation-card">
           <v-card-text>
             <div class="d-flex align-center flex-wrap ga-2"><span class="section">Recommendation basis</span><TruthBadge :value="riskProfile?.freshness || 'unavailable'" /><strong>{{ recommendationLabel }}</strong><v-spacer /><span class="text-caption">{{ coveredCategories }}/{{ riskProfile?.categories.length || 0 }} risk categories covered · {{ formatPercent(riskProfile?.completeness) }} completeness</span></div>
@@ -117,19 +113,18 @@
           <v-card v-for="category in riskProfile?.categories || []" :key="category.id" variant="outlined" class="factor-card">
             <v-card-text>
               <div class="d-flex align-center ga-2"><strong>{{ labelize(category.label || category.id) }}</strong><v-spacer /><TruthBadge :value="category.freshness" /><v-chip size="x-small" variant="tonal" :color="sevColor(category.severity)">{{ category.severity || 'No data' }}</v-chip></div>
-              <div v-if="!category.factors.length" class="missing-copy">No approved, non-simulated evidence. This gap is not treated as a clear result.</div>
+              <div v-if="!category.factors.length" class="missing-copy">No approved evidence. This gap is not treated as a clear result.</div>
               <div v-for="factor in category.factors" :key="factor.rule_id" class="factor">
-                <div class="d-flex align-center flex-wrap ga-1"><TruthBadge :value="factor.truth_status || 'derived'" /><TruthBadge v-if="factor.provenance?.simulated" value="simulated" /><b>{{ factor.explanation || labelize(factor.rule_id) }}</b></div>
+                <div class="d-flex align-center flex-wrap ga-1"><TruthBadge :value="factor.truth_status || 'derived'" /><b>{{ factor.explanation || labelize(factor.rule_id) }}</b></div>
                 <dl class="provenance-list"><dt>Claim</dt><dd><TruthBadge :value="factor.claim_status || 'unavailable'" /></dd><dt>Source</dt><dd>{{ factor.provenance?.source || factor.evidence?.[0]?.source || 'Unavailable' }}</dd><dt>Retrieved</dt><dd>{{ formatDate(factor.provenance?.retrieved_at || factor.evidence?.[0]?.retrieved_at) }}</dd><dt>Method</dt><dd>{{ factor.provenance?.method || factor.evidence?.[0]?.method || 'Unavailable' }}</dd><dt>Rule</dt><dd class="mono">{{ factor.rule_id }}</dd><dt>Confidence</dt><dd>{{ formatConfidence(factor.confidence) }}</dd><dt>Freshness</dt><dd><TruthBadge :value="factor.freshness || category.freshness" /></dd></dl>
-                <div v-if="factor.provenance?.simulated || factor.evidence?.some((e:any) => e.simulated)" class="simulation-copy">Training scenario only — excluded from verified scoring and not a real allegation.</div>
               </div>
             </v-card-text>
           </v-card>
         </div>
         <v-list density="compact" lines="two">
-          <v-list-item v-for="i in rep.risk.indicators" :key="i.family" :title="i.label" :subtitle="i.detail || ''" :class="{ 'finding-selected': selectedFinding === i.family, 'finding-simulated': i.simulated }" @click="selectedFinding = i.family">
+          <v-list-item v-for="i in rep.risk.indicators" :key="i.family" :title="i.label" :subtitle="i.detail || ''" :class="{ 'finding-selected': selectedFinding === i.family }" @click="selectedFinding = i.family">
             <template #prepend><v-icon :icon="sevIcon(i.severity)" :color="sevColor(i.severity)" /></template>
-            <template #append><v-chip v-if="i.simulated" size="x-small" color="warning" variant="outlined" class="mr-1">SIMULATION</v-chip><v-chip size="x-small" variant="tonal" :color="sevColor(i.severity)">{{ i.severity ? i.severity : 'No data' }}</v-chip><span class="ml-2 text-caption" style="opacity:.7">{{ i.source || '—' }}</span></template>
+            <template #append><v-chip size="x-small" variant="tonal" :color="sevColor(i.severity)">{{ i.severity ? i.severity : 'No data' }}</v-chip><span class="ml-2 text-caption" style="opacity:.7">{{ i.source || '—' }}</span></template>
           </v-list-item>
         </v-list>
         <div v-if="activeFinding" class="finding-actions">
@@ -143,23 +138,11 @@
           <b v-else>Risk score not assessed.</b>
           {{ rep.risk.note }}
         </v-alert>
-        <!-- Scenario material cannot move the verified score. Showing only that score would
-             hide what the tool actually found, so the scenario evaluation sits beside it. -->
-        <v-alert v-if="rep.risk.scenario" variant="tonal" density="compact" class="mt-2 scenario-score" type="warning">
-          <b>Including simulated scenario evidence: {{ rep.risk.scenario.score != null ? `${rep.risk.scenario.score}/100 · ${String(rep.risk.scenario.band || '').replaceAll('_', ' ')}` : 'not assessed' }}.</b>
-          Verified evidence alone scores {{ rep.risk.scenario.verified_score != null ? `${rep.risk.scenario.verified_score}/100` : 'nothing' }}.
-          Scenario material is excluded from the verified score and from exports; it is shown here so the findings it drives are visible.
-          <div v-if="scenarioDrivers.length" class="mt-1">
-            <div v-for="d in scenarioDrivers" :key="d.id + d.rule_id" class="text-caption">
-              <b>{{ labelize(d.id) }}</b> — {{ d.severity }}: {{ d.explanation }}
-            </div>
-          </div>
-        </v-alert>
         <p class="text-caption mt-2" style="opacity:.7">{{ rep.risk.disclaimer }}</p>
       </v-window-item>
       <v-window-item value="artifacts">
         <v-table density="compact"><thead><tr><th>Kind</th><th>Title</th><th>Source</th><th>Date</th><th>View</th></tr></thead>
-          <tbody><tr v-for="a in rep.artifacts" :key="a.id" :class="{ 'finding-simulated': a.simulated }"><td>{{ a.kind }} <TruthBadge v-if="a.simulated" value="simulated" /></td><td><SourceLink :href="a.url" :artifact-id="a.id">{{ a.title }}</SourceLink><div v-if="a.simulated" class="simulation-copy">Training scenario only — not a real allegation.</div></td><td>{{ a.source }}</td><td>{{ a.published_at || (a.retrieved_at || '').slice(0, 10) }}</td><td><v-btn icon="mdi-text-box-search-outline" size="x-small" variant="text" title="View contents" @click="rawId = a.id" /></td></tr></tbody></v-table>
+          <tbody><tr v-for="a in rep.artifacts" :key="a.id"><td>{{ a.kind }}</td><td><SourceLink :href="a.url" :artifact-id="a.id">{{ a.title }}</SourceLink></td><td>{{ a.source }}</td><td>{{ a.published_at || (a.retrieved_at || '').slice(0, 10) }}</td><td><v-btn icon="mdi-text-box-search-outline" size="x-small" variant="text" title="View contents" @click="rawId = a.id" /></td></tr></tbody></v-table>
         <ArtifactViewer :artifact-id="rawId" @close="rawId = null" />
         <p v-if="!rep.artifacts.length" class="text-body-2 mt-2" style="opacity:.6">No artifacts attached yet.</p>
       </v-window-item>
@@ -198,14 +181,6 @@ async function load() {
 const coveredCategories = computed(() => riskProfile.value?.categories.filter(category => category.factors.length > 0).length || 0)
 const recommendationLabel = computed(() => labelize(riskProfile.value?.disposition || 'Complete diligence'))
 function labelize(value: string) { return value.replaceAll('_', ' ').replaceAll('.', ' ') }
-// The categories the scenario evaluation actually scored, so the alert names what drove it
-// rather than only the number.
-const scenarioDrivers = computed(() => {
-  const cats = (rep.value as any)?.risk?.scenario?.categories || []
-  return cats
-    .filter((c: any) => c.severity && c.severity !== 'clear' && c.factors?.length)
-    .map((c: any) => ({ id: c.id, severity: c.severity, rule_id: c.factors[0].rule_id, explanation: c.factors[0].explanation }))
-})
 function formatDate(value?: string) { return value ? new Date(value).toLocaleString() : 'Unavailable' }
 function formatConfidence(value?: number | null) { return value == null ? 'Unavailable' : `${Math.round(value * 100)}%` }
 function formatPercent(value?: number | null) { return value == null ? 'Unavailable' : `${Math.round(value * 100)}%` }
@@ -220,12 +195,7 @@ function supplyFactor(s: any) {
     factor.evidence_refs.includes(evidence?.claim_id) || factor.evidence_refs.includes(evidence?.evidence_id),
   )
 }
-function supplySimulated(s: any) {
-  const evidence = supplyEvidence(s)
-  return Boolean(s.simulated || evidence?.simulated || evidence?.claim_simulated || evidence?.artifact_simulated || evidence?.evidence_simulated || evidence?.entity_simulated)
-}
 function supplyTruthStatus(s: any) {
-  if (supplySimulated(s)) return 'simulated'
   const evidence = supplyEvidence(s)
   return evidence?.claim_status || evidence?.status || 'unavailable'
 }
@@ -247,7 +217,6 @@ onMounted(load); watch(() => props.id, load)
 dl { display: grid; grid-template-columns: 110px 1fr; gap: 3px 8px; margin: 6px 0 0; font-size: 13px; }
 dt { opacity: .6; } dd { margin: 0; }
 .finding-selected { background: rgba(0,107,98,.08); border-left: 3px solid #006b62; }
-.finding-simulated { border-right: 3px dashed #b77900; background-image: repeating-linear-gradient(135deg, rgba(183,121,0,.045) 0, rgba(183,121,0,.045) 5px, transparent 5px, transparent 11px); }
 .finding-actions { margin-top: 12px; padding: 12px; display: flex; align-items: center; gap: 8px; border: 1px solid rgba(0,107,98,.3); border-radius: 5px; background: rgba(0,107,98,.045); }
 .finding-actions > div { display: grid; margin-right: auto; }
 .finding-actions strong { font-size: 13px; }
@@ -260,7 +229,6 @@ dt { opacity: .6; } dd { margin: 0; }
 .factor { margin-top: 10px; padding-top: 10px; border-top: thin solid rgba(0,0,0,.12); }
 .provenance-list { grid-template-columns: 76px 1fr; }
 .missing-copy { margin-top: 8px; padding: 8px; color: #8a5213; background: rgba(183,121,0,.08); font-size: 12px; }
-.simulation-copy { color: #8a5213; font-weight: 700; }
 .gap-row { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 6px; font-size: 12px; }
 .gap-row .v-chip { margin-left: 3px; }
 .deep-links { display: flex; flex-wrap: wrap; }

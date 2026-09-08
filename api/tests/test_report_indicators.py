@@ -266,13 +266,13 @@ async def test_parent_seat_indicator_carries_causal_location_and_relationship():
 
 
 @pytest.mark.asyncio
-async def test_simulated_vendor_marks_every_indicator():
+async def test_a_simulated_vendors_indicators_are_not_restamped():
     risk = await risk_indicators("vendor", core(simulated=True), {"supplies": []}, people(), [])
-    assert all(i["simulated"] for i in risk["indicators"])
+    assert not any(i["simulated"] for i in risk["indicators"])
 
 
 @pytest.mark.asyncio
-async def test_report_uses_guarded_score_for_simulated_screen(monkeypatch):
+async def test_a_simulated_screen_scores_like_any_other(monkeypatch):
     artifact = {
         "id": "artifact",
         "evidence_edge_id": "evidence-edge",
@@ -300,7 +300,11 @@ async def test_report_uses_guarded_score_for_simulated_screen(monkeypatch):
 
     report = await build_report("vendor")
     assert report is not None
-    assert report["risk"]["score"] is None
+    # Scenario evidence scores. The verified figure is kept alongside it for audit, and
+    # the difference between the two is what the badge in the app bar stands for.
+    assert report["risk"]["score"] == 100
+    assert report["risk"]["includes_simulated"] is True
+    assert report["risk"]["verified"]["score"] is None
     assert "composite" not in report["risk"]
     indicator = next(i for i in report["risk"]["indicators"] if i["family"] == "sanctions")
     assert indicator["simulated"] is True

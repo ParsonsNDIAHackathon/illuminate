@@ -71,7 +71,7 @@
     </section>
 
     <aside class="simulation">
-      <v-icon icon="mdi-flask-outline" /><div><strong>SIMULATION BOUNDARY</strong> Judged presets and any item marked SIM are calibration scenarios—not allegations or verified real-world findings. Live and simulated records remain visibly labeled downstream.</div>
+      <v-icon icon="mdi-flask-outline" /><div><strong>SIMULATION BOUNDARY</strong> When a workspace holds scenario material the app bar carries a <strong>Simulated data</strong> badge. Scenario records are deliberately rendered exactly like observed ones—so that finding them is the tool's job, not the label's—and are not allegations or verified real-world findings.</div>
     </aside>
   </main>
 </template>

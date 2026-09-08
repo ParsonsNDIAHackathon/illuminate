@@ -2,7 +2,6 @@
   <div class="inspector" v-if="edge">
     <div class="d-flex align-center ga-2 mb-1">
       <v-chip size="x-small" variant="tonal">edge · {{ edge.type }}</v-chip>
-      <v-chip v-if="p.simulated" size="x-small" color="warning" variant="tonal">SIMULATED</v-chip>
       <v-spacer />
       <v-btn icon="mdi-close" variant="text" size="x-small" @click="graph.selectEdge(null)" />
     </div>

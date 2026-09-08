@@ -1083,15 +1083,12 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
     else:
         inds.append(_ind("media", "Adverse media — below coverage threshold", None, None))
 
-    if e.get("simulated"):
-        for indicator in inds:
-            indicator["simulated"] = True
     observed = [i for i in inds if not i["no_data"]]
     return {
         "indicators": inds,
         "families_requested": len(inds),
         "families_with_data": len(observed),
-        "note": "Risk score uses approved, non-simulated evidence only. Missing, staged, rejected, and simulated evidence does not contribute.",
+        "note": "Missing, staged and rejected evidence does not contribute to the score.",
         "disclaimer": "Every indicator marks opacity, concentration or foreign control — conditions warranting human review. This tool flags; it does not accuse.",
     }
 
@@ -1107,19 +1104,16 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
     nws = await news(entity_id)
     aff = await affiliations(entity_id)
     risk = await risk_indicators(entity_id, core, supply, ppl, scr, aff)
-    risk.update(evaluate_risk_contract(core, supply, scr, people_data=ppl))
-    # A scenario is only worth planting if the tool is shown catching it. The verified
-    # score above deliberately cannot see simulated evidence — that is what keeps an
-    # exported finding about a real company honest — so the scenario evaluation is run
-    # alongside it and carried separately, labelled, for the demo to lead with.
-    if _has_simulated_evidence(core, supply, scr, ppl):
-        scenario = evaluate_risk_contract(core, supply, scr, include_simulated=True, people_data=ppl)
-        risk["scenario"] = {
-            **scenario,
-            "includes_simulated": True,
-            "verified_score": risk.get("score"),
-            "verified_band": risk.get("band"),
-        }
+    verified = evaluate_risk_contract(core, supply, scr, people_data=ppl)
+    # A scenario risk has to read exactly like a real one — same score, same band, same
+    # cards — or the demo shows the analyst where to look and proves nothing. Disclosure
+    # is the app-bar badge, once, not a second treatment on every finding. The verified
+    # evaluation is still computed and carried for audit; it is simply not the headline.
+    simulated = _has_simulated_evidence(core, supply, scr, ppl)
+    risk.update(evaluate_risk_contract(core, supply, scr, include_simulated=True, people_data=ppl)
+                if simulated else verified)
+    risk["includes_simulated"] = simulated
+    risk["verified"] = {k: verified.get(k) for k in ("score", "band", "disposition", "confidence", "completeness")}
     e = core["e"]
     sources = sorted({s for s in [e.get("source")] + [a.get("source") for a in arts] + [p.get("source") for p in ppl["current"] + ppl["former"]] if s})
     report = {
@@ -1139,9 +1133,9 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
         "categories": core.get("categories"),
         "supply": supply,
         "people": ppl,
-        "screens": [] if e.get("simulated") else [
-            s for s in scr if s.get("status") == "committed" and not _screen_simulated(s)
-        ],
+        # Committed is the bar. A screen is not withheld for being scenario material —
+        # an empty screens table is itself a tell.
+        "screens": [s for s in scr if s.get("status") == "committed"],
         "screen_evidence": scr,
         "risk": risk,
         "artifacts": arts,
