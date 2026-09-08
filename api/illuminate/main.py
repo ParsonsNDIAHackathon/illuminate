@@ -17,8 +17,8 @@ from .routers.deps import user_id
 from .routers import settings as settings_router
 from .schema import ensure_schema
 from .tools.permissions import gate
-from .routers import catalog, chat, claims, connectors, enrichment, exports, graph, permissions, query
 from .mcp_server import AuthenticatedMCP, build_server
+from .routers import catalog, chat, claims, connectors, enrichment, exports, graph, permissions, programs, query
 
 
 class _MCPMount:
@@ -86,7 +86,7 @@ async def health(refresh: bool = False, user: str = Depends(user_id)):
     return await build_readiness(user, refresh=refresh)
 
 
-for r in (graph.router, query.router, permissions.router, claims.router, enrichment.router, connectors.router, exports.router, catalog.router, settings_router.router, chat.router):
+for r in (graph.router, programs.router, query.router, permissions.router, claims.router, enrichment.router, connectors.router, exports.router, catalog.router, settings_router.router, chat.router):
     app.include_router(r)
 
 @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)

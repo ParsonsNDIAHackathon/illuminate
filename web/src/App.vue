@@ -22,6 +22,11 @@
       </v-list>
     </v-navigation-drawer>
     <v-main>
+      <v-alert v-if="hasSimulation" class="simulation-banner" type="warning" variant="tonal"
+               density="compact" rounded="0" icon="mdi-alert-outline">
+        <strong>SIMULATION DATA</strong>
+        <span>Scenario material for analysis — not an allegation or verified finding.</span>
+      </v-alert>
       <router-view />
     </v-main>
     <PermissionDialog />
@@ -44,9 +49,11 @@ const { smAndDown } = useDisplay()
 const narrow = smAndDown
 const drawer = ref(!narrow.value)
 const staged = ref(0); const snack = ref(false); const snackText = ref('')
+const hasSimulation = computed(() => graph.nodeList.some(n => n.props?.simulated) || graph.edgeList.some(e => e.props?.simulated))
 const nav = computed(() => [
   { to: '/', icon: 'mdi-graph', title: 'Graph' },
   { to: '/entities', icon: 'mdi-domain', title: 'Entities' },
+  { to: '/programs', icon: 'mdi-clipboard-text-outline', title: 'Programs' },
   { to: '/people', icon: 'mdi-account-tie', title: 'People' },
   { to: '/artifacts', icon: 'mdi-file-document-multiple', title: 'Artifacts' },
   { to: '/claims', icon: 'mdi-check-decagram', title: 'Claims', badge: staged.value || undefined },
@@ -60,6 +67,9 @@ watch(narrow, value => { drawer.value = !value })
 </script>
 <style>
 .brand { font-family: 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .18em; font-weight: 700; margin-left: 12px; }
+.simulation-banner .v-alert__content { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.simulation-banner strong { letter-spacing: .12em; white-space: nowrap; }
+@media (max-width: 600px) { .simulation-banner .v-alert__content { align-items: flex-start; flex-direction: column; gap: 2px; } }
 html, body { overscroll-behavior: none; }
 .nav-trigger { display: none; }
 .depth-select { width: 110px; flex: 0 0 110px; }

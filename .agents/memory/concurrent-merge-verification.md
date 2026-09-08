@@ -15,3 +15,14 @@ checks. Internal tests did not detect the integration loss.
 files, include an HTTP-level test against the real application object and
 confirm the current shared file plus live endpoint immediately before marking
 the task complete.
+
+Completion review evaluates the integrated base-to-head result, not only the
+files changed by the current task.
+
+**Why:** A task-local feature passed its own review, but completion was blocked
+by reproducible regressions already present elsewhere in the integration range.
+Commit provenance did not make a broken combined result acceptable.
+
+**How to apply:** When final validation identifies an integrated regression,
+coordinate with its active owner when possible; otherwise make the narrow repair
+and validate that behavior before retrying completion.

@@ -96,6 +96,7 @@ TAXONOMY: list[dict] = [
 
 CONSTRAINTS = [
     "CREATE CONSTRAINT entity_id IF NOT EXISTS FOR (n:Entity) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT program_code IF NOT EXISTS FOR (n:Entity) REQUIRE n.program_code_norm IS UNIQUE",
     "CREATE CONSTRAINT person_id IF NOT EXISTS FOR (n:Person) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT category_id IF NOT EXISTS FOR (n:Category) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT location_id IF NOT EXISTS FOR (n:Location) REQUIRE n.id IS UNIQUE",

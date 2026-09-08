@@ -1,7 +1,7 @@
 <template>
   <div class="explorer">
     <div class="canvas">
-      <GraphCanvas ref="canvas" :show-simulation-notice="false" @expand="expand" />
+      <GraphCanvas ref="canvas" @expand="expand" />
       <div class="toolbar">
         <LayerToggles @change="reload" />
         <v-select class="focus" :model-value="graph.focusId" :items="focusItems" item-title="name" item-value="id"
@@ -20,10 +20,6 @@
           <v-list v-if="open && hits.length" class="hits" density="compact" @mousedown.prevent>
             <v-list-item v-for="h in hits" :key="h.id" :title="h.name" :subtitle="[h.label, h.uei && `UEI ${h.uei}`].filter(Boolean).join(' · ')" @click="onPick(h.id)" />
           </v-list>
-        </div>
-        <div v-if="hasSimulation" class="simulation-notice">
-          <strong>SIMULATION DATA</strong>
-          <span>Scenario material for analysis — not an allegation or verified finding.</span>
         </div>
         <div v-if="graph.focusIds.length" class="focus-title">
           <span>REPORT TRACE</span>
@@ -71,7 +67,6 @@ const q = ref(''); const hits = ref<any[]>([]); const searching = ref(false); co
 // The programs the canvas can be narrowed to. The store keeps this current from live
 // deltas, so a program added while this view is open shows up here without a reload.
 const focusItems = computed(() => [{ id: null, name: 'Everything' }, ...graph.programs])
-const hasSimulation = computed(() => graph.nodeList.some(n => n.props?.simulated) || graph.edgeList.some(e => e.props?.simulated))
 let t: any
 // A plain text field, not an autocomplete: the typed text — and the canvas filter it drives — must survive blur.
 watch(q, (v) => {
@@ -136,8 +131,6 @@ watch(() => ws.depth, () => { if (graph.focusId) reload() })
 .canvas-overlays { position: absolute; top: 52px; left: 12px; z-index: 7; display: grid; gap: 8px; width: 360px; }
 .search { position: relative; z-index: 1; width: 100%; }
 .hits { position: absolute; top: 100%; left: 0; right: 0; z-index: 2; margin-top: 4px; max-height: 320px; overflow: auto; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
-.simulation-notice { display: flex; align-items: center; gap: 10px; max-height: 96px; overflow: auto; padding: 8px 14px; border: 2px solid #9a6700; border-radius: 4px; background: #fff4cf; color: #563b00; box-shadow: 0 3px 12px rgba(60,45,0,.16); font-size: 12px; letter-spacing: .01em; }
-.simulation-notice strong { font-size: 11px; letter-spacing: .12em; white-space: nowrap; }
 .focus-title { display: grid; max-height: 180px; overflow: auto; padding: 9px 12px; border-left: 4px solid #006b62; background: rgba(245,248,240,.94); color: #173b37; box-shadow: 0 2px 10px rgba(25,45,40,.12); }
 .focus-title span { color: #006b62; font-size: 9px; font-weight: 800; letter-spacing: .14em; }
 .focus-title strong { font-size: 13px; line-height: 1.25; }
@@ -159,6 +152,5 @@ watch(() => ws.depth, () => { if (graph.focusId) reload() })
 }
 @media (max-width: 420px) {
   .explorer { grid-template-rows: minmax(390px, 56dvh) minmax(480px, 76dvh); }
-  .simulation-notice { align-items: flex-start; flex-direction: column; gap: 2px; padding: 6px 9px; font-size: 10px; }
 }
 </style>

@@ -23,7 +23,7 @@ _listeners: set[Listener] = set()
 
 # Node ids are prefixed by kind (see ids.py). Relationship ids (rel_) are deliberately
 # absent: this matches node ids out of arbitrary Cypher parameters and result rows.
-NODE_ID = re.compile(r"^(?:ent|per|loc|cat|art|clm)_[A-Za-z0-9_.:-]{1,64}$")
+NODE_ID = re.compile(r"^(?:ent|prog|per|loc|cat|art|clm)_[A-Za-z0-9_.:-]{1,64}$")
 MAX_IDS = 200
 MAX_ELEMENTS = 4000
 

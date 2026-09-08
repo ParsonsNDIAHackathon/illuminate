@@ -38,6 +38,7 @@ def test_frontend_routes_serve_root_asset_and_history_fallback(tmp_path: Path):
     client = TestClient(test_app)
     assert client.get("/").text == '<div id="app"></div>'
     assert client.get("/portfolio").text == '<div id="app"></div>'
+    assert client.get("/programs").text == '<div id="app"></div>'
     assert client.get("/assets/app.js").text == "console.log('ok')"
 
 

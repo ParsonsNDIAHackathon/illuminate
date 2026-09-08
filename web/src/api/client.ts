@@ -185,6 +185,31 @@ export interface EntityListResponse {
   total: number
 }
 
+export interface Program {
+  id: string
+  name: string
+  agency: string | null
+  program_code: string | null
+  description: string | null
+  source: string
+  created_at: string | null
+  created_by: string | null
+}
+
+export interface ProgramListResponse {
+  items: Program[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface ProgramCreate {
+  name: string
+  agency?: string
+  program_code?: string
+  description?: string
+}
+
 export interface EntityRiskContract {
   contract_version: string
   score: number | null

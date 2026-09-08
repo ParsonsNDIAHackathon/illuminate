@@ -14,8 +14,8 @@ OTHER_ID = "ent_testlive2"
 
 
 def test_node_ids_finds_ids_at_any_depth():
-    found = events.node_ids({"id": "ent_abc123", "nested": [{"to_id": "per_9f0"}, "rel_notanode", "plain"], "n": 3})
-    assert found == ["ent_abc123", "per_9f0"]
+    found = events.node_ids({"id": "ent_abc123", "nested": [{"to_id": "per_9f0"}, "prog_0123456789ab", "rel_notanode", "plain"], "n": 3})
+    assert found == ["ent_abc123", "per_9f0", "prog_0123456789ab"]
     assert events.node_ids({"x": None}, [], "") == []
 
 
