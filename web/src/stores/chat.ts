@@ -54,6 +54,9 @@ export const useChat = defineStore('chat', {
         case 'permission_request': usePermissions().push(ev.payload); break
         case 'permission_resolved': case 'permission_failed': usePermissions().resolve(ev.payload); break
         case 'job_update': useJobs().update(ev.payload); break
+        // Any committed write, from any source — this chat, another tab, MCP, or the
+        // enrichment worker — arrives here so the canvas never needs a reload.
+        case 'graph_delta': graph.applyDelta(ev.payload?.subgraph, ev.payload?.focus); break
       }
     },
     reset() { this.messages = []; this.conversationId = null },
