@@ -107,7 +107,7 @@
 </template>
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
 import ArtifactViewer from '../components/ArtifactViewer.vue'
@@ -116,8 +116,10 @@ const rawId = ref<string | null>(null)
 import { useJobs } from '../stores/jobs'
 import { useWorkspace } from '../stores/workspace'
 const props = defineProps<{ id: string }>()
-const router = useRouter(); const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace()
-const rep = ref<any>(null); const tab = ref('overview'); const enriching = ref(false); const regen_busy = ref(false)
+const router = useRouter(); const route = useRoute(); const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace()
+const requestedTab = String(route.query.tab || '')
+const tab = ref(requestedTab === 'evidence' ? 'artifacts' : requestedTab || 'overview')
+const rep = ref<any>(null); const enriching = ref(false); const regen_busy = ref(false)
 async function load() { rep.value = await api.get(`/api/entities/${props.id}/report`) }
 function sevIcon(s: string | null) { return s === 'high' ? 'mdi-alert-octagon' : s === 'medium' ? 'mdi-alert' : s === 'low' ? 'mdi-information-outline' : s === 'clear' ? 'mdi-check-circle-outline' : 'mdi-help-circle-outline' }
 function sevColor(s: string | null) { return s === 'high' ? 'error' : s === 'medium' ? 'warning' : s === 'low' ? 'secondary' : s === 'clear' ? 'success' : undefined }

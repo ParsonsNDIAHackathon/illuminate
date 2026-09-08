@@ -1,5 +1,11 @@
 const USER = 'local'
 
+export interface EntitySummary {
+  id: string
+  name: string
+  tier: number | string | null
+  simulated: boolean
+}
 async function request<T = any>(method: string, path: string, body?: any): Promise<T> {
   const r = await fetch(path, {
     method,
@@ -136,4 +142,39 @@ export async function getVendorRiskProfile(id: string): Promise<VendorRiskProfil
     categories,
     diligence_flags: risk.diligence_flags || [],
   }
+}
+
+export interface EntityReportContract {
+  identity: EntitySummary & Record<string, unknown>
+  risk_contract?: EntityRiskContract
+  risk?: (Partial<EntityRiskContract> & Record<string, unknown>)
+  [key: string]: unknown
+}
+
+export interface EntityListResponse {
+  items: EntitySummary[]
+  total: number
+}
+
+export interface EntityRiskContract {
+  contract_version: string
+  score: number | null
+  band: string | null
+  disposition: string | null
+  confidence: number | null
+  completeness: number | null
+  freshness: string | number | null
+  categories: Array<RiskCategory | string>
+  diligence_flags: Array<string | Record<string, unknown>>
+}
+
+export interface RiskCategory {
+  id?: string
+  category?: string
+  name?: string
+  severity?: string | number | null
+  score?: number | null
+  confidence?: number | null
+  freshness?: string | null
+  [key: string]: unknown
 }
