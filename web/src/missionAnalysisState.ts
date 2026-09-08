@@ -3,12 +3,17 @@ export type MissionAnalysisCompletion = {
   template: string
   root: string
   elements: number
+  elementIds: string[]
+  affected: { id: string; name: string }[]
+  hasSimulated: boolean
 }
 
+type MissionElement = { id?: string; label?: string; name?: string; props?: Record<string, unknown> }
+type MissionEdge = { id?: string; props?: Record<string, unknown> }
 type MissionAnalysisResult = {
   ok: boolean
-  data?: { error?: string }
-  subgraph?: { nodes?: unknown[]; edges?: unknown[] }
+  data?: { error?: string; rows?: { id?: string; name?: string }[] }
+  subgraph?: { nodes?: MissionElement[]; edges?: MissionEdge[] }
 }
 
 export function missionAnalysisKey(query: Record<string, unknown>) {
@@ -29,6 +34,19 @@ export function shouldRunMissionAnalysis(
   supportedTemplate: boolean,
 ) {
   return supportedTemplate && completion?.key !== key
+}
+
+export function extendMissionResultIds(
+  current: string[],
+  centerId: string,
+  edges: { id: string; source: string; target: string }[],
+) {
+  const incident = edges.filter(edge => edge.source === centerId || edge.target === centerId)
+  return [...new Set([
+    ...current,
+    centerId,
+    ...incident.flatMap(edge => [edge.id, edge.source, edge.target]),
+  ])]
 }
 
 export function resolveMissionAnalysis(
@@ -52,7 +70,17 @@ export function resolveMissionAnalysis(
     }
   }
   return {
-    completion: { key, template, root, elements },
+    completion: {
+      key, template, root, elements,
+      elementIds: [...(result.subgraph?.nodes || []), ...(result.subgraph?.edges || [])].map(item => item.id || '').filter(Boolean),
+      affected: (result.data?.rows || [])
+        .filter((row, index, rows) => row.id && rows.findIndex(candidate => candidate.id === row.id) === index)
+        .map(row => {
+          const node = (result.subgraph?.nodes || []).find(candidate => candidate.id === row.id)
+          return { id: row.id!, name: row.name || node?.name || row.id! }
+        }),
+      hasSimulated: [...(result.subgraph?.nodes || []), ...(result.subgraph?.edges || [])].some(item => item.props?.simulated === true),
+    },
     error: '',
   }
 }

@@ -1,11 +1,11 @@
 <template>
-  <div class="legend" :class="{ minimized }">
+  <div class="legend" :class="{ minimized, embedded }">
     <div class="legend-heading">
-      <strong>{{ minimized ? 'Legend' : 'Node types' }}</strong>
-      <span v-if="!minimized">Icon, shape and tint; highlights sit on top</span>
-      <v-btn class="toggle" :icon="minimized ? 'mdi-chevron-up' : 'mdi-minus'" variant="text" size="x-small" :title="minimized ? 'Show legend' : 'Minimize legend'" @click="minimized = !minimized" />
+      <strong>{{ minimized && !embedded ? 'Legend' : 'Node types' }}</strong>
+      <span v-if="!minimized || embedded">Icon, shape and tint; highlights sit on top</span>
+      <v-btn v-if="!embedded" class="toggle" :icon="minimized ? 'mdi-chevron-up' : 'mdi-minus'" variant="text" size="x-small" :title="minimized ? 'Show legend' : 'Minimize legend'" @click="minimized = !minimized" />
     </div>
-    <template v-if="!minimized">
+    <template v-if="!minimized || embedded">
       <div class="type-row">
         <span v-for="t in types" :key="t.key" class="type" :title="t.label"><i :class="t.shape" :style="{ backgroundColor: t.fill, backgroundImage: `url('${t.icon}')`, backgroundSize: `${t.glyphScale}%`, backgroundPosition: `center ${t.glyphY}%` }"></i>{{ t.label }}</span>
       </div>
@@ -48,6 +48,7 @@ import { RELATIONSHIP_FAMILIES, type RelationshipFamily } from '../styles/relati
 import { TIER_SIZES, supplierTiers } from '../styles/nodeSize'
 import { NODE_TYPES, iconForType, nodeType, type NodeType } from '../styles/nodeTypes'
 const graph = useGraph(); const ws = useWorkspace()
+defineProps<{ embedded?: boolean }>()
 const STORAGE_KEY = 'illuminate.legend.minimized'
 const minimized = ref(localStorage.getItem(STORAGE_KEY) === '1')
 watch(minimized, v => localStorage.setItem(STORAGE_KEY, v ? '1' : '0'))
@@ -64,6 +65,7 @@ function familyColor(family: RelationshipFamily) { return ws.theme === 'dark' ? 
 </script>
 <style scoped>
 .legend { position: absolute; left: 12px; bottom: 12px; z-index: 4; width: min(430px, calc(100% - 72px)); display: grid; gap: 7px; padding: 10px 12px; border: 1px solid rgba(100,116,139,.32); border-radius: 6px; background: rgba(var(--v-theme-surface),.94); box-shadow: 0 3px 14px rgba(15,23,42,.13); font-size: 11px; backdrop-filter: blur(5px); }
+.legend.embedded { position:static; width:100%; padding:0; border:0; box-shadow:none; background:none; }
 .legend-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .legend-heading .toggle { align-self: center; margin: -4px -6px -4px 0; opacity: .65; }
 .legend-heading .toggle:hover { opacity: 1; }

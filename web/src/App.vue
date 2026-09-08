@@ -15,7 +15,6 @@
         Simulated data
       </v-chip>
       <v-spacer />
-      <v-select v-if="route.name === 'graph'" class="depth-select mr-2" :model-value="ws.depth" @update:model-value="ws.setDepth" :items="[1,2,3,4,5,6]" label="Depth" hide-details />
       <v-badge v-if="jobs.running.length" :content="jobs.running.length" color="secondary" inline class="mr-2"><v-icon icon="mdi-cog-sync" size="20" /></v-badge>
       <v-btn :icon="ws.theme === 'dark' ? 'mdi-weather-sunny' : 'mdi-weather-night'" :aria-label="ws.theme === 'dark' ? 'Use light theme' : 'Use dark theme'" variant="text" @click="ws.setTheme(ws.theme === 'dark' ? 'light' : 'dark')" />
       <v-avatar size="28" color="primary" class="ml-1 mr-2"><span class="text-caption">jb</span></v-avatar>
@@ -84,13 +83,11 @@ watch(narrow, value => { drawer.value = !value })
 .simulated-badge { background: #fff4cf; color: #563b00; border: 1px solid #9a6700; font-weight: 600; letter-spacing: .04em; }
 html, body { overscroll-behavior: none; }
 .nav-trigger { display: none; }
-.depth-select { width: 110px; flex: 0 0 110px; }
 @media (max-width: 959px) {
   .nav-trigger { display: inline-flex; }
   .brand { margin-left: 2px; font-size: 12px; }
   .context-chip { max-width: min(34vw, 150px); }
   .context-chip .v-chip__content { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .depth-select { width: 76px; flex-basis: 76px; }
   .v-app-bar .v-avatar { display: none; }
 }
 @media (max-width: 430px) {

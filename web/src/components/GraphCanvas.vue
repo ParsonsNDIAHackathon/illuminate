@@ -3,10 +3,15 @@
     <div ref="el" class="cy"></div>
     <div v-if="graph.loading" class="loading"><v-progress-circular indeterminate size="28" /></div>
     <div class="canvas-tools">
-      <v-btn icon="mdi-fit-to-screen" variant="text" title="Fit" @click="fit" />
-      <v-btn icon="mdi-graph-outline" variant="text" title="Re-layout" @click="layout" />
-      <v-btn icon="mdi-format-color-fill" variant="text" title="Clear findings focus and styles" @click="clearVisualFocus" />
-      <v-btn icon="mdi-broom" variant="text" title="Clear canvas" @click="graph.clear()" />
+      <v-btn icon="mdi-fit-to-screen" variant="text" title="Fit graph to view" aria-label="Fit graph to view" @click="fit" />
+      <v-menu location="bottom end">
+        <template #activator="{ props }"><v-btn v-bind="props" icon="mdi-dots-horizontal" variant="text" title="More canvas actions" aria-label="More canvas actions" /></template>
+        <v-list density="compact">
+          <v-list-item prepend-icon="mdi-graph-outline" title="Re-layout graph" @click="layout()" />
+          <v-list-item prepend-icon="mdi-format-color-fill" title="Clear finding highlights" @click="clearVisualFocus" />
+          <v-list-item prepend-icon="mdi-broom" title="Clear canvas" @click="graph.clear()" />
+        </v-list>
+      </v-menu>
     </div>
   </div>
 </template>
@@ -23,6 +28,7 @@ import { nodeSize, supplierTiers } from '../styles/nodeSize'
 import { fillFor, glyphScaleFor, glyphYFor, iconFor, shapeFor } from '../styles/nodeTypes'
 import { relationshipFamily } from '../styles/relationshipFamilies'
 import { layerData, layerVisible } from '../stores/graphLayers'
+import { deriveFindingPath } from '../graphFocusPath'
 
 cytoscape.use(fcose)
 cytoscape.use(cola)
@@ -32,7 +38,7 @@ const ws = useWorkspace()
 let cy: Core | null = null
 let sameNameCollapsed: boolean | null = null
 const groupingLockedIds = new Set<string>()
-const emit = defineEmits<{ (e: 'expand', id: string): void; (e: 'report', id: string): void }>()
+const emit = defineEmits<{ (e: 'expand', id: string): void; (e: 'report', id: string): void; (e: 'select'): void }>()
 
 const SAME_NAME_COLLAPSE_ZOOM = 1
 
@@ -171,63 +177,12 @@ function restyle() {
   applyZoomGrouping(true)
   markFresh()
 }
-const FAMILY_EDGES: Record<string, Set<string>> = {
-  ownership: new Set(['OWNS', 'ULTIMATE_PARENT_OF', 'BENEFICIAL_OWNER_OF', 'PARENT_SEATED_IN']),
-  concentration: new Set(['SUPPLIES']),
-  people: new Set(['HELD_ROLE']),
-  sanctions: new Set(['EVIDENCES', 'ASSERTS', 'TARGETS', 'ABOUT']),
-  financial: new Set(['EVIDENCES', 'ASSERTS', 'ABOUT']),
-  media: new Set(['EVIDENCES', 'ASSERTS', 'ABOUT']),
-}
-type Step = { edge: string; node: string }
-function stableSteps(nodeId: string, allowed: Set<string>, supplyTowardVendor = false): Step[] {
-  return graph.edgeList
-    .filter(e => allowed.has(e.type) && (supplyTowardVendor ? e.target === nodeId : (e.source === nodeId || e.target === nodeId)))
-    .map(e => ({ edge: e.id, node: supplyTowardVendor ? e.source : (e.source === nodeId ? e.target : e.source) }))
-    .sort((a, b) => `${a.node}\u0000${a.edge}`.localeCompare(`${b.node}\u0000${b.edge}`))
-}
-function stablePath(from: string, to: string, allowed: Set<string>, supplyTowardVendor = false): string[] {
-  if (from === to) return [from]
-  const queue: { node: string; path: string[] }[] = [{ node: from, path: [from] }]
-  const seen = new Set([from])
-  while (queue.length) {
-    const current = queue.shift()!
-    for (const step of stableSteps(current.node, allowed, supplyTowardVendor)) {
-      if (seen.has(step.node)) continue
-      const path = [...current.path, step.edge, step.node]
-      if (step.node === to) return path
-      seen.add(step.node)
-      queue.push({ node: step.node, path })
-    }
-  }
-  return []
-}
-function betterPath(paths: string[][]): string[] {
-  return paths.filter(p => p.length).sort((a, b) => a.length - b.length || a.join('\u0000').localeCompare(b.join('\u0000')))[0] || []
-}
 function applyFindingFocus() {
   if (!cy) return
   cy.elements().removeClass('focus-context focus-path focus-risk')
-  const ids = graph.focusIds.filter(id => graph.nodes.has(id) || graph.edges.has(id))
-  graph.setFocusUnavailable(graph.focusIds.filter(id => !graph.nodes.has(id) && !graph.edges.has(id)))
-  const vendor = graph.focusVendorId
-  if (!vendor || !graph.nodes.has(vendor)) return
-  const rootId = graph.focusId
-  const pathIds = new Set<string>([vendor])
-  if (rootId && graph.nodes.has(rootId)) {
-    stablePath(rootId, vendor, new Set(['SUPPLIES']), true).forEach(id => pathIds.add(id))
-  }
-  const allowed = FAMILY_EDGES[graph.focusFamily] || new Set<string>()
-  const riskIds = new Set<string>()
-  for (const id of ids) {
-    const edge = graph.edges.get(id)
-    const targets = edge ? [edge.source, edge.target].sort() : [id]
-    const connector = betterPath(targets.map(target => stablePath(vendor, target, allowed)))
-    connector.forEach(part => pathIds.add(part))
-    pathIds.add(id)
-    riskIds.add(id)
-    if (edge) { pathIds.add(edge.source); pathIds.add(edge.target) }
-  }
+  const { pathIds, riskIds, unavailableIds } = deriveFindingPath(graph.nodeList, graph.edgeList, graph.focusIds, graph.focusVendorId, graph.focusId, graph.focusFamily)
+  graph.setFocusUnavailable(unavailableIds)
+  if (!pathIds.size) return
   const path = cy.collection([...pathIds].map(id => cy!.getElementById(id)).filter(e => e.length))
   cy.elements().not(path).addClass('focus-context')
   path.addClass('focus-path')
@@ -396,8 +351,8 @@ function fit() { cy?.fit(undefined, 40) }
 onMounted(() => {
   cy = cytoscape({ container: el.value!, style: styleSheet(), wheelSensitivity: 0.25, minZoom: 0.1, maxZoom: 4 })
   ;(window as any).__cy = cy
-  cy.on('tap', 'node', (ev) => graph.select(ev.target.id()))
-  cy.on('tap', 'edge', (ev) => graph.selectEdge(ev.target.id()))
+  cy.on('tap', 'node', (ev) => { graph.select(ev.target.id()); emit('select') })
+  cy.on('tap', 'edge', (ev) => { graph.selectEdge(ev.target.id()); emit('select') })
   cy.on('tap', (ev) => { if (ev.target === cy) { graph.select(null); graph.selectEdge(null) } })
   cy.on('dbltap', 'node', (ev) => { const n = graph.nodes.get(ev.target.id()); if (n && (n.label === 'Entity' || n.label === 'Person')) emit('expand', ev.target.id()) })
   cy.on('zoom', () => applyZoomGrouping())
