@@ -3,7 +3,9 @@ ToolContext and returns a ToolResult whose `data` is what the model sees and
 whose subgraph/style_ops/cypher are what the UI draws."""
 from __future__ import annotations
 
+
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -13,7 +15,7 @@ from ..config import load_workspace
 from ..cypher.templates import TEMPLATES
 from ..cypher.validator import CypherRejected, validate
 from ..graphio import merge_subgraphs, rows_clean, subgraph_from_graph
-from ..ids import edge_id, entity_id as make_entity_id, location_id, normalize_name, artifact_id, claim_id
+from ..ids import edge_id, entity_id as make_entity_id, location_id, normalize_name, artifact_id, claim_id, lucene_query, search_tokens
 from ..report import build_report
 from ..resolve import find_entity, fuzzy_candidates
 from ..styles import derive_legend, validate_ops
@@ -106,28 +108,31 @@ async def search_entities(ctx: ToolContext, query: str, kind: str = "any", limit
     q = (query or "").strip()
     limit = max(1, min(int(limit or 10), 50))
     rows: list[dict] = []
-    if q:
-        # identifier hits first
+    toks = search_tokens(q)
+    if toks:
+        # identifier hits first — UEI/CAGE/LEI are stored upper-case without separators
+        ident = re.sub(r"[^A-Za-z0-9]", "", q).upper()
         rows = await db.read(
             "MATCH (e:Entity) WHERE e.uei = $u OR e.cage = $u OR e.lei = $u RETURN e.id AS id, e.name AS name, 'Entity' AS label, e.uei AS uei, e.cage AS cage, e.lei AS lei, 1.0 AS score LIMIT 5",
-            {"u": q.upper()},
+            {"u": ident},
         )
         if not rows:
             try:
-                ft = await db.read(
+                rows = await db.read(
                     "CALL db.index.fulltext.queryNodes('entity_search', $q) YIELD node, score "
                     "RETURN node.id AS id, node.name AS name, head(labels(node)) AS label, node.uei AS uei, node.cage AS cage, node.lei AS lei, score "
                     "ORDER BY score DESC LIMIT $limit",
-                    {"q": q.replace('"', " ") + "~", "limit": limit},
+                    {"q": lucene_query(q), "limit": limit},
                 )
-                rows = ft
             except Exception:
                 rows = []
             if not rows:
+                # substring fallback (fulltext index missing or nothing fuzzy-close): every word somewhere in name or aliases
                 rows = await db.read(
-                    "MATCH (n) WHERE (n:Entity OR n:Person) AND toLower(n.name) CONTAINS toLower($q) "
+                    "MATCH (n) WHERE (n:Entity OR n:Person) "
+                    "AND all(t IN $toks WHERE toLower(coalesce(n.name, '') + ' ' + coalesce(n.aliases_text, '')) CONTAINS t) "
                     "RETURN n.id AS id, n.name AS name, head(labels(n)) AS label, n.uei AS uei, n.cage AS cage, n.lei AS lei, 0.5 AS score LIMIT $limit",
-                    {"q": q, "limit": limit},
+                    {"toks": toks, "limit": limit},
                 )
     if kind == "entity":
         rows = [r for r in rows if r["label"] == "Entity"]

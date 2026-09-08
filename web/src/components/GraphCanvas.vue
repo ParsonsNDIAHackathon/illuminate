@@ -152,19 +152,27 @@ function seedNearNeighbours(ids: string[]) {
   }
 }
 
-/** Does the store node match the search text? Name, label and every scalar prop (UEI, CAGE, country…) count. */
-function nodeMatches(n: any, q: string) {
-  if (n.name?.toLowerCase().includes(q) || n.label?.toLowerCase().includes(q)) return true
-  for (const v of Object.values(n.props || {})) if ((typeof v === 'string' || typeof v === 'number') && String(v).toLowerCase().includes(q)) return true
-  return false
+/** Case-, accent- and punctuation-insensitive form: "Société L-3 Harris" → "societe l 3 harris". */
+function fold(s: string) { return s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim() }
+/** Everything searchable about a node, folded: name, label and every scalar prop (UEI, CAGE, aliases, country…). */
+function haystack(n: any) {
+  const parts = [n.name, n.label, ...Object.values(n.props || {}).filter(v => typeof v === 'string' || typeof v === 'number')]
+  return ' ' + fold(parts.join(' ')) + ' '
+}
+/** Every typed word must appear somewhere, in any order; a run of words also matches with the spaces removed ("l3harris" ~ "L-3 Harris"). */
+function matcher(query: string): ((n: any) => boolean) | null {
+  const toks = fold(query).split(' ').filter(Boolean)
+  if (!toks.length) return null
+  const compact = toks.join('')
+  return (n) => { const h = haystack(n); return toks.every(t => h.includes(t)) || h.replace(/ /g, '').includes(compact) }
 }
 /** Search-bar filter: dim nodes that don't match and edges that don't join two matches. Independent of chat style ops. */
 function applyFilter() {
   if (!cy) return
-  const q = graph.filter.toLowerCase()
   cy.elements().removeClass('q-dim q-match')
-  if (!q) return
-  const hit = cy.nodes().filter(e => { const n = graph.nodes.get(e.id()); return !!n && nodeMatches(n, q) })
+  const match = matcher(graph.filter)
+  if (!match) return
+  const hit = cy.nodes().filter(e => { const n = graph.nodes.get(e.id()); return !!n && match(n) })
   hit.addClass('q-match')
   cy.nodes().not(hit).addClass('q-dim')
   cy.edges().forEach(e => { e.addClass(e.source().hasClass('q-match') && e.target().hasClass('q-match') ? 'q-match' : 'q-dim') })
