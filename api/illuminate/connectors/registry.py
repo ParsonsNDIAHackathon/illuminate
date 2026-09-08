@@ -10,6 +10,7 @@ from .ofac import OFACConnector
 from .opencorporates import OpenCorporatesConnector
 from .sam import SAMConnector
 from .sam_exclusions import SAMExclusionsConnector
+from .un_sanctions import UNSanctionsConnector
 from .usaspending import USAspendingConnector
 from .websearch import WebSearchConnector
 
@@ -30,7 +31,7 @@ class OpenAIPseudoConnector(Connector):
 
 REGISTRY: list[Connector] = [
     SAMConnector(), SAMExclusionsConnector(), USAspendingConnector(), GLEIFConnector(), LittleSisConnector(), EDGARConnector(), GDELTConnector(),
-    OFACConnector(), MarketConnector(), OpenCorporatesConnector(), WebSearchConnector(), OpenAIPseudoConnector(),
+    OFACConnector(), UNSanctionsConnector(), MarketConnector(), OpenCorporatesConnector(), WebSearchConnector(), OpenAIPseudoConnector(),
 ]
 _BY_NAME = {c.name: c for c in REGISTRY}
 

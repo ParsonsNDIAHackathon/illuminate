@@ -314,12 +314,28 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
     # 3. People
     interlocks = [p for p in ppl["current"] if p.get("interlock")]
     moved = [p for p in ppl["former"] if p.get("moved_to_flagged")]
+    # Someone on staff *now* who also sits inside a flagged entity *now*. This is the
+    # sharpest form of the tie and it used to fall through: flagged_in below only caught
+    # a lapsed role at the flagged entity, so a concurrent one scored as clear.
+    flagged_now = [p for p in ppl["current"] if any(x["flagged"] and x["current"] for x in p["elsewhere"])]
     flagged_in = [p for p in ppl["current"] if any(x["flagged"] and not x["current"] for x in p["elsewhere"])]
-    if moved or flagged_in:
-        who = (moved or flagged_in)[0]
-        other = next((x for x in who["elsewhere"] if x["flagged"]), None)
-        inds.append(_ind("people", f"{'Former' if moved else 'Current'} {who['title'] or 'officer'} linked to flagged entity" + (f" ({other['entity']})" if other else ""),
-                         "medium", who.get("source") or "LittleSis", who["name"], who.get("source_url"), ids=[who["person_id"]]))
+    if moved or flagged_now or flagged_in:
+        who = (moved or flagged_now or flagged_in)[0]
+        concurrent = not moved and bool(flagged_now)
+        # Prefer the live role at the flagged entity when the person holds more than one.
+        flagged_roles = [x for x in who["elsewhere"] if x["flagged"]]
+        other = next((x for x in flagged_roles if x["current"]), None) if concurrent else None
+        other = other or next(iter(flagged_roles), None)
+        people_ids = [i for i in (who.get("person_id"), who.get("edge_id"), who.get("claim_id")) if i]
+        if other:
+            people_ids += [i for i in (other.get("entity_id"), other.get("role_edge_id"), other.get("claim_id")) if i]
+        role = who["title"] or "officer"
+        label = (f"Current {role} concurrently at flagged entity" if concurrent
+                 else f"{'Former' if moved else 'Current'} {role} linked to flagged entity")
+        inds.append(_ind("people", label + (f" ({other['entity']})" if other else ""),
+                         "high" if concurrent else "medium",
+                         who.get("source") or (other or {}).get("source") or "LittleSis", who["name"],
+                         who.get("source_url") or (other or {}).get("source_url"), ids=people_ids))
     elif any(p.get("formerly_elsewhere") for p in ppl["current"]):
         p0 = next(p for p in ppl["current"] if p.get("formerly_elsewhere"))
         other = next((x for x in p0["elsewhere"] if not x["current"] and x.get("supplier")), None)

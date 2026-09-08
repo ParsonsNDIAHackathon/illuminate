@@ -1,5 +1,9 @@
 """OFAC SDN list — sanctions screening. Open CSV, no key. The screen is recorded as
-a claim ('sanctions_screen' → hit|clear) with the matched rows as detail."""
+a claim ('sanctions_screen' → hit|clear) with the matched rows as detail.
+
+The list designates both organisations and people. Entity enrichment screens the
+organisation rows; screen_person() screens the individual rows, so a named officer
+or director can be checked rather than only the company that employs them."""
 from __future__ import annotations
 
 import csv
@@ -7,13 +11,14 @@ import io
 
 from rapidfuzz import fuzz
 
-from ..ids import normalize_name
+from ..ids import normalize_name, normalize_person
 from .base import ArtifactRef, Connector, Fact, NodeRef
 from .http import fetch_text
 
 SDN_CSV = "https://www.treasury.gov/ofac/downloads/sdn.csv"
 ALT_CSV = "https://www.treasury.gov/ofac/downloads/alt.csv"
 MATCH = 92
+PERSON_MATCH = 90
 
 
 async def sdn_rows() -> list[dict]:
@@ -32,7 +37,7 @@ async def screen_name(name: str, aliases: list[str] | None = None) -> dict:
     norms = [normalize_name(n) for n in names if n]
     hits = []
     for r in rows:
-        if r["type"] and r["type"] != "-0-" and r["type"].lower() == "individual":
+        if _is_individual(r):
             continue
         rn = normalize_name(r["name"])
         if not rn:
@@ -42,6 +47,35 @@ async def screen_name(name: str, aliases: list[str] | None = None) -> dict:
             if s >= MATCH and len(rn) > 5 and abs(len(n) - len(rn)) <= max(4, len(rn) // 3):
                 hits.append({**r, "score": s, "matched": n})
                 break
+    return {"result": "hit" if hits else "clear", "hits": hits[:10], "list_size": len(rows)}
+
+
+def _is_individual(row: dict) -> bool:
+    return (row["type"] or "").strip().lower() == "individual"
+
+
+async def screen_person(name: str, aliases: list[str] | None = None) -> dict:
+    """Screen a named individual against the SDN's individual designations.
+
+    Kept apart from screen_name because people and companies normalise differently:
+    a legal-suffix stripper does nothing useful to a person's name, and a designation
+    reduced to one token matches far too much to be worth reporting."""
+    rows = [r for r in await sdn_rows() if _is_individual(r)]
+    names = [n for n in [name, *(aliases or [])] if n]
+    norms = [normalize_person(n) for n in names]
+    hits = []
+    for r in rows:
+        rn = normalize_person(r["name"])
+        if len(rn.split()) < 2:
+            continue
+        for n in norms:
+            if len(n.split()) < 2:
+                continue
+            s = fuzz.token_sort_ratio(n, rn)
+            if s >= PERSON_MATCH:
+                hits.append({**r, "score": s, "matched": n})
+                break
+    hits.sort(key=lambda h: h["score"], reverse=True)
     return {"result": "hit" if hits else "clear", "hits": hits[:10], "list_size": len(rows)}
 
 
