@@ -7,11 +7,15 @@ from __future__ import annotations
 import re
 from datetime import date
 
-from . import db
+from . import db, risk
+from .risk import SEVERITY_WEIGHT   # noqa: F401 — the grading scale lives with the scorer now
 
-HOME = "US"
+HOME = risk.riskdata.HOME
 
-SEVERITY_WEIGHT = {"high": 3.0, "medium": 2.0, "low": 1.0, "clear": 0.0}
+# Families the scorer computes better than this module can, because it walks the whole
+# graph rather than one entity's neighbourhood. When a scored breakdown is supplied they
+# are dropped in its favour; the rest survive as context.
+SUPERSEDED_BY_SCORER = ("ownership", "sanctions", "financial", "media", "concentration")
 
 
 """How far up a control chain the ultimate-parent walk will go before giving up."""
@@ -275,7 +279,15 @@ def _tie_label(t: dict) -> str:
     return f"{word}: {t.get('entity')}"
 
 
-async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, scr: list[dict], aff: dict | None = None) -> dict:
+async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, scr: list[dict], aff: dict | None = None,
+                          scored: dict | None = None) -> dict:
+    """The Risk tab.
+
+    `scored` is the node's breakdown from risk.py — the same score the canvas, the entity
+    list and Cypher see, so a vendor never carries two different numbers. Without it (a
+    direct call, or a unit test with no graph behind it) this module grades its own
+    families and averages them, which is what it did before the scorer existed.
+    """
     inds: list[dict] = []
     aff = aff or {"memberships": [], "transactions": [], "lobbying": [], "donations": [], "subsidiaries": [], "count": 0}
     e = core["e"]
@@ -408,16 +420,16 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
         inds.append(_ind("political", "Registered lobbying entity, no relationships recorded", "low", "LittleSis", f"LDA registrant {e['lda_registrant_id']}"))
     else:
         inds.append(_ind("political", "Political exposure", None, None, "No lobbying or donation records"))
-    # 4. Sanctions & debarment
-    sanc = next((s for s in scr if s["predicate"] == "sanctions_screen"), None)
-    excl = next((s for s in scr if s["predicate"] == "exclusion_screen"), None)
-    if sanc or excl:
-        hit = (sanc and sanc["result"] == "hit") or (excl and excl["result"] == "hit")
-        src = " · ".join(x["source"] for x in (sanc, excl) if x)
-        det = "; ".join(filter(None, [(sanc or {}).get("detail"), (excl or {}).get("detail")]))
-        inds.append(_ind("sanctions", "Sanctions and debarment screen" + (" — HIT" if hit else ""), "high" if hit else "clear", src, det or None))
+    # 4. Sanctions, debarment and restricted lists
+    ran = [s for s in scr if s["predicate"] in risk.DESIGNATION_SCREENS]
+    if ran:
+        hit = any(s["result"] == "hit" for s in ran)
+        src = " · ".join(sorted({s["source"] for s in ran if s.get("source")}))
+        det = "; ".join(s["detail"] for s in ran if s.get("detail"))
+        inds.append(_ind("sanctions", "Sanctions, debarment and restricted-list screens" + (" — HIT" if hit else ""),
+                         "high" if hit else "clear", src, det or None))
     else:
-        inds.append(_ind("sanctions", "Sanctions and debarment screen", None, None, "Not yet screened"))
+        inds.append(_ind("sanctions", "Sanctions, debarment and restricted-list screens", None, None, "Not yet screened"))
     # 5. Financial health — only meaningful for listed entities with filings
     fin = next((s for s in scr if s["predicate"] == "financial_screen"), None)
     if fin:
@@ -433,20 +445,46 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
     else:
         inds.append(_ind("media", "Adverse media — below coverage threshold", None, None))
 
-    scored = [i for i in inds if not i["no_data"]]
-    total = sum(SEVERITY_WEIGHT[i["severity"]] for i in scored)
-    maxv = 3.0 * len(scored) if scored else 0
+    disclaimer = ("Every indicator marks opacity, concentration or foreign control — conditions warranting "
+                  "human review. This tool flags; it does not accuse.")
+    if scored and scored.get("components"):
+        # The scored dimensions lead; what is left of this module's own families rides
+        # along as context. Interlocks, revolving-door seats and lobbying are leads by
+        # this report's own account, so they explain a score rather than move it.
+        context = [{**i, "scored": False} for i in inds if i["family"] not in SUPERSEDED_BY_SCORER]
+        dimensions = [{**c, "scored": True} for c in scored["components"]]
+        return {
+            "indicators": dimensions + context,
+            "composite": scored.get("score"),
+            "band": scored.get("band"),
+            "top_factor": scored.get("top_factor"),
+            "confidence": scored.get("confidence"),
+            "families_requested": scored.get("dimensions_requested") or len(dimensions),
+            "families_with_data": scored.get("dimensions_scored") or 0,
+            "context_indicators": len(context),
+            "weights": scored.get("weights") or {k: v[0] for k, v in risk.DIMENSIONS.items()},
+            "scored_at": scored.get("scored_at"),
+            "note": (scored.get("note") or "") + (
+                f" A further {len(context)} signal famil{'ies' if len(context) != 1 else 'y'} — interlocks, government "
+                "ties, affiliations and political exposure — are shown as context and do not move the score; this "
+                "report calls them leads, not findings." if context else ""),
+            "reference": scored.get("reference"),
+            "disclaimer": disclaimer,
+        }
+    with_data = [i for i in inds if not i["no_data"]]
+    total = sum(SEVERITY_WEIGHT[i["severity"]] for i in with_data)
+    maxv = 3.0 * len(with_data) if with_data else 0
     composite = round(100 * total / maxv) if maxv else None
     return {
         "indicators": inds,
         "composite": composite,
         "families_requested": len(inds),
-        "families_with_data": len(scored),
+        "families_with_data": len(with_data),
         "note": (
-            f"Composite is computed on available indicators only. {len(inds) - len(scored)} of {len(inds)} requested signal families returned no data; the score reflects {len(scored)}."
-            if scored else "No signal families returned data; no composite is computed."
+            f"Composite is computed on available indicators only. {len(inds) - len(with_data)} of {len(inds)} requested signal families returned no data; the score reflects {len(with_data)}."
+            if with_data else "No signal families returned data; no composite is computed."
         ),
-        "disclaimer": "Every indicator marks opacity, concentration or foreign control — conditions warranting human review. This tool flags; it does not accuse.",
+        "disclaimer": disclaimer,
     }
 
 
@@ -460,7 +498,9 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
     arts = await artifacts(entity_id)
     nws = await news(entity_id)
     aff = await affiliations(entity_id)
-    risk = await risk_indicators(entity_id, core, supply, ppl, scr, aff)
+    # The stored breakdown, or a fresh one when this entity has never been through a pass.
+    scored = await risk.explain(entity_id)
+    risk_block = await risk_indicators(entity_id, core, supply, ppl, scr, aff, scored=scored)
     e = core["e"]
     sources = sorted({s for s in [e.get("source")] + [a.get("source") for a in arts] + [p.get("source") for p in ppl["current"] + ppl["former"]] if s})
     return {
@@ -481,7 +521,7 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
         "supply": supply,
         "people": ppl,
         "screens": scr,
-        "risk": risk,
+        "risk": risk_block,
         "artifacts": arts,
         "news": nws,
         "summary": {"text": e.get("summary"), "generated_at": e.get("summary_at"), "model": e.get("summary_model"), "source_count": len(arts)},

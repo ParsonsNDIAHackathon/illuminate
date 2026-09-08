@@ -21,6 +21,7 @@ import { useWorkspace } from '../stores/workspace'
 import { applyStyleOps, clearStyleOps } from '../styles/styleOps'
 import { nodeSize, supplierTiers } from '../styles/nodeSize'
 import { edgeColor, fillFor, glyphScaleFor, glyphYFor, iconFor, shapeFor } from '../styles/nodeTypes'
+import { haloFor, isThin } from '../styles/risk'
 import { hiddenNodeIds, layerData } from '../stores/graphLayers'
 
 cytoscape.use(fcose)
@@ -37,7 +38,18 @@ function badgeFor(n: any) {
   const bits: string[] = []
   if (p.simulated) bits.push('SIM')
   if (p.flagged) bits.push('⚑')
+  // The number, not just the halo: two nodes in the same band still rank against each
+  // other, and a thin score is marked so nobody acts on 100/2-of-7 as if it were settled.
+  if (p.risk_score != null && p.risk_band && p.risk_band !== 'low') {
+    bits.push(`${p.risk_score}${isThin(p.risk_confidence) ? '?' : ''}`)
+  }
   return bits.join(' ')
+}
+
+/** Risk halo data for a node, or nulls when it is unscored — unscored gets no ink at all. */
+function haloData(n: any, theme: 'light' | 'dark') {
+  const halo = haloFor(n.props?.risk_band, theme)
+  return { haloColor: halo?.color ?? '#000000', haloPad: halo?.padding ?? 0, haloOpacity: halo?.opacity ?? 0 }
 }
 
 function styleSheet(): any[] {
@@ -48,6 +60,9 @@ function styleSheet(): any[] {
     // The glyph is sized as a share of the node, so it follows supplier tier and the simulated
     // screen-space rescale on its own; `fit: none` is what makes the percentages authoritative.
     { selector: 'node', style: { 'background-color': 'data(baseColor)', shape: 'data(shape)', width: 'data(size)', height: 'data(size)', 'background-image': 'data(icon)', 'background-fit': 'none', 'background-width': 'data(glyphScale)', 'background-height': 'data(glyphScale)', 'background-position-y': 'data(glyphY)', 'background-image-opacity': 0.95, label: 'data(name)', color: text, 'font-size': 10, 'text-wrap': 'ellipsis', 'text-max-width': 120, 'text-valign': 'bottom', 'text-margin-y': 4, 'text-outline-color': outline, 'text-outline-width': 2, 'border-width': 1.5, 'border-color': dark ? '#374151' : '#cbd5e1', 'overlay-padding': 4 } },
+    // Drawn under the node, so risk never competes with the border, which already carries
+    // root, selection, simulated, freshness and style-op state.
+    { selector: 'node[haloOpacity > 0]', style: { 'underlay-color': 'data(haloColor)', 'underlay-padding': 'data(haloPad)', 'underlay-opacity': 'data(haloOpacity)' } },
     { selector: 'node[?isRoot]', style: { 'border-width': 3, 'border-color': dark ? '#60a5fa' : '#1d4ed8', 'font-weight': 'bold', 'font-size': 12 } },
     { selector: 'node[badge != ""]', style: { label: (e: any) => `${e.data('name')}\n${e.data('badge')}`, 'text-wrap': 'wrap' } },
     { selector: 'node[?simulated]', style: { 'border-style': 'dashed', 'border-color': dark ? '#facc15' : '#ca8a04', 'border-width': 2 } },
@@ -77,6 +92,10 @@ function styleSheet(): any[] {
     { selector: '.q-dim', style: { opacity: 0.12, 'z-index': 0 } },
     { selector: 'node.q-match', style: { 'border-width': 3, 'border-color': dark ? '#fbbf24' : '#d97706', 'z-index': 20 } },
     { selector: 'edge.q-match', style: { width: 2.2, 'z-index': 20 } },
+    // the route behind a risk finding — the ownership chain, the person a proximity hop went
+    // through. Held until the user picks another dimension or clears it.
+    { selector: 'node.trace', style: { 'border-width': 4, 'border-color': dark ? '#f472b6' : '#be185d', 'z-index': 25 } },
+    { selector: 'edge.trace', style: { width: 3.2, 'line-color': dark ? '#f472b6' : '#be185d', 'target-arrow-color': dark ? '#f472b6' : '#be185d', 'z-index': 25 } },
   ]
 }
 
@@ -87,7 +106,7 @@ function toElements() {
   const tiers = supplierTiers(graph.edgeList, graph.nodeList)
   const nodes = graph.nodeList.map(n => {
     const tier = tiers.get(n.id)
-    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, ...layerData(n), baseColor: fillFor(n, ws.theme), shape: shapeFor(n), icon: iconFor(n), glyphScale: glyphScaleFor(n), glyphY: glyphYFor(n), size: nodeSize(n, tier), tier, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
+    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, ...layerData(n), baseColor: fillFor(n, ws.theme), shape: shapeFor(n), icon: iconFor(n), glyphScale: glyphScaleFor(n), glyphY: glyphYFor(n), size: nodeSize(n, tier), tier, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n), ...haloData(n, ws.theme) } }
   })
   const edges = graph.edgeList.map(e => ({ group: 'edges', data: { id: e.id, source: e.source, target: e.target, type: e.type, color: edgeColor(e.type, ws.theme), simulated: !!e.props?.simulated, label: e.type === 'SUPPLIES' && e.props?.tier ? `T${e.props.tier}${e.props.sole_source ? ' · sole' : ''}` : e.type === 'HELD_ROLE' ? (e.props?.title || '').slice(0, 18) : e.type === 'OWNS' && e.props?.pct ? `${e.props.pct}%` : '' } }))
   return [...nodes, ...edges]
@@ -116,6 +135,7 @@ function restyle() {
   applyStyleOps(cy, graph.styleOps, ws.theme)
   applyFilter()
   applyLayers()
+  applyTrace()
   markFresh()
   // Style ops and layer toggles change which components are drawn. Only adjust a simulation that is
   // already running: while the static layout is in flight there is none, and it starts one itself.
@@ -248,6 +268,16 @@ function applyFilter() {
   cy.nodes().not(hit).addClass('q-dim')
   cy.edges().forEach(e => { e.addClass(e.source().hasClass('q-match') && e.target().hasClass('q-match') ? 'q-match' : 'q-dim') })
 }
+/** Mark the elements a risk dimension was computed from. Ids that are not on the canvas are
+ *  simply absent — a trace is best-effort, never an error. */
+function applyTrace() {
+  if (!cy) return
+  cy.elements().removeClass('trace')
+  for (const id of graph.highlightIds) {
+    const el = cy.getElementById(id)
+    if (el && el.nonempty()) el.addClass('trace')
+  }
+}
 function layout(fit = true) {
   if (!cy || cy.nodes().length === 0) return
   stopLive()
@@ -272,6 +302,7 @@ watch(() => graph.version, sync)
 watch(() => graph.freshVersion, revealFresh)
 watch(() => graph.styleVersion, restyle)
 watch(() => graph.filter, applyFilter)
+watch(() => graph.highlightIds, applyTrace)
 watch(() => ws.ws.layers, applyLayers, { deep: true })
 watch(() => ws.theme, () => { cy?.style(styleSheet() as any); sync() })
 watch(() => [graph.selectedId, graph.selectedEdgeId], ([id, eid]) => {

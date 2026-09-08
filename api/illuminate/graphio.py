@@ -30,6 +30,13 @@ def _clean(v: Any) -> Any:
 
 _LABEL_LAYER = {"Person": "people", "Location": "countries", "Category": "categories", "Claim": "claims"}
 
+# Node properties too heavy to send with every node on the canvas. The risk breakdown is
+# ~1.8 KB of JSON per node, which at the 1500-node cap would add megabytes to every graph
+# load and every live delta for something only the selected node ever shows. The score,
+# band and confidence stay — they are what the canvas draws — and the breakdown is fetched
+# from /api/risk/{id} when a node is actually opened.
+HEAVY_PROPS = ("risk_components",)
+
 
 def layer_of(label: str, props: dict) -> str | None:
     """The canvas layer a node belongs to, or None for entities, which are always drawn.
@@ -41,7 +48,7 @@ def layer_of(label: str, props: dict) -> str | None:
 
 
 def node_dict(n: Node) -> dict:
-    props = {k: _clean(v) for k, v in dict(n).items()}
+    props = {k: _clean(v) for k, v in dict(n).items() if k not in HEAVY_PROPS}
     labels = list(n.labels)
     primary = next((l for l in ("Entity", "Person", "Category", "Location", "Artifact", "Claim") if l in labels), labels[0] if labels else "Node")
     return {

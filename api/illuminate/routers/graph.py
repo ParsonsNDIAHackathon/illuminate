@@ -105,7 +105,8 @@ async def node(node_id: str):
 
 
 @router.get("/entities")
-async def entities(q: str | None = None, kind: str | None = None, flagged: bool | None = None, limit: int = Query(100, le=1000), offset: int = 0):
+async def entities(q: str | None = None, kind: str | None = None, flagged: bool | None = None, band: str | None = None,
+                   sort: str = "tier", limit: int = Query(100, le=1000), offset: int = 0):
     where = ["1=1"]
     params: dict = {"limit": limit, "offset": offset}
     if q:
@@ -117,6 +118,11 @@ async def entities(q: str | None = None, kind: str | None = None, flagged: bool 
     if flagged is not None:
         where.append("coalesce(e.flagged,false) = $flagged")
         params["flagged"] = flagged
+    if band:
+        where.append("e.risk_band = $band")
+        params["band"] = band
+    # Unscored rows sort last under either order: a null score is missing data, not a low one.
+    order = "e.risk_score IS NULL, e.risk_score DESC, name" if sort == "risk" else "tier, name"
     rows = await db.read(
         f"""
         MATCH (e:Entity) WHERE {' AND '.join(where)}
@@ -133,8 +139,10 @@ async def entities(q: str | None = None, kind: str | None = None, flagged: bool 
           RETURN up.name AS parent ORDER BY length(path), up.name LIMIT 1
         }}
         RETURN e.id AS id, e.name AS name, e.kind AS kind, e.uei AS uei, e.cage AS cage, e.lei AS lei, tier, consumers, inc AS incorporated, seat AS parent_seat, parent,
-               sole_source, coalesce(e.flagged,false) AS flagged, coalesce(e.simulated,false) AS simulated, e.source AS source
-        ORDER BY tier, name SKIP $offset LIMIT $limit
+               sole_source, coalesce(e.flagged,false) AS flagged, coalesce(e.simulated,false) AS simulated, e.source AS source,
+               e.risk_score AS risk_score, e.risk_band AS risk_band, e.risk_top_factor AS risk_top_factor, e.risk_confidence AS risk_confidence,
+               e.risk_dimensions_scored AS risk_dimensions_scored, e.risk_dimensions_requested AS risk_dimensions_requested
+        ORDER BY {order} SKIP $offset LIMIT $limit
         """,
         params,
     )
@@ -154,8 +162,10 @@ async def people(q: str | None = None, limit: int = Query(200, le=1000)):
         OPTIONAL MATCH (p)-[r:HELD_ROLE]->(e:Entity)
         WITH p, collect({{entity_id:e.id, lei:e.lei, entity:e.name, title:r.title, role_type:r.role_type, from:r.from, to:r.to, current:coalesce(r.current, r.to IS NULL), edge_id:r.id}}) AS roles
         RETURN p.id AS id, p.name AS name, p.source AS source, p.source_url AS source_url, coalesce(p.simulated,false) AS simulated, roles,
+               coalesce(p.flagged,false) AS flagged, p.risk_score AS risk_score, p.risk_band AS risk_band, p.risk_top_factor AS risk_top_factor, p.risk_confidence AS risk_confidence,
+               p.risk_dimensions_scored AS risk_dimensions_scored, p.risk_dimensions_requested AS risk_dimensions_requested,
                size([x IN roles WHERE x.current]) AS current_roles, size(apoc.coll.toSet([x IN roles | coalesce(x.lei, x.entity_id)])) AS entities
-        ORDER BY entities DESC, name LIMIT $limit
+        ORDER BY p.risk_score IS NULL, p.risk_score DESC, entities DESC, name LIMIT $limit
         """,
         params,
     )

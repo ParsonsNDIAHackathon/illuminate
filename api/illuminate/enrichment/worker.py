@@ -135,11 +135,27 @@ class Worker:
             # entity may have gained identifiers (LEI, CIK…) that later connectors use
             rows = await db.read("MATCH (e:Entity {id:$id}) RETURN e{.*} AS e", {"id": job.entity_id})
             entity = rows[0]["e"]
+        await self._rescore(job)
         await self._refresh_summary(job)
         job.status = "done"
         job.finished_at = time.time()
         await self._emit("job_update", job.to_dict())
         await events.announce([job.entity_id], reason="enrich:done", source="enrichment")
+
+    async def _rescore(self, job: Job) -> None:
+        """Rescore the whole graph, not just the entity that was enriched.
+
+        A screen that lands on one vendor changes what everything within three hops of it
+        is exposed to, and those neighbours are exactly the nodes nobody thought to look
+        at. Scoring only the enriched entity would hide the finding this feature exists
+        to surface. The pass is a handful of bulk queries, so it is cheaper than the
+        enrichment that preceded it.
+        """
+        try:
+            from ..risk import persist
+            job.results["_risk"] = await persist()
+        except Exception as e:
+            job.results["_risk_error"] = f"{type(e).__name__}: {e}"
 
     async def _refresh_summary(self, job: Job) -> None:
         try:

@@ -21,7 +21,11 @@ ATTR_ALLOWLIST = {"uei", "cage", "lei", "registration_status", "public", "ticker
                   "incorporation_date", "entity_status", "market_cap", "last_price", "price_change_12m", "registration_expires", "organization_structure",
                   # LittleSis org record and person markers
                   "revenue", "lda_registrant_id", "fedspending_id", "aliases_text", "blurb", "org_types", "littlesis_tags", "public_official"}
-SCREEN_PREDICATES = {"sanctions_screen", "exclusion_screen", "financial_screen", "adverse_media_screen", "registry_screen"}
+SCREEN_PREDICATES = {"sanctions_screen", "exclusion_screen", "restricted_list_screen", "financial_screen", "adverse_media_screen", "registry_screen"}
+# Screens whose 'hit' means some authority has named this party. Each sets its own marker
+# as well as the shared `flagged`, because "sanctioned", "debarred" and "named on a
+# restricted list" carry different consequences and a report that collapses them is wrong.
+DESIGNATION_MARKERS = {"sanctions_screen": "sanctioned", "exclusion_screen": "debarred", "restricted_list_screen": "restricted"}
 # 'mention' asserts only that an artifact is about the subject — the connector's own observation, committed on arrival.
 OBSERVATION_PREDICATES = SCREEN_PREDICATES | {"mention"}
 CORROBORATION_SOURCES = 2
@@ -162,9 +166,12 @@ async def commit(cid: str, note: str | None = None) -> str:
             if val in ("true", "false"):
                 val = val == "true"
             await db.write(f"MATCH (s {{id:$sid}}) SET s.{name} = $v, s.{name}_claim_id = $cid", {"sid": r["sid"], "v": val, "cid": cid})
-    elif pred == "sanctions_screen" or pred == "exclusion_screen":
+    elif pred in DESIGNATION_MARKERS:
         if c.get("object_value") == "hit":
-            await db.write("MATCH (s {id:$sid}) SET s.flagged = true, s.flag_reason = $why", {"sid": r["sid"], "why": f"{pred}: {c.get('detail') or 'hit'}"})
+            await db.write(
+                f"MATCH (s {{id:$sid}}) SET s.flagged = true, s.{DESIGNATION_MARKERS[pred]} = true, s.flag_reason = $why",
+                {"sid": r["sid"], "why": f"{pred}: {c.get('detail') or 'hit'}"},
+            )
     await db.write("MATCH (c:Claim {id:$id}) SET c.status='committed', c.decided_at=$now, c.decision_note=$note", {"id": cid, "now": now_iso(), "note": note})
     return "committed"
 

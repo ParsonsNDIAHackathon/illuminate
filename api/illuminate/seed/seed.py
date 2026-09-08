@@ -403,6 +403,9 @@ async def main_async(args) -> None:
     if not args.skip_enrich:
         await enrich_with(["gleif"], all_ids, commit_open=False)
         await enrich_with(["ofac"], all_ids, commit_open=False)
+        # The §1260H roster is committed in the connector, so this screen runs offline
+        # like the rest of the seed and needs no fixture.
+        await enrich_with(["section_1260h"], all_ids, commit_open=False)
         await enrich_with(["sam_exclusions"], all_ids, commit_open=False)
         if (await get_connector("sam").status("local")).get("connected"):
             await enrich_with(["sam"], all_ids, commit_open=False)
@@ -414,11 +417,15 @@ async def main_async(args) -> None:
         parents = [r["id"] for r in await db.read(
             "MATCH (p:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(c:Entity) WHERE NOT (p)-[:SUPPLIES]->() AND coalesce(p.simulated,false)=false "
             "OPTIONAL MATCH (c)-[s:SUPPLIES]->() RETURN p.id AS id, sum(coalesce(s.amount,0)) AS amt ORDER BY amt DESC, id")]
-        await enrich_with(["gleif", "ofac", "sam_exclusions"], parents, commit_open=False)
+        await enrich_with(["gleif", "ofac", "section_1260h", "sam_exclusions"], parents, commit_open=False)
         await enrich_with(["littlesis"], top_ids + parents[:10], commit_open=True)
         await enrich_with(["edgar"], top_ids + parents[:10], commit_open=False)
     if args.scenario:
         await scenario(info["root_id"])
+    # Last, because proximity is a property of the finished graph: the scenario's designated
+    # group has to exist before anything can be scored as three hops from it.
+    from ..risk import persist as persist_risk
+    log(f"risk: {json.dumps(await persist_risk())}")
     st = await stats()
     log(f"done: {json.dumps(st)}")
     await db.close_driver()

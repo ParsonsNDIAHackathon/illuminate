@@ -4,6 +4,10 @@
       <v-btn icon="mdi-arrow-left" variant="text" @click="router.back()" />
       <h2 class="text-h6">{{ rep.identity.name }}</h2>
       <v-chip v-if="rep.entity.flagged" size="x-small" color="error" variant="tonal">flagged</v-chip>
+      <v-chip v-if="rep.risk?.composite != null" size="x-small" variant="tonal" :color="bandChip(rep.risk.band)"
+              :title="rep.risk.note" @click="tab = 'risk'" style="cursor:pointer">
+        risk {{ rep.risk.composite }} · {{ bandLabel(rep.risk.band) }}<span v-if="isThin(rep.risk.confidence)"> ?</span>
+      </v-chip>
       <v-spacer />
       <v-btn prepend-icon="mdi-graph" @click="openInGraph">Open in graph</v-btn>
       <v-btn prepend-icon="mdi-auto-fix" @click="enrich" :loading="enriching">Enrich</v-btn>
@@ -93,16 +97,41 @@
         </template>
       </v-window-item>
       <v-window-item value="risk">
+        <div class="d-flex align-center ga-3 mb-2" v-if="rep.risk.composite != null">
+          <v-chip size="large" variant="tonal" :color="bandChip(rep.risk.band)">
+            {{ rep.risk.composite }}/100 · {{ bandLabel(rep.risk.band) }}
+          </v-chip>
+          <div>
+            <div class="text-body-2">{{ rep.risk.top_factor || 'No dimension graded above clear' }}</div>
+            <div class="text-caption" :class="{ 'text-warning': isThin(rep.risk.confidence) }">
+              {{ confidenceNote(rep.risk.confidence, rep.risk.families_with_data, rep.risk.families_requested) }}
+            </div>
+          </div>
+        </div>
+        <p class="section" v-if="scoredIndicators.length">Scored dimensions</p>
         <v-list density="compact" lines="two">
-          <v-list-item v-for="i in rep.risk.indicators" :key="i.family" :title="i.label" :subtitle="i.detail || ''">
+          <v-list-item v-for="i in scoredIndicators" :key="i.family" :title="i.label" :subtitle="i.detail || ''">
+            <template #prepend><v-icon :icon="sevIcon(i.severity)" :color="sevColor(i.severity)" /></template>
+            <template #append>
+              <span v-if="i.weight" class="text-caption mr-2" style="opacity:.55" title="Relative weight among the dimensions that returned data">×{{ i.weight }}</span>
+              <v-chip size="x-small" variant="tonal" :color="sevColor(i.severity)">{{ i.severity ? i.severity : 'No data' }}</v-chip>
+              <a v-if="i.source_url" :href="i.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ i.source }}</a>
+              <span v-else class="ml-2 text-caption" style="opacity:.7">{{ i.source || '—' }}</span>
+            </template>
+          </v-list-item>
+        </v-list>
+        <!-- Leads, not findings — the wording this report has always used for them. They are
+             shown because they explain a score; they are separated because they do not move it. -->
+        <p class="section mt-3" v-if="contextIndicators.length">Context — leads, not findings; these do not move the score</p>
+        <v-list density="compact" lines="two" v-if="contextIndicators.length">
+          <v-list-item v-for="i in contextIndicators" :key="i.family" :title="i.label" :subtitle="i.detail || ''">
             <template #prepend><v-icon :icon="sevIcon(i.severity)" :color="sevColor(i.severity)" /></template>
             <template #append><v-chip size="x-small" variant="tonal" :color="sevColor(i.severity)">{{ i.severity ? i.severity : 'No data' }}</v-chip><a v-if="i.source_url" :href="i.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ i.source }}</a><span v-else class="ml-2 text-caption" style="opacity:.7">{{ i.source || '—' }}</span></template>
           </v-list-item>
         </v-list>
-        <v-alert variant="tonal" density="compact" class="mt-2" type="info">
-          <b v-if="rep.risk.composite != null">Composite {{ rep.risk.composite }}/100.</b> {{ rep.risk.note }}
-        </v-alert>
+        <v-alert variant="tonal" density="compact" class="mt-2" type="info">{{ rep.risk.note }}</v-alert>
         <p class="text-caption mt-2" style="opacity:.7">{{ rep.risk.disclaimer }}</p>
+        <p class="text-caption mt-1" style="opacity:.6" v-if="rep.risk.reference">{{ rep.risk.reference }}</p>
       </v-window-item>
       <v-window-item value="artifacts">
         <v-table density="compact"><thead><tr><th>Kind</th><th>Title</th><th>Source</th><th>Date</th><th>View</th></tr></thead>
@@ -118,12 +147,13 @@
   <v-container v-else><v-progress-linear indeterminate /></v-container>
 </template>
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, qs } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
 import ArtifactViewer from '../components/ArtifactViewer.vue'
 import SourceLink from '../components/SourceLink.vue'
+import { bandChip, bandLabel, confidenceNote, isThin, sevColor, sevIcon } from '../styles/risk'
 import { useGraph } from '../stores/graph'
 const rawId = ref<string | null>(null)
 import { useJobs } from '../stores/jobs'
@@ -133,8 +163,10 @@ const router = useRouter(); const graph = useGraph(); const jobs = useJobs(); co
 const rep = ref<any>(null); const tab = ref('overview'); const enriching = ref(false); const regen_busy = ref(false)
 // tier is counted towards the program the canvas is focused on, if any
 async function load() { rep.value = await api.get(`/api/entities/${props.id}/report?${qs({ root_id: graph.focusId })}`) }
-function sevIcon(s: string | null) { return s === 'high' ? 'mdi-alert-octagon' : s === 'medium' ? 'mdi-alert' : s === 'low' ? 'mdi-information-outline' : s === 'clear' ? 'mdi-check-circle-outline' : 'mdi-help-circle-outline' }
-function sevColor(s: string | null) { return s === 'high' ? 'error' : s === 'medium' ? 'warning' : s === 'low' ? 'secondary' : s === 'clear' ? 'success' : undefined }
+// A report built before the scorer ran has no `scored` flag on its indicators; treating an
+// absent flag as scored keeps that older shape rendering as one list.
+const scoredIndicators = computed<any[]>(() => (rep.value?.risk?.indicators || []).filter((i: any) => i.scored !== false))
+const contextIndicators = computed<any[]>(() => (rep.value?.risk?.indicators || []).filter((i: any) => i.scored === false))
 async function enrich() { enriching.value = true; try { await jobs.enqueue(props.id) } finally { enriching.value = false } }
 async function regen() { regen_busy.value = true; try { await api.post(`/api/entities/${props.id}/summary`); await load() } catch (e: any) { alert(e.message) } finally { regen_busy.value = false } }
 async function openInGraph() { await graph.loadNeighbourhood(props.id, 2, ws.ws.layers); graph.select(props.id); router.push('/') }

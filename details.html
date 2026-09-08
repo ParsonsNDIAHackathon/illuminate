@@ -185,6 +185,7 @@
       <a href="#graph">The demo graph</a>
       <a href="#tour">Tour</a>
       <a href="#decisions">Design decisions</a>
+      <a href="#risk">Risk scoring</a>
       <a href="#api">API and MCP</a>
       <a href="#ask">Ask it</a>
       <a href="#limits">Honest limits</a>
@@ -208,7 +209,7 @@
         <div>
           <div class="tag display">UC-11</div>
           <div class="name">Automated Vendor Risk Assessment</div>
-          <p class="how">Root = the buying organisation. One vendor report: identity, geography, control, people, affiliations, nine risk families with citations.</p>
+          <p class="how">Root = the buying organisation. One vendor report: identity, geography, control, people, affiliations, and a scored risk profile with citations — carried on every organisation and person in the graph, not just the one on screen.</p>
         </div>
       </div>
     </section>
@@ -268,6 +269,8 @@
           <tr><td><span class="d">SAM.gov Entity</span></td><td class="num">5</td><td>Registration status, CAGE, incorporation, NAICS per vendor. The personal-key tier allows about ten calls a day, so this fills in slowly.</td></tr>
           <tr><td><span class="d">OFAC SDN</span></td><td class="num">bulk</td><td>Sanctions screen on every entity, matched locally by UEI, CAGE and strict name; recorded as claims with the matched rows as detail.</td></tr>
           <tr><td><span class="d">SAM.gov Exclusions</span></td><td class="num">bulk</td><td>Debarment and suspension screen against the public daily extract, 33,861 firm and special-entity records. No key, no quota spent.</td></tr>
+          <tr><td><span class="d">UN Consolidated List</span></td><td class="num">bulk</td><td>The multilateral counterpart to the SDN: a vendor clear under OFAC can still sit on a UN designation. Entities and individuals both indexed, so a named officer is screened as well as their employer.</td></tr>
+          <tr><td><span class="d">DoD §1260H</span></td><td class="num">committed</td><td>Chinese military companies named by the Department of Defense. Not a sanctions list — from June 2026 the statute bars DoD from contracting with a listed firm <em>or with anything that supplies one</em>, which is why it usually lands two or three hops up an ownership chain rather than on the vendor. DoD publishes it as a PDF annex, so the roster is committed in the connector like a fixture; it is an <em>excerpt</em>, and every result, clear ones included, says so.</td></tr>
         </tbody>
       </table></div>
 
@@ -320,7 +323,7 @@
         </figure>
         <figure>
           <img src="docs/screenshots/06-report-risk.png" alt="Vendor report risk section with six risk families and citations" loading="lazy">
-          <figcaption><b>Risk.</b> Nine risk families (ownership, concentration, people, government ties, affiliations, political exposure, sanctions, financial, media) with citations, and honest <em>no data</em> rows where a source was not available.</figcaption>
+          <figcaption><b>Risk.</b> The seven scored dimensions with their weights and citations, the narrative families below them as context, and honest <em>no data</em> rows where a source was not available. The score is stated with how much of the model stood behind it.</figcaption>
         </figure>
         <figure>
           <img src="docs/screenshots/07-report-people.png" alt="Vendor report people section listing officers and directors with tenure" loading="lazy">
@@ -372,9 +375,32 @@
       </div>
     </section>
 
+    <section id="risk">
+      <div class="sec-head"><div class="eyebrow">Scoring</div><h2>Risk is a property of the node</h2></div>
+      <p>Every <code>Entity</code> and <code>Person</code> carries a computed <code>risk_score</code> (0–100), a band, the dimension that led it, and the full breakdown as evidence. It is written by a bulk pass over the whole graph (<code>api/illuminate/risk.py</code>), so the canvas, the entity and people lists, the vendor report and Cypher all read one number rather than four opinions. The pass runs after every enrichment job, at the end of a seed, and on demand from <code>POST /api/risk/rescore</code>.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Dimension</th><th class="num">Weight</th><th>What it reads</th></tr></thead>
+        <tbody>
+          <tr><td><span class="d">Designation</span></td><td class="num">3.0</td><td>The node's own screens: OFAC SDN, UN Consolidated List, SAM exclusions, DoD §1260H. A hit here is the finding; nothing else competes with it.</td></tr>
+          <tr><td><span class="d">Proximity</span></td><td class="num">2.0</td><td>Degrees of separation from a designated party, walked up to three hops over ownership, personnel and commercial edges. One hop is high, two medium, three low. This is the dimension that only a graph can compute, and the one that catches a vendor whose own record is spotless.</td></tr>
+          <tr><td><span class="d">Foreign control</span></td><td class="num">1.5</td><td>Incorporation, ultimate-parent seat, operations and manufacture, classified by jurisdiction: covered nations under 10 U.S.C. § 4872, embargoed states, allies. Read separately, worst wins — a Delaware shell that manufactures in a covered nation answers the first question reassuringly and the third not at all. A chain through a non-disclosing registry is its own finding, because it cannot be walked to its end.</td></tr>
+          <tr><td><span class="d">Financial distress</span></td><td class="num">1.5</td><td>Lapsed or expiring SAM registration, dissolved registry status, notifications of late filing (NT 10-K/10-Q), a listed company that has stopped filing, collapsed market value. Filing behaviour, not financial-statement analysis, and it says so.</td></tr>
+          <tr><td><span class="d">Regional exposure</span></td><td class="num">1.0</td><td>Armed conflict and natural-hazard exposure where the entity physically operates and manufactures — deliberately blind to incorporation, since a hurricane does not read the paperwork. Manufacture counts above operation. US places resolve against state-level hazard, everywhere else against country.</td></tr>
+          <tr><td><span class="d">Concentration</span></td><td class="num">1.0</td><td>Sole-source award relationships.</td></tr>
+          <tr><td><span class="d">Adverse media</span></td><td class="num">0.75</td><td>The GDELT media screen, where one has run.</td></tr>
+        </tbody>
+      </table></div>
+      <p>People are graded on the dimensions that mean something for a person — designation, proximity and the jurisdictions of the seats they hold. A person's exposure comes from where they sit, never from their name: the graph records no nationality for most people, and guessing one is how a screening tool becomes a discrimination engine.</p>
+      <h3>A signal that returned no data is not a zero</h3>
+      <p>The score is the weighted mean over the dimensions that <em>answered</em>. A dimension with nothing to go on abstains, and a country absent from the reference tables scores as no-data rather than as safe. That keeps the model honest but makes the raw number ambiguous on its own: an unscreened vendor one hop from a designated party, seated in a covered nation, scores 100 on two dimensions and outranks a party that is itself designated but graded on six. Both orderings are defensible — all we know about the first one is bad — so every node also carries <code>risk_confidence</code>, the share of the model's weight that answered, and it is drawn next to the score everywhere: in the table, on the canvas badge, in the inspector and at the top of the report.</p>
+      <div class="callout">Nothing is scored that cannot be shown. Every dimension carries the ids of the nodes and edges it was computed from; clicking one in the inspector lights the route up on the canvas. A score you cannot walk back to its evidence is just an assertion.</div>
+      <p>The report keeps its narrative families — interlocks, government ties, affiliations, political exposure — but shows them separately as <em>context</em>. They are leads, not findings, by this report's own long-standing account, so they explain a score rather than move it. The sharpest of them, an officer sitting inside a designated entity, is already scored: it is a two-hop proximity finding through a <code>HELD_ROLE</code> edge.</p>
+      <p>Jurisdiction, conflict and hazard tables are a committed snapshot (<code>api/illuminate/riskdata.py</code>) with a stated date and source, for the same reason the seed commits its fixtures: a score that silently depended on a live third-party index would be unreproducible.</p>
+    </section>
+
     <section id="api">
       <div class="sec-head"><div class="eyebrow">Surface</div><h2>API and MCP</h2></div>
-      <p>REST under <code>/api</code> with OpenAPI at <code>/docs</code>: graph, search and subgraph; entities and their report (the UC-11 profile); people; artifacts; claims with commit and reject; query (cypher, template, validate, styles); permissions with approve and refuse; connectors and credentials; enrichment jobs; workspace settings.</p>
+      <p>REST under <code>/api</code> with OpenAPI at <code>/docs</code>: graph, search and subgraph; entities and their report (the UC-11 profile); people; risk (the graph ranked by score, one node's breakdown, and rescore); artifacts; claims with commit and reject; query (cypher, template, validate, styles); permissions with approve and refuse; connectors and credentials; enrichment jobs; workspace settings.</p>
       <p>Chat runs over a websocket at <code>/ws/chat</code>; permission requests and job updates are broadcast on the same socket. MCP is served at <code>POST /mcp/</code> as stateless streamable HTTP, and as <code>illuminate-mcp</code> over stdio, for Claude Desktop or Claude Code:</p>
       <pre><code>{ "mcpServers": { "illuminate": { "command": "/path/to/api/.venv/bin/illuminate-mcp" } } }</code></pre>
     </section>
@@ -385,6 +411,7 @@
         <div>for all of the program's vendors, highlight goods in purple and services in yellow</div>
         <div>highlight all entities that rely on manufacturing in CN, include tier 2 and below</div>
         <div>which suppliers have a foreign ultimate parent?</div>
+        <div>which vendors are within two hops of a designated party? <span>→ proximity, the dimension only a graph can answer</span></div>
         <div>show sole-source suppliers</div>
         <div>shared directors across suppliers</div>
         <div>add Acme Castings as a tier-3 supplier to AVIAN, LLC <span>→ permission dialog with a real impact count</span></div>
@@ -397,7 +424,8 @@
       <p>Entity resolution is the whole game. UEI, CAGE and LEI carry it; the residue is name matching with a matcher tuned to refuse the subset trap, and every fuzzy merge records its method and confidence. Sub-award coverage is uneven, so tier depth varies by program.</p>
       <p>Text-to-Cypher fails in ways that look like answers, which is why templates are the default and the query is always shown. People are harder to resolve than companies and coverage is skewed to large listed firms.</p>
       <p>SAM.gov's personal-key tier allows about ten Entity API calls a day, so per-vendor registration details fill in slowly unless a federal or system-account key is used. The exclusion screen does not depend on it because it runs against the public daily extract.</p>
-      <div class="callout warn">Cut on purpose for the three days: a vector index over filings, multi-tenant auth, adverse-media and financial-health scoring (shown as no-data instead), and market data (wired, keyed off).</div>
+      <p>The risk score is a triage instrument, not an adjudication. Financial distress is read from filing <em>behaviour</em> — a late-filing notice, an annual report that stopped arriving — never from the financial statements themselves, and a private vendor with no filings produces no signal at all, which is the common case in a sub-tier supply base. The conflict and hazard tables are a hand-curated snapshot with a stated date; countries absent from them abstain rather than score clear. The §1260H roster is an excerpt of the published annex, so a clear result against it is not a clearance and says so on every screen.</p>
+      <div class="callout warn">Cut on purpose for the three days: a vector index over filings, multi-tenant auth, live feeds behind the conflict and hazard tables (committed snapshots instead), full-text financial-statement analysis, and market data (wired, keyed off).</div>
     </section>
 
     <section id="ops">

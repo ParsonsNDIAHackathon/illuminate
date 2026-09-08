@@ -63,6 +63,11 @@ export const useGraph = defineStore('graph', {
     select(id: string | null) { this.selectedId = id; if (id) this.selectedEdgeId = null },
     selectEdge(id: string | null) { this.selectedEdgeId = id; if (id) this.selectedId = null },
     setFilter(q: string) { this.filter = (q || '').trim() },
+    /** Trace the elements a finding was computed from — the ownership chain behind a foreign
+     *  parent, the person a proximity hop went through. A risk score the user cannot walk
+     *  back to its evidence is just an assertion, so every scored dimension carries its ids
+     *  and this is what lights them up. Passing nothing clears the trace. */
+    trace(ids: string[] | null) { this.highlightIds = ids || []; this.styleVersion++ },
     applyStyleOps(ops: StyleOp[], append = false) {
       this.styleOps = append ? [...this.styleOps, ...ops] : ops
       this.legend = deriveLegend(this.styleOps)

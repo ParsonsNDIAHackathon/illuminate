@@ -3,6 +3,8 @@
     <div class="d-flex align-center ga-2 mb-1">
       <v-chip size="x-small" variant="tonal">{{ node.label }}<span v-if="p.kind"> · {{ p.kind }}</span></v-chip>
       <v-chip v-if="p.flagged" size="x-small" color="error" variant="tonal" :title="p.flag_reason">flagged</v-chip>
+      <v-chip v-if="scorable" size="x-small" variant="tonal" :color="bandChip(rs.band)"
+              :title="rs.note || 'Not scored yet'">{{ scoreLabel(rs.score, rs.band) }}</v-chip>
       <v-spacer />
       <v-btn icon="mdi-close" variant="text" size="x-small" @click="graph.select(null)" />
     </div>
@@ -45,6 +47,30 @@
     <section v-if="node.label === 'Person'">
       <h4>Roles</h4>
       <div v-for="r in personRoles" :key="r.edge_id" class="text-body-2">{{ r.title }} · {{ r.entity }} <span class="text-caption">{{ r.from || '?' }} – {{ r.current ? 'now' : (r.to || '?') }}</span></div>
+    </section>
+    <section v-if="scorable">
+      <div class="d-flex align-center ga-1">
+        <h4 class="flex-grow-1">Risk</h4>
+        <v-btn v-if="graph.highlightIds.length" size="x-small" variant="text" density="compact"
+               @click="graph.trace(null)">clear trace</v-btn>
+      </div>
+      <p v-if="rs.score == null" class="text-caption" style="opacity:.7">
+        Nothing to grade yet — no dimension returned data. Enrich this node to give the scorer something to read.
+      </p>
+      <template v-else>
+        <!-- Coverage before breakdown: the number is only readable once you know how much
+             of the model stood behind it. -->
+        <p class="text-caption mb-1" :class="{ 'text-warning': isThin(rs.confidence) }">
+          {{ confidenceNote(rs.confidence, rs.dimensions_scored, rs.dimensions_requested) }}
+        </p>
+        <div v-for="c in riskComponents" :key="c.dimension" class="risk-row"
+             :class="{ clickable: c.element_ids?.length }" :title="c.detail || c.label"
+             @click="trace(c)">
+          <v-icon size="14" :icon="sevIcon(c.severity)" :color="sevColor(c.severity)" />
+          <span class="risk-label">{{ c.label }}</span>
+          <span class="risk-sev">{{ c.severity || 'no data' }}</span>
+        </div>
+      </template>
     </section>
     <section>
       <h4>Provenance</h4>
@@ -111,6 +137,7 @@ import { useWorkspace } from '../stores/workspace'
 import ArtifactViewer from './ArtifactViewer.vue'
 import SourceFrame from './SourceFrame.vue'
 import SourceLink from './SourceLink.vue'
+import { bandChip, confidenceNote, isThin, scoreLabel, sevColor, sevIcon } from '../styles/risk'
 const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace()
 const rawId = ref<string | null>(null); const viewId = ref<string | null>(null)
 defineEmits<{ (e: 'expand', id: string): void }>()
@@ -118,11 +145,32 @@ const node = computed(() => graph.selected)
 const p = computed(() => node.value?.props || {})
 const detail = ref<any>(null); const supplies = ref<any[]>([]); const personRoles = ref<any[]>([]); const enriching = ref(false); const focusing = ref(false)
 const isProgram = computed(() => node.value?.label === 'Entity' && p.value.kind === 'program')
+// Only organisations, programs and people are scored; locations, artifacts and claims are
+// evidence about parties, not parties to be graded.
+const scorable = computed(() => node.value?.label === 'Entity' || node.value?.label === 'Person')
+// The breakdown is ~2 KB per node, so it is stripped from the canvas payload
+// (graphio.HEAVY_PROPS) and fetched for the one node that is actually open.
+const risk = ref<any>(null)
+const riskComponents = computed<any[]>(() => risk.value?.components || [])
+// The canvas payload carries the score, band and confidence; the fetch supersedes them
+// once it lands, and covers a node that has never been through a pass (explain() recomputes).
+const rs = computed(() => risk.value ?? {
+  score: p.value.risk_score, band: p.value.risk_band, confidence: p.value.risk_confidence,
+  note: p.value.risk_note, dimensions_scored: p.value.risk_dimensions_scored,
+  dimensions_requested: p.value.risk_dimensions_requested,
+})
+/** Light up the nodes and edges a dimension was computed from: a score the user cannot walk
+ *  back to its evidence is only an assertion. */
+function trace(c: any) { if (c.element_ids?.length) graph.trace(c.element_ids) }
 const discoverDlg = ref(false); const discovering = ref(false); const discoverError = ref('')
 const kw = ref<string[]>([]); const agency = ref(''); const maxSubs = ref<number | null>(null)
 watch(node, async (n) => {
-  detail.value = null; supplies.value = []; personRoles.value = []
+  detail.value = null; supplies.value = []; personRoles.value = []; risk.value = null
   if (!n) return
+  // Both labels are scored, so this is fetched before the label-specific work below.
+  if (scorable.value) {
+    try { risk.value = await api.get(`/api/risk/${n.id}`) } catch {}
+  }
   if (n.label === 'Entity') {
     try {
       // tier is counted towards the focused program; with nothing focused there is no tier
@@ -170,4 +218,9 @@ section { margin-top: 10px; }
 h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; margin-bottom: 4px; }
 dl { display: grid; grid-template-columns: 90px 1fr; gap: 2px 8px; margin: 0; }
 dt { opacity: .6; } dd { margin: 0; }
+.risk-row { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 4px; padding: 1px 0; }
+.risk-row.clickable { cursor: pointer; }
+.risk-row.clickable:hover .risk-label { text-decoration: underline; }
+.risk-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.risk-sev { font-size: 11px; opacity: .6; }
 </style>

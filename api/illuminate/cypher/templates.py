@@ -198,6 +198,82 @@ def _foreign_parent_style(rows, p):
     ]
 
 
+def _risk_ranked(p):
+    """The root's supply chain ordered by the stored risk score.
+
+    Unscored vendors sort last and are still returned: a null score means no dimension
+    returned data, which is a reason to enrich the vendor rather than to drop it from the
+    answer. The band filter is optional so "show me the severe ones" narrows the same query.
+    """
+    d = _depth(p.get("depth", MAX_DEPTH))
+    band = (p.get("band") or "").strip().lower()
+    where = "\nWHERE v.risk_band = $band" if band else ""
+    cy = (
+        f"MATCH (root:Entity {{id:$root}})\n"
+        f"MATCH path=(v:Entity)-[:SUPPLIES*1..{d}]->(root){where}\n"
+        "WITH v, min(length(path)) AS tier\n"
+        "RETURN v.id AS id, v.name AS name, tier, v.risk_score AS score, v.risk_band AS band,\n"
+        "       v.risk_confidence AS confidence, v.risk_top_factor AS top_factor, v\n"
+        "ORDER BY v.risk_score IS NULL, v.risk_score DESC, v.risk_confidence DESC, name\n"
+        "LIMIT $limit"
+    )
+    bound = {"root": p["root_id"], "limit": int(p.get("limit", 100))}
+    if band:
+        bound["band"] = band
+    return cy, bound
+
+
+# Band -> palette name. Mirrors web/src/styles/risk.ts; low is neutral because a low score
+# is "clear on the little we asked", which is not an all-clear.
+_BAND_SWATCH = {"severe": "red", "high": "orange", "elevated": "yellow", "low": "neutral"}
+
+
+def _risk_ranked_style(rows, p):
+    ops = []
+    for band, swatch in _BAND_SWATCH.items():
+        ids = [r["id"] for r in rows if r.get("band") == band]
+        if ids:
+            ops.append({"op": "set", "ids": ids, "style": {"fill": swatch, "badge": band},
+                        "label": f"Risk: {band}"})
+    unscored = [r["id"] for r in rows if r.get("score") is None]
+    if unscored:
+        # Named, not hidden: "we could not grade this" is a finding of its own.
+        ops.append({"op": "set", "ids": unscored, "style": {"stroke": "neutral", "dashed": True, "badge": "unscored"},
+                    "label": "Unscored — no dimension returned data"})
+    return ops
+
+
+def _near_designated(p):
+    """Everything within N hops of a designated party, with the route that reaches it.
+
+    The same walk risk.py scores `proximity` from, exposed as a question you can ask: it is
+    the one thing a supplier list cannot answer and a graph can.
+    """
+    hops = max(1, min(MAX_DEPTH, int(p.get("hops", 2) or 2)))
+    rels = "OWNS|ULTIMATE_PARENT_OF|BENEFICIAL_OWNER_OF|HELD_ROLE|SUPPLIES|TRANSACTS_WITH|MEMBER_OF"
+    cy = (
+        "MATCH (seed:Entity|Person)\n"
+        "WHERE coalesce(seed.flagged, false) = true\n"
+        f"CALL apoc.path.expandConfig(seed, {{relationshipFilter:'{rels}', minLevel:1, maxLevel:{hops},\n"
+        "                                    bfs:true, uniqueness:'NODE_GLOBAL'}) YIELD path\n"
+        "WITH seed, last(nodes(path)) AS n, length(path) AS hops, path\n"
+        "WHERE n.id <> seed.id\n"
+        "RETURN n.id AS id, n.name AS name, hops, seed.name AS designated, n, path\n"
+        "ORDER BY hops, name LIMIT $limit"
+    )
+    return cy, {"limit": int(p.get("limit", 200))}
+
+
+def _near_designated_style(rows, p):
+    ops = []
+    for hops, swatch in ((1, "red"), (2, "orange"), (3, "yellow")):
+        ids = [r["id"] for r in rows if r.get("hops") == hops]
+        if ids:
+            ops.append({"op": "set", "ids": ids, "style": {"fill": swatch, "badge": f"{hops} hop{'s' if hops != 1 else ''}"},
+                        "label": f"{hops} degree{'s' if hops != 1 else ''} from a designated party"})
+    return ops
+
+
 def _people_of(p):
     cy = (
         "MATCH (e:Entity {id:$id})<-[r:HELD_ROLE]-(per:Person)\n"
@@ -306,6 +382,25 @@ TEMPLATES: dict[str, Template] = {
             "Entities in the root's supply chain whose ultimate parent is seated outside the home country (default US).",
             {"root_id": {"type": "string"}, "home_country": {"type": "string", "default": "US"}, "depth": {"type": "integer", "default": MAX_DEPTH}}, ["root_id"], _foreign_parent, _foreign_parent_style,
             [re.compile(r"\bforeign\b.*\b(parent|own|control)", re.I)],
+        ),
+        Template(
+            "risk_ranked",
+            "The root's supply chain ordered by computed risk score, optionally narrowed to one band "
+            "(severe, high, elevated, low). Use for 'riskiest suppliers', 'which vendors are highest risk', "
+            "'show me the severe ones'. Unscored vendors are returned last, never dropped.",
+            {"root_id": {"type": "string"}, "band": {"type": "string", "description": "severe | high | elevated | low"},
+             "depth": {"type": "integer", "default": MAX_DEPTH}, "limit": {"type": "integer", "default": 100}},
+            ["root_id"], _risk_ranked, _risk_ranked_style,
+            [re.compile(r"\b(riskiest|highest[- ]risk|risk score|most at risk|risky)\b", re.I)],
+        ),
+        Template(
+            "near_designated",
+            "Entities and people within N hops of a designated party (sanctioned, debarred or named on a "
+            "restricted list), over ownership, personnel and commercial edges. Use for 'who is connected to a "
+            "sanctioned entity', 'degrees of separation from a designated party', 'exposure to flagged parties'.",
+            {"hops": {"type": "integer", "minimum": 1, "maximum": MAX_DEPTH, "default": 2}, "limit": {"type": "integer", "default": 200}},
+            [], _near_designated, _near_designated_style,
+            [re.compile(r"\b(degrees? of separation|connected to a (sanctioned|designated|flagged)|near a (sanctioned|designated|flagged))\b", re.I)],
         ),
         Template(
             "people_of",

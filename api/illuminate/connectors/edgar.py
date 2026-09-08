@@ -2,6 +2,8 @@
 SEC requires a descriptive User-Agent, which the shared client sends."""
 from __future__ import annotations
 
+from datetime import date
+
 from rapidfuzz import fuzz
 
 from ..ids import name_match_score, normalize_name
@@ -10,7 +12,15 @@ from .http import HttpError, fetch_json
 
 TICKERS = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
-INTERESTING = {"10-K", "10-Q", "8-K", "DEF 14A", "20-F", "40-F", "3", "4", "5", "SC 13D", "SC 13G"}
+INTERESTING = {"10-K", "10-Q", "8-K", "DEF 14A", "20-F", "40-F", "3", "4", "5", "SC 13D", "SC 13G",
+               # Notifications of late filing. A company files one of these when it cannot
+               # close its books on time, which is the earliest public sign of trouble that
+               # does not require reading the financials.
+               "NT 10-K", "NT 10-Q", "NT 20-F"}
+NT_FORMS = {"NT 10-K", "NT 10-Q", "NT 20-F"}
+ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
+# An annual report older than this from a company still on the tape is a reporting gap.
+ANNUAL_STALE_DAYS = 550
 
 
 async def match_ticker(name: str) -> dict | None:
@@ -74,15 +84,43 @@ class EDGARConnector(Connector):
         recent = sub.get("filings", {}).get("recent", {})
         forms, dates, accs, docs = recent.get("form", []), recent.get("filingDate", []), recent.get("accessionNumber", []), recent.get("primaryDocument", [])
         n = 0
-        for form, date, acc, doc in zip(forms, dates, accs, docs):
+        seen: list[tuple[str, str]] = []
+        for form, fdate, acc, doc in zip(forms, dates, accs, docs):
+            seen.append((form, fdate))
             if form not in INTERESTING:
                 continue
             accn = acc.replace("-", "")
             furl = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accn}/{doc}"
-            fart = ArtifactRef(url=furl, title=f"{form} filed {date}", kind="filing", source="EDGAR", published_at=date, props={"form": form})
+            fart = ArtifactRef(url=furl, title=f"{form} filed {fdate}", kind="filing", source="EDGAR", published_at=fdate, props={"form": form})
             facts.append(Fact(subj, "mention", artifact=fart, confidence=conf, detail=f"{form} filing"))
             n += 1
             if n >= 12:
                 break
-        facts.append(Fact(subj, "financial_screen", value="clear", artifact=art, confidence=0.7, detail=f"listed; {n} recent filings available for review (no automated financial analysis)"))
+        result, detail = grade_filings(seen, n)
+        facts.append(Fact(subj, "financial_screen", value=result, artifact=art, confidence=0.7, detail=detail))
         return facts
+
+
+def grade_filings(seen: list[tuple[str, str]], attached: int) -> tuple[str, str]:
+    """Grade filing behaviour, which is all EDGAR's index can tell us without reading a
+    financial statement. Two signals: a notification of late filing, and an annual report
+    that has stopped arriving. Neither is a solvency judgement and the detail says so."""
+    late = sorted({form for form, _ in seen if form in NT_FORMS})
+    annuals = sorted((d for form, d in seen if form in ANNUAL_FORMS), reverse=True)
+    latest_annual = annuals[0] if annuals else None
+    stale = False
+    if latest_annual:
+        try:
+            stale = (date.today() - date.fromisoformat(latest_annual[:10])).days > ANNUAL_STALE_DAYS
+        except ValueError:
+            stale = False
+    parts = [f"{attached} recent filings attached"]
+    if late:
+        parts.append("late-filing notification on record (" + ", ".join(late) + ")")
+    if latest_annual:
+        parts.append(f"most recent annual report {latest_annual}" + (" — overdue" if stale else ""))
+    else:
+        parts.append("no annual report in the recent index")
+    parts.append("filing behaviour only; no financial-statement analysis")
+    result = "medium" if late else ("low" if stale or not latest_annual else "clear")
+    return result, "; ".join(parts)

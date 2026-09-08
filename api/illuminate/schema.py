@@ -101,6 +101,10 @@ CONSTRAINTS = [
     "CREATE INDEX entity_name IF NOT EXISTS FOR (n:Entity) ON (n.name_norm)",
     "CREATE INDEX person_name IF NOT EXISTS FOR (n:Person) ON (n.name_norm)",
     "CREATE INDEX claim_status IF NOT EXISTS FOR (n:Claim) ON (n.status)",
+    # Risk is a first-class way into the graph: "show me everything severe" is a range
+    # scan, not a full scan, and the canvas asks it on every load.
+    "CREATE INDEX entity_risk IF NOT EXISTS FOR (n:Entity) ON (n.risk_score)",
+    "CREATE INDEX person_risk IF NOT EXISTS FOR (n:Person) ON (n.risk_score)",
     "CREATE FULLTEXT INDEX entity_search IF NOT EXISTS FOR (n:Entity|Person) ON EACH [n.name, n.aliases_text]",
 ]
 
@@ -132,6 +136,10 @@ def schema_prompt() -> str:
     lines.append("COMMON PROPERTIES: every node has id (string, e.g. 'ent_…', 'per_…', 'cat_…', 'loc_…', 'art_…', 'clm_…') and name. "
                  "Entity: uei, cage, lei, kind ∈ {organization, program, agency}, aliases, registration_status, public (bool), ticker, summary, simulated (bool), "
                  "revenue, lda_registrant_id, org_types, federal (bool, agencies). Person: person_types, public_official (bool). "
+                 "Entity and Person also carry a computed risk score (risk.py): risk_score (int 0-100, null when no dimension "
+                 "returned data), risk_band ∈ {low, elevated, high, severe}, risk_top_factor (text), risk_dimensions_scored / "
+                 "risk_dimensions_requested (int), risk_components (JSON string — do not filter on it), risk_scored_at. "
+                 "Designation markers set by a screen hit: flagged (bool, any designation), sanctioned, debarred, restricted (bool). "
                  "Location: code (ISO2 country / 'US-TX'), kind. Category: kind ∈ {goods, services}. "
                  "Edges carry an id property and provenance: " + ", ".join(PROVENANCE_FIELDS) + ".")
     lines.append("CATEGORY TAXONOMY (id → name, kind):")

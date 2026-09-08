@@ -18,6 +18,7 @@ prompt. Record passwords in your own password manager, not here.
 | SEC EDGAR | sec.gov / data.sec.gov | tickers, submissions; needs the descriptive User-Agent we send |
 | GDELT | api.gdeltproject.org | news; rate-limited (~1 req / 5 s, 429 otherwise) — treated as best-effort |
 | **SAM.gov Exclusions (public extract)** | sam.gov Data Services daily ZIP | debarment/suspension screen done locally against ~34k firm + special-entity records; no key, no quota; slim index committed in fixtures for offline use |
+| **DoD Section 1260H** | defense.gov release annex (PDF) | Chinese military companies named by DoD. No feed and no key: DoD publishes a PDF annex, so the roster is committed in `connectors/section_1260h.py` and screened locally. It is an **excerpt**, not the full annex — every result says so, and refreshing it means re-reading the published PDF by hand |
 
 ## Needs a key — please register
 
