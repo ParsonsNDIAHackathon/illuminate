@@ -31,16 +31,19 @@ pushing. If the fetched tip is not an ancestor, merge it and revalidate; retry o
 a small fixed number of times, and stop for review if the remote keeps advancing.
 
 Replit's concurrent-task integration may rebuild workspace `main` by rebasing it
-onto the internal `main-repl/main` base. A merge made only on workspace `main` can
-therefore disappear while its file changes survive as patch-equivalent commits.
+onto the platform-owned `main-repl/main` base. A merge made only on workspace
+`main` can disappear while its file changes survive as patch-equivalent commits.
+Locally changing that base is not durable because the platform force-refreshes it
+from its authoritative remote.
 
 **Why:** Repeated history-preserving merges were replaced during completion review
-because the integration base itself did not contain the freshly fetched remote tip.
+because active task integration rebased `main`; a later attempt to update the local
+base was itself replaced by a forced fetch.
 
-**How to apply:** Confirm the reflog before repeating a vanished merge. When it
-shows an automatic rebase onto `main-repl/main`, merge the remote tip into that
-integration base first, then merge the updated base into workspace `main`. Recheck
-both refs after concurrent task activity settles.
+**How to apply:** Confirm the reflog before repeating a vanished merge. If it shows
+automatic rebases and forced base refreshes, do not modify the local integration
+base or keep racing it. Coordinate with the integration owner or wait until active
+task merges settle, then reconcile workspace `main` and recheck ancestry immediately.
 
 Treat any credential-delivery channel as readable by the whole Git process tree,
 not just the intended credential prompt.
