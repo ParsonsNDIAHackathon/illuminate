@@ -55,12 +55,24 @@
         <dt>Method</dt><dd>{{ p.method || '—' }}<span v-if="p.confidence != null"> · confidence {{ p.confidence }}</span></dd>
       </dl>
     </section>
+    <section v-if="node.label === 'Artifact'">
+      <h4>Artifact</h4>
+      <dl>
+        <template v-if="p.url"><dt>Page</dt><dd><a :href="p.url" target="_blank" rel="noopener">{{ p.url }}</a></dd></template>
+        <template v-if="p.published_at"><dt>Published</dt><dd>{{ p.published_at }}</dd></template>
+        <template v-if="p.amount"><dt>Amount</dt><dd>${{ Number(p.amount).toLocaleString() }}</dd></template>
+        <template v-if="p.award_id"><dt>Award</dt><dd>{{ p.award_id }}</dd></template>
+        <template v-if="p.form"><dt>Form</dt><dd>{{ p.form }}</dd></template>
+      </dl>
+    </section>
     <div class="d-flex flex-wrap ga-1 mt-2">
+      <v-btn v-if="node.label === 'Artifact'" prepend-icon="mdi-code-json" @click="rawId = node.id">Raw</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-file-document-outline" :to="`/entities/${node.id}`">Report</v-btn>
       <v-btn prepend-icon="mdi-arrow-expand-all" @click="$emit('expand', node.id)">Expand</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-auto-fix" @click="enrich" :loading="enriching">Enrich</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-target" variant="text" @click="setRoot" title="Make this the consumer (root)">Set as root</v-btn>
     </div>
+    <ArtifactRaw :artifact-id="rawId" @close="rawId = null" />
   </div>
 </template>
 <script setup lang="ts">
@@ -69,7 +81,9 @@ import { api } from '../api/client'
 import { useGraph } from '../stores/graph'
 import { useJobs } from '../stores/jobs'
 import { useWorkspace } from '../stores/workspace'
+import ArtifactRaw from './ArtifactRaw.vue'
 const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace()
+const rawId = ref<string | null>(null)
 defineEmits<{ (e: 'expand', id: string): void }>()
 const node = computed(() => graph.selected)
 const p = computed(() => node.value?.props || {})

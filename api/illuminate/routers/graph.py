@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .. import db
+from ..raw import find_raw
 from ..report import build_report
 from ..tools.handlers import ToolContext, expand_subgraph, search_entities
 from .deps import user_id
@@ -116,6 +117,25 @@ async def artifacts(kind: str | None = None, entity_id: str | None = None, limit
         """,
         params,
     )
+
+
+@router.get("/artifacts/{artifact_id}")
+async def artifact_detail(artifact_id: str):
+    """One artifact with what it is attached to and, where the source response is cached, the raw payload."""
+    rows = await db.read(
+        """
+        MATCH (a:Artifact {id:$id})
+        OPTIONAL MATCH (a)-[:ABOUT]->(e:Entity)
+        OPTIONAL MATCH (a)-[:EVIDENCES]->(c:Claim)
+        RETURN a{.*} AS artifact, collect(DISTINCT e{.id,.name}) AS about,
+               collect(DISTINCT c{.id,.predicate,.status,.confidence}) AS claims
+        """,
+        {"id": artifact_id},
+    )
+    if not rows:
+        raise HTTPException(404, "no such artifact")
+    row = rows[0]
+    return {**row, "raw": find_raw(artifact_id, row["artifact"] or {})}
 
 
 @router.get("/locations")

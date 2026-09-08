@@ -92,8 +92,9 @@
         <p class="text-caption mt-2" style="opacity:.7">{{ rep.risk.disclaimer }}</p>
       </v-window-item>
       <v-window-item value="artifacts">
-        <v-table density="compact"><thead><tr><th>Kind</th><th>Title</th><th>Source</th><th>Date</th></tr></thead>
-          <tbody><tr v-for="a in rep.artifacts" :key="a.id"><td>{{ a.kind }}</td><td><a :href="a.url" target="_blank" rel="noopener">{{ a.title }}</a></td><td>{{ a.source }}</td><td>{{ a.published_at || (a.retrieved_at || '').slice(0, 10) }}</td></tr></tbody></v-table>
+        <v-table density="compact"><thead><tr><th>Kind</th><th>Title</th><th>Source</th><th>Date</th><th>Raw</th></tr></thead>
+          <tbody><tr v-for="a in rep.artifacts" :key="a.id"><td>{{ a.kind }}</td><td><a :href="a.url" target="_blank" rel="noopener">{{ a.title }}</a></td><td>{{ a.source }}</td><td>{{ a.published_at || (a.retrieved_at || '').slice(0, 10) }}</td><td><v-btn icon="mdi-code-json" size="x-small" variant="text" title="View raw payload" @click="rawId = a.id" /></td></tr></tbody></v-table>
+        <ArtifactRaw :artifact-id="rawId" @close="rawId = null" />
         <p v-if="!rep.artifacts.length" class="text-body-2 mt-2" style="opacity:.6">No artifacts attached yet.</p>
       </v-window-item>
       <v-window-item value="graph">
@@ -108,7 +109,9 @@ import { onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
+import ArtifactRaw from '../components/ArtifactRaw.vue'
 import { useGraph } from '../stores/graph'
+const rawId = ref<string | null>(null)
 import { useJobs } from '../stores/jobs'
 import { useWorkspace } from '../stores/workspace'
 const props = defineProps<{ id: string }>()
