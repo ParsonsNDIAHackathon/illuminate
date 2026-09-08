@@ -15,12 +15,14 @@
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import cytoscape, { type Core } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
+import cola from 'cytoscape-cola'
 import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 import { applyStyleOps, clearStyleOps } from '../styles/styleOps'
 import { LABEL_COLORS } from '../styles/palette'
 
 cytoscape.use(fcose)
+cytoscape.use(cola)
 const el = ref<HTMLElement>()
 const graph = useGraph()
 const ws = useWorkspace()
@@ -92,49 +94,52 @@ function sync() {
   wanted.filter(w => existing.has(w.data.id)).forEach(w => cy!.getElementById(w.data.id).data(w.data))
   if (fresh.length) {
     cy.add(fresh as any)
-    layout(fresh.length > 0 && existing.size === 0)
+    if (existing.size === 0) layout(true)
+    else { seedNearNeighbours(fresh.filter(w => w.group === 'nodes').map(w => w.data.id)); startLive() }
+  } else if (cy.elements().length === 0) {
+    stopLive()
   }
   restyle()
 }
 function restyle() { if (!cy) return; clearStyleOps(cy); applyStyleOps(cy, graph.styleOps, ws.theme) }
+
+// Layout strategy: fcose arranges a fresh canvas (it is the better static layout), then cola takes
+// over in infinite mode — a force simulation that keeps running, so dragging a node pulls its
+// neighbours through the edges and the rest of the graph relaxes, the way d3-force does in Neo4j
+// Browser. Cola pins the grabbed node to the pointer itself; nothing here handles drag events.
+let live: any = null
+function stopLive() { if (live) { try { live.stop() } catch {} live = null } }
+function startLive() {
+  stopLive()
+  if (!cy || cy.nodes().length === 0) return
+  live = cy.layout({
+    name: 'cola', infinite: true, fit: false, randomize: false, animate: true,
+    edgeLength: 115, nodeSpacing: () => 26, avoidOverlap: true, handleDisconnected: true, convergenceThreshold: 0.02,
+  } as any)
+  live.run()
+}
+// Nodes added to a running canvas would otherwise appear at the origin and fly across it; drop
+// each one next to a neighbour that already has a position and let the simulation settle it.
+function seedNearNeighbours(ids: string[]) {
+  if (!cy) return
+  const fresh = new Set(ids)
+  for (const id of ids) {
+    const n = cy.getElementById(id)
+    const anchor = n.neighborhood('node').filter(m => !fresh.has(m.id()))[0]
+    if (!anchor) continue
+    const p = anchor.position()
+    n.position({ x: p.x + (Math.random() - 0.5) * 80, y: p.y + (Math.random() - 0.5) * 80 })
+  }
+}
 function layout(fit = true) {
   if (!cy || cy.nodes().length === 0) return
+  stopLive()
   // A fresh canvas has every node at the origin; fcose must randomise from there or it collapses to a line.
-  // Incremental additions keep existing positions so the user's mental map survives.
   const l = cy.layout({ name: 'fcose', animate: true, animationDuration: 400, randomize: fit, fit, padding: 40, nodeRepulsion: () => 9000, idealEdgeLength: () => 90, quality: 'default' } as any)
+  l.one('layoutstop', () => startLive())
   l.run()
 }
 function fit() { cy?.fit(undefined, 40) }
-
-// Dragging: the graph is not frozen around the grabbed node. While it moves, its neighbours
-// follow with damping (1 hop at 55 %, 2 hops at 20 %); on release the local neighbourhood
-// re-settles with fcose, the dropped node pinned where the user left it.
-const FOLLOW_1 = 0.55, FOLLOW_2 = 0.2
-let dragPrev: { x: number; y: number } | null = null
-function onGrab(ev: any) { const p = ev.target.position(); dragPrev = { x: p.x, y: p.y } }
-function onDrag(ev: any) {
-  const n = ev.target
-  if (!dragPrev || !cy) return
-  const p = n.position(); const dx = p.x - dragPrev.x, dy = p.y - dragPrev.y
-  dragPrev = { x: p.x, y: p.y }
-  if (!dx && !dy) return
-  const moving = cy.nodes(':grabbed')                       // the dragged node plus any co-selected ones
-  const hop1 = n.neighborhood('node').difference(moving)
-  const hop2 = hop1.neighborhood('node').difference(hop1).difference(moving)
-  hop1.shift({ x: dx * FOLLOW_1, y: dy * FOLLOW_1 })
-  hop2.shift({ x: dx * FOLLOW_2, y: dy * FOLLOW_2 })
-}
-function onFree(ev: any) {
-  dragPrev = null
-  if (!cy) return
-  const n = ev.target
-  const local = n.closedNeighborhood().closedNeighborhood()
-  if (local.nodes().length < 3) return
-  const pos = n.position()
-  local.layout({ name: 'fcose', animate: true, animationDuration: 250, randomize: false, fit: false, quality: 'draft',
-    nodeRepulsion: () => 9000, idealEdgeLength: () => 90,
-    fixedNodeConstraint: [{ nodeId: n.id(), position: { x: pos.x, y: pos.y } }] } as any).run()
-}
 
 onMounted(() => {
   cy = cytoscape({ container: el.value!, style: styleSheet(), wheelSensitivity: 0.25, minZoom: 0.1, maxZoom: 4 })
@@ -143,12 +148,9 @@ onMounted(() => {
   cy.on('tap', 'edge', (ev) => graph.selectEdge(ev.target.id()))
   cy.on('tap', (ev) => { if (ev.target === cy) { graph.select(null); graph.selectEdge(null) } })
   cy.on('dbltap', 'node', (ev) => { const n = graph.nodes.get(ev.target.id()); if (n && (n.label === 'Entity' || n.label === 'Person')) emit('expand', ev.target.id()) })
-  cy.on('grab', 'node', onGrab)
-  cy.on('drag', 'node', onDrag)
-  cy.on('free', 'node', onFree)
   sync()
 })
-onBeforeUnmount(() => cy?.destroy())
+onBeforeUnmount(() => { stopLive(); cy?.destroy() })
 watch(() => graph.version, sync)
 watch(() => graph.styleVersion, restyle)
 watch(() => ws.theme, () => { cy?.style(styleSheet() as any); sync() })
