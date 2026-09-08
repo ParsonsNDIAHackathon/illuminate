@@ -124,7 +124,7 @@ async function enrich() { enriching.value = true; try { await jobs.enqueue(props
 async function regen() { regen_busy.value = true; try { await api.post(`/api/entities/${props.id}/summary`); await load() } catch (e: any) { alert(e.message) } finally { regen_busy.value = false } }
 async function openInGraph() { await graph.loadNeighbourhood(props.id, 2, ws.ws.layers); graph.select(props.id); router.push('/') }
 watch(tab, async (t) => { if (t === 'graph') { await graph.loadNeighbourhood(props.id, 2, { ...ws.ws.layers, people: true, countries: true }, true); graph.select(props.id) } })
-watch(() => jobs.jobs.filter(j => j.entity_id === props.id && j.status === 'done').length, load)
+watch(() => jobs.jobs.filter(j => j.entity_id === props.id && ['succeeded', 'empty', 'partial', 'failed', 'timed_out'].includes(j.status)).length, load)
 onMounted(load); watch(() => props.id, load)
 </script>
 <style scoped>

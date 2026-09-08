@@ -30,6 +30,7 @@ from ..schema import ensure_schema
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 PROV = {"source": "USAspending", "method": "connector", "confidence": 0.95}
+SEED_VERSION = "uc7-fixtures-v1"
 
 
 def log(msg: str) -> None:
@@ -332,6 +333,16 @@ async def main_async(args) -> None:
         await enrich_with(["edgar"], top_ids + parents[:10], commit_open=False)
     if args.scenario:
         await scenario(info["root_id"])
+    seed_status = "complete" if info["primes"] > 0 and info["subs"] > 0 else "incomplete"
+    await db.write(
+        "MERGE (m:SeedMetadata {id:'primary'}) "
+        "SET m.version=$version, m.status=$status, m.completed_at=$completed, "
+        "m.offline=$offline, m.scenario=$scenario, m.root_id=$root_id, "
+        "m.primes=$primes, m.subs=$subs",
+        {"version": SEED_VERSION, "completed": now_iso(), "offline": args.offline,
+         "scenario": args.scenario, "root_id": info["root_id"], "status": seed_status,
+         "primes": info["primes"], "subs": info["subs"]},
+    )
     st = await stats()
     log(f"done: {json.dumps(st)}")
     await db.close_driver()

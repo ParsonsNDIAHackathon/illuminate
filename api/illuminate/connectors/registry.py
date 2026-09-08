@@ -41,3 +41,8 @@ def get_connector(name: str) -> Connector | None:
 
 def connector_names() -> list[str]:
     return [c.name for c in REGISTRY]
+
+
+def capability_kind(name: str) -> str:
+    """All registry capabilities are optional to the deterministic judged path."""
+    return "model" if name == "openai" else "connector"

@@ -30,7 +30,16 @@ class Settings(BaseSettings):
     cypher_max_limit: int = 2000
     cypher_max_hops: int = 6
     cypher_read_timeout_s: float = 20.0
+    cypher_write_timeout_s: float = 20.0
     permission_timeout_s: float = 600.0
+    connector_timeout_s: float = 45.0
+    connector_retries: int = 1
+    connector_processing_timeout_s: float = 60.0
+    enrichment_job_timeout_s: float = 180.0
+    summary_timeout_s: float = 30.0
+    readiness_timeout_s: float = 3.0
+    readiness_cache_s: float = 10.0
+    freshness_stale_hours: float = 168.0
 
     # Default model tiers (D8). Overridable per user in workspace settings.
     model_strong: str = "gpt-5"

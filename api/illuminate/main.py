@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -11,6 +11,8 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__, db
 from .config import settings
 from .enrichment.worker import worker
+from .readiness import build_readiness
+from .routers.deps import user_id
 from .routers import chat, claims, connectors, enrichment, graph, permissions, query
 from .routers import settings as settings_router
 from .schema import ensure_schema
@@ -59,6 +61,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Illuminate", version=__version__, lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+
+@app.get("/api/health", tags=["operations"])
+async def health(refresh: bool = False, user: str = Depends(user_id)):
+    """Reusable readiness contract; always safe to expose and never returns secrets."""
+    return await build_readiness(user, refresh=refresh)
 
 for r in (graph.router, query.router, permissions.router, claims.router, enrichment.router, connectors.router, settings_router.router, chat.router):
     app.include_router(r)

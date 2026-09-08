@@ -34,13 +34,3 @@ async def tools():
 @router.get("/palette")
 async def palette():
     return PALETTE
-
-
-@router.get("/health")
-async def health():
-    try:
-        await db.read("RETURN 1 AS ok")
-        neo = True
-    except Exception:
-        neo = False
-    return {"ok": neo, "neo4j": neo, "version": __import__("illuminate").__version__}

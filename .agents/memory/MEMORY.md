@@ -1,2 +1,3 @@
 - [Neo4j on Replit](neo4j-on-replit.md) — Nix Neo4j needs a writable config and explicit APOC plugin wiring for this app.
 - [Graph evidence truth](graph-evidence-truth.md) — consumers must resolve current backing-claim and artifact status; edge metadata alone can become stale.
+- [Readiness truth rules](readiness-truth-rules.md) — primary readiness requires stamped seed completion plus live mission coverage; optional services never gate it.
