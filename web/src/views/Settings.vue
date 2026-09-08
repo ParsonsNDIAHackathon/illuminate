@@ -60,6 +60,21 @@
       </v-card-text>
     </v-card>
     <v-card class="mb-4" variant="outlined">
+      <v-card-title class="text-subtitle-1">Simulated data</v-card-title>
+      <v-card-text>
+        <v-switch
+          :model-value="ws.ws.include_simulated"
+          label="Allow simulated scenario data in portfolio and vendor comparison"
+          color="warning"
+          hide-details
+          @update:model-value="(v: boolean | null) => ws.save({ include_simulated: Boolean(v) })"
+        />
+        <p class="text-caption mt-2" style="opacity:.7">
+          Off by default. When off, vendor lists and reports request observed/live data only. Turn this on to make clearly labeled simulated records available for training and calibration; it does not remove their SIMULATED labels.
+        </p>
+      </v-card-text>
+    </v-card>
+    <v-card class="mb-4" variant="outlined">
       <v-card-title class="text-subtitle-1">Model tiers</v-card-title>
       <v-card-text>
         <div class="d-flex ga-3 flex-wrap">

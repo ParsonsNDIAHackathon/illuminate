@@ -38,10 +38,17 @@ async def test_the_walk_climbs_owns_and_stops_at_an_owner_nobody_owns(monkeypatc
     monkeypatch.setattr(db, "read", reader([row()], calls))
     await ultimate_parents("ent_ningbo")
     cypher, params = calls[0]
-    assert params == {"id": "ent_ningbo"}
+    assert params == {"id": "ent_ningbo", "include_simulated": False}
     # It is the traversal that finds the parent, not an edge that names one.
     assert f"[:OWNS|ULTIMATE_PARENT_OF*1..{ULTIMATE_PARENT_DEPTH}]" in cypher
-    assert "NOT EXISTS { (:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(up) }" in cypher
+    assert "MATCH (owner:Entity)-[incoming:OWNS|ULTIMATE_PARENT_OF]->(up)" in cypher
+    path_policy = cypher.split("WITH up, path", 1)[0]
+    assert "all(n IN nodes(path)" in path_policy
+    assert "all(h IN relationships(path)" in path_policy
+    assert "MATCH (hc:Claim {id:h.claim_id})" in path_policy
+    assert "MATCH (ha:Artifact)-[:EVIDENCES]->(hc)" in path_policy
+    assert "MATCH (:Artifact)-[he:EVIDENCES]->(hc)" in path_policy
+    assert path_policy.index("$include_simulated") < cypher.index("ORDER BY length(path)")
 
 
 @pytest.mark.asyncio
@@ -63,7 +70,7 @@ async def test_a_single_stated_hop_keeps_the_source_that_stated_it(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_simulation_propagates_down_a_derived_chain(monkeypatch):
-    monkeypatch.setattr(db, "read", reader([row(simulated=True, relationship_simulated=True)]))
+    monkeypatch.setattr(db, "read", reader([row(simulated=False, relationship_simulated=True)]))
     found = await ultimate_parents("ent_ningbo")
     assert found[0]["simulated"] is True
     assert found[0]["relationship_simulated"] is True

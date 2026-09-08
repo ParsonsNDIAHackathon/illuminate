@@ -239,7 +239,7 @@ chmod 600 "$PASSWORD_TMP"
 mv "$PASSWORD_TMP" "$PASSWORD_FILE"
 [ "$INITIALIZED_NOW" -eq 0 ] || touch "$PASSWORD_MARKER"
 
-setsid bash -c 'cd api && exec python3 -m uvicorn illuminate.main:app --host 0.0.0.0 --port 8000' &
+setsid bash -c 'cd api && exec .venv/bin/python -m uvicorn illuminate.main:app --host 0.0.0.0 --port 8000' &
 API_PID=$!
 
 echo "Waiting for Illuminate API..."

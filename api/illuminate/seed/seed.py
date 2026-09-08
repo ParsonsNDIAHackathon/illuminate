@@ -34,8 +34,8 @@ PROV = {"source": "USAspending", "method": "connector", "confidence": 0.95}
 SEED_VERSION = "uc7-fixtures-v1"
 _seed_retrieval_mode = "offline_fixture"
 _seed_retrieval_trace: list[dict] | None = None
-from ..config import settings
 from ..connectors.http import retrieval_context, set_cache_dir
+from ..config import load_workspace, settings
 
 
 def log(msg: str) -> None:
@@ -697,6 +697,10 @@ async def mark_seed_started(args) -> None:
 async def main_async(args) -> None:
     global _seed_retrieval_mode, _seed_retrieval_trace
     bootstrap = bool(getattr(args, "bootstrap", False))
+    args.scenario = bool(
+        getattr(args, "scenario", False)
+        or (not bootstrap and load_workspace().include_simulated)
+    )
     if bootstrap and args.offline:
         raise ValueError("--bootstrap cannot use offline fixtures")
     _seed_retrieval_mode = "offline_fixture" if args.offline else "operational_live"

@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from pathlib import Path
 
 from illuminate.connectors.base import ArtifactRef, Fact, NodeRef
 from illuminate.enrichment import claims
@@ -11,6 +12,10 @@ async def test_seed_orchestration_runs_scenario_and_stamps_program_identity(monk
     metadata_writes = []
 
     monkeypatch.setattr(seed, "ensure_schema", AsyncMock())
+    monkeypatch.setattr(
+        seed, "load_workspace",
+        lambda: type("Workspace", (), {"include_simulated": False})(),
+    )
     monkeypatch.setattr(seed, "seed_catalog_lineage", AsyncMock())
     monkeypatch.setattr(seed, "seed_program", AsyncMock(return_value=root))
     monkeypatch.setattr(seed, "seed_cached_gdelt", AsyncMock())
@@ -67,6 +72,10 @@ async def test_interrupted_reset_invalidates_prior_completion_before_deleting_da
     writes = []
 
     monkeypatch.setattr(seed, "ensure_schema", AsyncMock())
+    monkeypatch.setattr(
+        seed, "load_workspace",
+        lambda: type("Workspace", (), {"include_simulated": False})(),
+    )
     monkeypatch.setattr(seed, "seed_catalog_lineage", AsyncMock())
     monkeypatch.setattr(
         seed,
@@ -102,7 +111,34 @@ async def test_interrupted_reset_invalidates_prior_completion_before_deleting_da
     assert "DETACH DELETE" in writes[1][0]
     assert not any("status=$status" in statement for statement, _ in writes)
 
+async def test_workspace_opt_in_enables_seed_scenario(monkeypatch):
+    args = SimpleNamespace(
+        offline=True, reset=False, keyword=["program"], root_name="Program",
+        since="2024-01-01", until="2026-01-01", primes=1, subs=1,
+        agency="Agency", people=0, skip_enrich=True, scenario=False,
+    )
+    monkeypatch.setattr(
+        seed, "load_workspace",
+        lambda: type("Workspace", (), {"include_simulated": True})(),
+    )
+    monkeypatch.setattr(seed, "ensure_schema", AsyncMock())
+    monkeypatch.setattr(seed, "mark_seed_started", AsyncMock())
+    monkeypatch.setattr(seed, "seed_catalog_lineage", AsyncMock())
+    monkeypatch.setattr(
+        seed, "seed_program",
+        AsyncMock(return_value={"root_id": "ent_program", "primes": 1, "subs": 1}),
+    )
+    monkeypatch.setattr(seed, "seed_cached_gdelt", AsyncMock())
+    monkeypatch.setattr(seed, "scenario", AsyncMock())
+    monkeypatch.setattr(seed, "stats", AsyncMock(return_value={}))
+    monkeypatch.setattr(seed.db, "read", AsyncMock(return_value=[]))
+    monkeypatch.setattr(seed.db, "write", AsyncMock())
+    monkeypatch.setattr(seed.db, "close_driver", AsyncMock())
 
+    await seed.main_async(args)
+
+    assert args.scenario is True
+    seed.scenario.assert_awaited_once_with("ent_program")
 def test_seed_claim_identity_is_stable_and_distinguishes_evidence():
     fact = Fact(
         subject=NodeRef("Entity", "ent_1"),
@@ -157,3 +193,8 @@ async def test_replayed_committed_observation_uses_idempotent_refresh(monkeypatc
 
     assert await claims.decide("clm_seed_1", trust="authoritative") == "committed"
     commit.assert_awaited_once_with("clm_seed_1", refresh_materialization=True)
+
+def test_seed_script_requires_explicit_scenario_flag():
+    script = (Path(__file__).parents[2] / "scripts" / "seed.sh").read_text()
+    assert "args=(-m illuminate.seed.seed --reset \"$@\")" in script
+    assert "--reset --scenario" not in script

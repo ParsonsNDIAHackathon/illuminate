@@ -15,6 +15,7 @@ import re
 from typing import Any, Awaitable, Callable, Iterable
 
 from . import db
+from .config import load_workspace
 from .graphio import subgraph_from_graph
 
 Listener = Callable[[str, dict], Awaitable[None]]
@@ -64,7 +65,24 @@ def node_ids(*objs: Any) -> list[str]:
     return list(found)
 
 
-async def delta_for(ids: Iterable[str]) -> dict:
+def _filter_simulated_delta(subgraph: dict, include_simulated: bool) -> dict:
+    if include_simulated:
+        return subgraph
+    nodes = [
+        node for node in subgraph.get("nodes", [])
+        if not bool((node.get("props") or {}).get("simulated"))
+    ]
+    node_ids = {node.get("id") for node in nodes}
+    edges = [
+        edge for edge in subgraph.get("edges", [])
+        if edge.get("source") in node_ids
+        and edge.get("target") in node_ids
+        and not bool((edge.get("props") or {}).get("simulated"))
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+async def delta_for(ids: Iterable[str], *, include_simulated: bool | None = None) -> dict:
     """The named nodes and their immediate neighbourhood, in the shape the canvas draws."""
     wanted = list(dict.fromkeys(i for i in ids if i))[:MAX_IDS]
     if not wanted:
@@ -76,7 +94,9 @@ async def delta_for(ids: Iterable[str]) -> dict:
         "RETURN [x IN ns WHERE x IS NOT NULL][..$cap] AS nodes, rs[..$cap] AS rels",
         {"ids": wanted, "cap": MAX_ELEMENTS},
     )
-    return subgraph_from_graph(graph)
+    if include_simulated is None:
+        include_simulated = load_workspace().include_simulated
+    return _filter_simulated_delta(subgraph_from_graph(graph), include_simulated)
 
 
 async def announce(ids: Iterable[str], *, reason: str, source: str | None = None) -> None:
@@ -89,6 +109,15 @@ async def announce(ids: Iterable[str], *, reason: str, source: str | None = None
         sub = await delta_for(focus)
         if not sub["nodes"]:
             return
-        await _emit("graph_delta", {"subgraph": sub, "focus": focus, "reason": reason, "source": source})
+        visible = {node["id"] for node in sub["nodes"]}
+        await _emit(
+            "graph_delta",
+            {
+                "subgraph": sub,
+                "focus": [node_id for node_id in focus if node_id in visible],
+                "reason": reason,
+                "source": source,
+            },
+        )
     except Exception:
         return

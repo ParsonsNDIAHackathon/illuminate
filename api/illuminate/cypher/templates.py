@@ -32,6 +32,39 @@ def _subgraph_limit(v, default=400) -> int:
     return max(1, min(MAX_SUBGRAPH_NODES, limit))
 
 
+def _live_relationship_backing_policy(relationship: str) -> str:
+    return (
+        f"({relationship}.claim_id IS NULL OR NOT EXISTS {{ "
+        f"MATCH (rc:Claim {{id:{relationship}.claim_id}}) "
+        "WHERE coalesce(rc.simulated,false) "
+        "OR EXISTS { MATCH (ra:Artifact)-[:EVIDENCES]->(rc) "
+        "WHERE coalesce(ra.simulated,false) } "
+        "OR EXISTS { MATCH (:Artifact)-[re:EVIDENCES]->(rc) "
+        "WHERE coalesce(re.simulated,false) }"
+        " })"
+    )
+
+
+def _live_relationship_policy(relationship: str) -> str:
+    return (
+        "($include_simulated OR ("
+        f"coalesce({relationship}.simulated,false)=false AND "
+        f"{_live_relationship_backing_policy(relationship)}"
+        "))"
+    )
+
+
+def _live_path_policy(path: str) -> str:
+    """Require every node, relationship, and backing evidence item to be live."""
+    return (
+        f"($include_simulated OR ("
+        f"all(n IN nodes({path}) WHERE coalesce(n.simulated,false)=false) "
+        f"AND all(r IN relationships({path}) WHERE "
+        f"coalesce(r.simulated,false)=false AND {_live_relationship_backing_policy('r')}"
+        ")))"
+    )
+
+
 @dataclass
 class Template:
     name: str
@@ -53,6 +86,8 @@ def _vendors_of(p):
     cy = (
         f"MATCH (root:Entity {{id:$id}})\n"
         f"MATCH path=(v:Entity)-[:SUPPLIES*1..{d}]->(root)\n"
+        "WHERE $include_simulated OR (all(n IN nodes(path) WHERE coalesce(n.simulated,false)=false) "
+        "AND all(r IN relationships(path) WHERE coalesce(r.simulated,false)=false))\n"
         "WITH root, path, v, length(path) AS tier\n"
         "RETURN v.id AS id, v.name AS name, min(tier) AS tier, path\n"
         "ORDER BY tier, name LIMIT 500"
@@ -65,8 +100,14 @@ def _color_by_category(p):
     cy = (
         f"MATCH (root:Entity {{id:$id}})\n"
         f"MATCH path=(v:Entity)-[:SUPPLIES*1..{d}]->(root)\n"
-        "OPTIONAL MATCH (v)-[:PROVIDES]->(c:Category)\n"
-        "OPTIONAL MATCH (c)-[:SUBCATEGORY_OF*0..4]->(top:Category) WHERE NOT (top)-[:SUBCATEGORY_OF]->()\n"
+        "WHERE $include_simulated OR (all(n IN nodes(path) WHERE coalesce(n.simulated,false)=false) "
+        "AND all(r IN relationships(path) WHERE coalesce(r.simulated,false)=false))\n"
+        "OPTIONAL MATCH (v)-[pr:PROVIDES]->(c:Category)\n"
+        "WHERE $include_simulated OR (coalesce(pr.simulated,false)=false AND coalesce(c.simulated,false)=false)\n"
+        "OPTIONAL MATCH cp=(c)-[:SUBCATEGORY_OF*0..4]->(top:Category) "
+        "WHERE NOT (top)-[:SUBCATEGORY_OF]->() AND ($include_simulated OR "
+        "(all(n IN nodes(cp) WHERE coalesce(n.simulated,false)=false) "
+        "AND all(r IN relationships(cp) WHERE coalesce(r.simulated,false)=false)))\n"
         "RETURN v.id AS id, v.name AS name, collect(DISTINCT coalesce(top.kind, c.kind)) AS kinds, collect(DISTINCT path) AS paths\n"
         "LIMIT 500"
     )
@@ -96,10 +137,13 @@ def _manufactures_in(p):
     cy = (
         f"MATCH (root:Entity {{id:$root}})\n"
         f"MATCH path=(v:Entity)-[:SUPPLIES*1..{d}]->(root)\n"
+        "WHERE $include_simulated OR (all(n IN nodes(path) WHERE coalesce(n.simulated,false)=false) "
+        "AND all(r IN relationships(path) WHERE coalesce(r.simulated,false)=false))\n"
         "WITH v, min(length(path)) AS tier, collect(path)[0] AS path\n"
         "WHERE tier >= $min_tier\n"
         "MATCH (v)-[m:MANUFACTURES_IN]->(l:Location)\n"
-        "WHERE l.code = $country OR l.code STARTS WITH ($country + '-') OR toLower(l.name) = toLower($country)\n"
+        "WHERE (l.code = $country OR l.code STARTS WITH ($country + '-') OR toLower(l.name) = toLower($country)) "
+        "AND ($include_simulated OR (coalesce(m.simulated,false)=false AND coalesce(l.simulated,false)=false))\n"
         "RETURN v.id AS id, v.name AS name, tier, l.code AS location, path, m\n"
         "ORDER BY tier LIMIT 500"
     )
@@ -119,9 +163,13 @@ def _manufactures_in_style(rows, p):
 def _ownership_chain(p):
     cy = (
         "MATCH (e:Entity {id:$id})\n"
+        "WHERE $include_simulated OR coalesce(e.simulated,false)=false\n"
         f"OPTIONAL MATCH up=(e)<-[:OWNS|ULTIMATE_PARENT_OF*1..{MAX_DEPTH}]-(parent:Entity)\n"
+        f"WHERE {_live_path_policy('up')}\n"
         f"OPTIONAL MATCH down=(e)-[:OWNS*1..{MAX_DEPTH}]->(child:Entity)\n"
+        f"WHERE {_live_path_policy('down')}\n"
         "OPTIONAL MATCH (parent)-[inc:INCORPORATED_IN]->(pl:Location)\n"
+        "WHERE $include_simulated OR (coalesce(inc.simulated,false)=false AND coalesce(pl.simulated,false)=false)\n"
         "RETURN e.id AS id, e.name AS name, up, down, parent.id AS parent_id, parent.name AS parent_name, pl.code AS parent_country\n"
         "LIMIT 200"
     )
@@ -140,12 +188,17 @@ def _shared_directors(p):
     d = _depth(p.get("depth", MAX_DEPTH))
     cy = (
         f"MATCH (root:Entity {{id:$root}})\n"
-        f"OPTIONAL MATCH (v:Entity)-[:SUPPLIES*1..{d}]->(root)\n"
+        f"OPTIONAL MATCH membership=(v:Entity)-[:SUPPLIES*1..{d}]->(root)\n"
+        "WHERE $include_simulated OR (v IS NULL OR "
+        "(all(n IN nodes(membership) WHERE coalesce(n.simulated,false)=false) "
+        "AND all(r IN relationships(membership) WHERE coalesce(r.simulated,false)=false)))\n"
         "WITH root, collect(DISTINCT v) AS vs\n"
         "WITH vs + [root] AS members\n"
         "UNWIND members AS a\n"
         "MATCH (per:Person)-[r1:HELD_ROLE]->(a)\n"
-        "MATCH (per)-[r2:HELD_ROLE]->(b:Entity) WHERE b IN members AND a.id < b.id AND (a.lei IS NULL OR b.lei IS NULL OR a.lei <> b.lei)\n"
+        "MATCH (per)-[r2:HELD_ROLE]->(b:Entity) WHERE b IN members AND a.id < b.id AND (a.lei IS NULL OR b.lei IS NULL OR a.lei <> b.lei) "
+        "AND ($include_simulated OR (coalesce(per.simulated,false)=false AND coalesce(r1.simulated,false)=false "
+        "AND coalesce(r2.simulated,false)=false AND coalesce(a.simulated,false)=false AND coalesce(b.simulated,false)=false))\n"
         "RETURN per.id AS person_id, per.name AS person, a.id AS a_id, a.name AS a, b.id AS b_id, b.name AS b, "
         "r1.title AS a_title, r1.current AS a_current, r2.title AS b_title, r2.current AS b_current, r1, r2, per, a AS a_node, b AS b_node\n"
         "LIMIT 200"
@@ -170,7 +223,9 @@ def _sole_source(p):
         f"MATCH (root:Entity {{id:$root}})\n"
         f"MATCH path=(v:Entity)-[:SUPPLIES*1..{d}]->(root)\n"
         "WITH v, path, relationships(path)[0] AS r\n"
-        "WHERE r.sole_source = true\n"
+        "WHERE r.sole_source = true AND ($include_simulated OR "
+        "(all(n IN nodes(path) WHERE coalesce(n.simulated,false)=false) "
+        "AND all(rel IN relationships(path) WHERE coalesce(rel.simulated,false)=false)))\n"
         "RETURN DISTINCT v.id AS id, v.name AS name, r.tier AS tier, r.psc AS psc, r.contract_ref AS contract_ref, r AS edge, path\n"
         "LIMIT 500"
     )
@@ -191,9 +246,14 @@ def _foreign_parent(p):
     cy = (
         f"MATCH (root:Entity {{id:$root}})\n"
         f"MATCH path=(v:Entity)-[:SUPPLIES*1..{d}]->(root)\n"
+        "WHERE $include_simulated OR (all(n IN nodes(path) WHERE coalesce(n.simulated,false)=false) "
+        "AND all(r IN relationships(path) WHERE coalesce(r.simulated,false)=false))\n"
         "MATCH (v)-[ps:PARENT_SEATED_IN]->(l:Location)\n"
-        "WHERE NOT l.code STARTS WITH $home\n"
+        "WHERE NOT l.code STARTS WITH $home "
+        f"AND {_live_relationship_policy('ps')} "
+        "AND ($include_simulated OR coalesce(l.simulated,false)=false)\n"
         "OPTIONAL MATCH up=(v)<-[:OWNS|ULTIMATE_PARENT_OF*1..4]-(parent:Entity)\n"
+        f"WHERE {_live_path_policy('up')}\n"
         "RETURN DISTINCT v.id AS id, v.name AS name, l.code AS parent_country, min(length(path)) AS tier, path, up, ps\n"
         "LIMIT 500"
     )
@@ -210,6 +270,8 @@ def _foreign_parent_style(rows, p):
 def _people_of(p):
     cy = (
         "MATCH (e:Entity {id:$id})<-[r:HELD_ROLE]-(per:Person)\n"
+        "WHERE $include_simulated OR (coalesce(e.simulated,false)=false "
+        "AND coalesce(r.simulated,false)=false AND coalesce(per.simulated,false)=false)\n"
         "RETURN per.id AS person_id, per.name AS person, r.title AS title, r.role_type AS role_type, r.from AS from, r.to AS to, r.current AS current, r, per, e\n"
         "ORDER BY r.current DESC, r.from DESC LIMIT 200"
     )
@@ -219,7 +281,9 @@ def _people_of(p):
 def _as_of_board(p):
     cy = (
         "MATCH (e:Entity {id:$id})<-[r:HELD_ROLE]-(per:Person)\n"
-        "WHERE (r.from IS NULL OR r.from <= $date) AND (r.to IS NULL OR r.to >= $date)\n"
+        "WHERE (r.from IS NULL OR r.from <= $date) AND (r.to IS NULL OR r.to >= $date) "
+        "AND ($include_simulated OR (coalesce(e.simulated,false)=false "
+        "AND coalesce(r.simulated,false)=false AND coalesce(per.simulated,false)=false))\n"
         "RETURN per.id AS person_id, per.name AS person, r.title AS title, r.role_type AS role_type, r.from AS from, r.to AS to, r, per, e\n"
         "ORDER BY r.role_type, per.name LIMIT 200"
     )

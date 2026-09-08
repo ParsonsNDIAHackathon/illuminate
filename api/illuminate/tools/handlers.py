@@ -86,6 +86,7 @@ class ToolContext:
     conversation_id: str | None = None
     user: str = "local"
     layers: dict | None = None
+    include_simulated: bool = False
     # Backward-compatible name used by MCP callers and older deterministic tests.
     # Program focus is the current name; either input resolves to the same context.
     root_id: str | None = None
@@ -103,7 +104,11 @@ class ToolContext:
     @classmethod
     def from_workspace(cls, **kw) -> "ToolContext":
         ws = load_workspace()
-        return cls(layers=kw.pop("layers", None) or ws.layers, **kw)
+        return cls(
+            layers=kw.pop("layers", None) or ws.layers,
+            include_simulated=kw.pop("include_simulated", ws.include_simulated),
+            **kw,
+        )
 
 
 @dataclass
@@ -138,11 +143,38 @@ def _compact_rows(rows: list[dict], limit: int = 60) -> list[dict]:
         c = {}
         for k, v in r.items():
             if isinstance(v, dict) and "props" in v and "id" in v:
-                c[k] = {"id": v["id"], "name": v.get("name"), "label": v.get("label") or v.get("type")}
+                c[k] = {
+                    "id": v["id"],
+                    "name": v.get("name"),
+                    "label": v.get("label") or v.get("type"),
+                    "simulated": bool((v.get("props") or {}).get("simulated")),
+                }
             elif isinstance(v, dict) and "nodes" in v and "edges" in v:
-                c[k] = {"path_nodes": [n["id"] for n in v["nodes"]], "path_edges": [e["id"] for e in v["edges"]]}
+                c[k] = {
+                    "path_nodes": [
+                        {
+                            "id": n["id"],
+                            "simulated": bool((n.get("props") or {}).get("simulated")),
+                        }
+                        for n in v["nodes"]
+                    ],
+                    "path_edges": [
+                        {
+                            "id": e["id"],
+                            "simulated": bool((e.get("props") or {}).get("simulated")),
+                        }
+                        for e in v["edges"]
+                    ],
+                }
             elif isinstance(v, list) and v and isinstance(v[0], dict) and "props" in v[0]:
-                c[k] = [{"id": x["id"], "name": x.get("name")} for x in v[:40]]
+                c[k] = [
+                    {
+                        "id": x["id"],
+                        "name": x.get("name"),
+                        "simulated": bool((x.get("props") or {}).get("simulated")),
+                    }
+                    for x in v[:40]
+                ]
             else:
                 c[k] = v
         out.append(c)
@@ -173,6 +205,45 @@ def _subgraph_from_rows(rows: list[dict]) -> dict:
     return {"nodes": list(nodes.values()), "edges": list(edges.values())}
 
 
+def filter_simulated_subgraph(
+    subgraph: dict | None, include_simulated: bool, root_id: str | None = None,
+) -> dict:
+    """Keep scenario nodes and relationships out of operational graph projections."""
+    if include_simulated or not subgraph:
+        return subgraph or {"nodes": [], "edges": []}
+    nodes = [
+        node for node in subgraph.get("nodes", [])
+        if not bool((node.get("props") or {}).get("simulated"))
+    ]
+    node_ids = {node.get("id") for node in nodes}
+    edges = [
+        edge for edge in subgraph.get("edges", [])
+        if edge.get("source") in node_ids
+        and edge.get("target") in node_ids
+        and not bool((edge.get("props") or {}).get("simulated"))
+    ]
+    if root_id and root_id not in node_ids:
+        return {"nodes": [], "edges": []}
+    if root_id:
+        adjacent: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+        for edge in edges:
+            adjacent[edge["source"]].add(edge["target"])
+            adjacent[edge["target"]].add(edge["source"])
+        reachable = {root_id}
+        frontier = [root_id]
+        while frontier:
+            current = frontier.pop()
+            for neighbour in adjacent[current] - reachable:
+                reachable.add(neighbour)
+                frontier.append(neighbour)
+        nodes = [node for node in nodes if node.get("id") in reachable]
+        edges = [
+            edge for edge in edges
+            if edge.get("source") in reachable and edge.get("target") in reachable
+        ]
+    return {"nodes": nodes, "edges": edges}
+
+
 # ---------------------------------------------------------------------------------
 async def search_entities(ctx: ToolContext, query: str, kind: str = "any", limit: int = 10) -> ToolResult:
     q = (query or "").strip()
@@ -183,16 +254,21 @@ async def search_entities(ctx: ToolContext, query: str, kind: str = "any", limit
         # identifier hits first — UEI/CAGE/LEI are stored upper-case without separators
         ident = re.sub(r"[^A-Za-z0-9]", "", q).upper()
         rows = await db.read(
-            "MATCH (e:Entity) WHERE e.uei = $u OR e.cage = $u OR e.lei = $u RETURN e.id AS id, e.name AS name, 'Entity' AS label, e.uei AS uei, e.cage AS cage, e.lei AS lei, 1.0 AS score LIMIT 5",
-            {"u": ident},
+            "MATCH (e:Entity) WHERE ($include_simulated OR coalesce(e.simulated,false)=false) "
+            "AND (e.uei = $u OR e.cage = $u OR e.lei = $u) "
+            "RETURN e.id AS id, e.name AS name, 'Entity' AS label, e.uei AS uei, "
+            "e.cage AS cage, e.lei AS lei, coalesce(e.simulated,false) AS simulated, "
+            "1.0 AS score LIMIT 5",
+            {"u": ident, "include_simulated": ctx.include_simulated},
         )
         if not rows:
             try:
                 rows = await db.read(
                     "CALL db.index.fulltext.queryNodes('entity_search', $q) YIELD node, score "
-                    "RETURN node.id AS id, node.name AS name, head(labels(node)) AS label, node.uei AS uei, node.cage AS cage, node.lei AS lei, score "
+                    "WHERE $include_simulated OR coalesce(node.simulated,false)=false "
+                    "RETURN node.id AS id, node.name AS name, head(labels(node)) AS label, node.uei AS uei, node.cage AS cage, node.lei AS lei, coalesce(node.simulated,false) AS simulated, score "
                     "ORDER BY score DESC LIMIT $limit",
-                    {"q": lucene_query(q), "limit": limit},
+                    {"q": lucene_query(q), "limit": limit, "include_simulated": ctx.include_simulated},
                 )
             except Exception:
                 rows = []
@@ -200,9 +276,10 @@ async def search_entities(ctx: ToolContext, query: str, kind: str = "any", limit
                 # substring fallback (fulltext index missing or nothing fuzzy-close): every word somewhere in name or aliases
                 rows = await db.read(
                     "MATCH (n) WHERE (n:Entity OR n:Person) "
+                    "AND ($include_simulated OR coalesce(n.simulated,false)=false) "
                     "AND all(t IN $toks WHERE toLower(coalesce(n.name, '') + ' ' + coalesce(n.aliases_text, '')) CONTAINS t) "
-                    "RETURN n.id AS id, n.name AS name, head(labels(n)) AS label, n.uei AS uei, n.cage AS cage, n.lei AS lei, 0.5 AS score LIMIT $limit",
-                    {"toks": toks, "limit": limit},
+                    "RETURN n.id AS id, n.name AS name, head(labels(n)) AS label, n.uei AS uei, n.cage AS cage, n.lei AS lei, coalesce(n.simulated,false) AS simulated, 0.5 AS score LIMIT $limit",
+                    {"toks": toks, "limit": limit, "include_simulated": ctx.include_simulated},
                 )
     if kind == "entity":
         rows = [r for r in rows if r["label"] == "Entity"]
@@ -222,10 +299,20 @@ async def expand_subgraph(ctx: ToolContext, entity_id: str, depth: int = 2, laye
     sub = subgraph_from_graph(graph)
     if rows and isinstance(rows[0].get("nodes"), list):
         sub = merge_subgraphs(sub, {"nodes": rows[0]["nodes"], "edges": rows[0].get("relationships", [])})
+    sub = filter_simulated_subgraph(sub, ctx.include_simulated, entity_id)
     return ToolResult(
         ok=True,
-        data={"entity_id": entity_id, "nodes": [{"id": n["id"], "name": n["name"], "label": n["label"]} for n in sub["nodes"][:150]],
-              "edges": [{"id": e["id"], "type": e["type"], "source": e["source"], "target": e["target"]} for e in sub["edges"][:200]]},
+        data={"entity_id": entity_id, "nodes": [
+                  {"id": n["id"], "name": n["name"], "label": n["label"],
+                   "simulated": bool((n.get("props") or {}).get("simulated"))}
+                  for n in sub["nodes"][:150]
+              ],
+              "edges": [
+                  {"id": e["id"], "type": e["type"], "source": e["source"],
+                   "target": e["target"],
+                   "simulated": bool((e.get("props") or {}).get("simulated"))}
+                  for e in sub["edges"][:200]
+              ]},
         cypher=v.statement, params=bound, subgraph=sub,
     )
 
@@ -247,12 +334,18 @@ async def run_template(ctx: ToolContext, name: str, params: dict | None = None, 
     p.setdefault("layers", ctx.layers or {})
     try:
         cy, bound = t.build(p)
+        bound["include_simulated"] = ctx.include_simulated
         v = validate(cy, params=bound)
     except (CypherRejected, KeyError) as e:
         return ToolResult(ok=False, data={"error": str(e)})
     records, graph, _ = await db.read_graph(v.statement, bound)
     rows = rows_clean(records)
     sub = merge_subgraphs(subgraph_from_graph(graph), _subgraph_from_rows(rows))
+    sub = filter_simulated_subgraph(
+        sub, ctx.include_simulated, p.get("entity_id") if name == "neighbourhood" else None
+    )
+    if name == "neighbourhood" and not ctx.include_simulated:
+        rows = [{"nodes": sub["nodes"], "relationships": sub["edges"]}]
     ops: list[dict] = []
     if apply_styles and t.style:
         ops = [o.model_dump(exclude_none=True) for o in validate_ops(t.style(rows, p))]
@@ -270,12 +363,27 @@ async def run_cypher(ctx: ToolContext, statement: str, params: dict | None = Non
     if v.classification == "SCHEMA":
         return ToolResult(ok=False, data={"error": "schema changes are not available through tools"}, cypher=v.statement)
     if v.is_read:
+        if not ctx.include_simulated:
+            return ToolResult(
+                ok=False,
+                data={
+                    "classification": "READ",
+                    "error": (
+                        "Custom Cypher is unavailable while simulation data is disabled "
+                        "because arbitrary scalar aliases cannot be safely filtered. "
+                        "Use a named query template or enable simulation data in Settings."
+                    ),
+                },
+                cypher=v.statement,
+                params=params,
+            )
         try:
             records, graph, _ = await db.read_graph(v.statement, params)
         except Exception as e:
             return ToolResult(ok=False, data={"error": f"query failed: {e}"}, cypher=v.statement, params=params)
         rows = rows_clean(records)
         sub = merge_subgraphs(subgraph_from_graph(graph), _subgraph_from_rows(rows))
+        sub = filter_simulated_subgraph(sub, ctx.include_simulated)
         return ToolResult(ok=True, data={"classification": "READ", "row_count": len(rows), "rows": _compact_rows(rows)},
                           cypher=v.statement, params=params, subgraph=sub, notes=v.notes)
     decision = await gate.request(v, params, source=ctx.source, conversation_id=ctx.conversation_id, tool="run_cypher", rationale=rationale)
@@ -298,7 +406,9 @@ async def set_styles(ctx: ToolContext, ops: list[dict]) -> ToolResult:
 
 
 async def get_entity_report(ctx: ToolContext, entity_id: str) -> ToolResult:
-    rep = await build_report(entity_id, ctx.focus_id)
+    rep = await build_report(
+        entity_id, ctx.focus_id, include_simulated=ctx.include_simulated
+    )
     if not rep:
         return ToolResult(ok=False, data={"error": f"no entity {entity_id}"})
     compact = {

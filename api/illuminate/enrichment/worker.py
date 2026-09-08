@@ -84,7 +84,8 @@ class Worker:
 
     async def enqueue(self, entity_id: str, connectors: list[str] | None = None, user: str = "local",
                       requested_by: str = "ui", retrieval_mode: RetrievalMode = "operational_live",
-                       resume_job_id: str | None = None, parent_job_id: str | None = None) -> Job:
+                       resume_job_id: str | None = None, parent_job_id: str | None = None,
+                       force: bool = False) -> Job:
         rows = await db.read("MATCH (e:Entity {id:$id}) RETURN e{.*} AS e", {"id": entity_id})
         entity = rows[0]["e"] if rows else {}
         previous = self.jobs.get(resume_job_id) if resume_job_id else None
@@ -99,6 +100,20 @@ class Worker:
         requested = connectors if connectors is not None else previous_connectors
         names = select_connectors(entity, REGISTRY, requested=requested,
                                   previous_results=previous_results)
+        if not force and not resume_job_id and not parent_job_id:
+            cutoff = time.time() - max(0.0, settings.enrichment_refresh_dedupe_window_s)
+            duplicate = next((
+                existing for existing in sorted(
+                    self.jobs.values(), key=lambda item: item.created_at, reverse=True
+                )
+                if existing.entity_id == entity_id
+                and existing.connectors == names
+                and existing.retrieval_mode == retrieval_mode
+                and existing.created_at >= cutoff
+                and existing.status in {"queued", "running", "succeeded", "empty"}
+            ), None)
+            if duplicate is not None:
+                return duplicate
         selection = {
             c.name: {"status": "not_applicable", "reason": f"source does not speak about a {entity.get('kind') or 'organization'}"}
             for c in REGISTRY if c.name != "openai" and not c.applies_to(entity)

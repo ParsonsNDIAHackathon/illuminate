@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 COMPOSE=${COMPOSE:-docker compose}
-args=(-m illuminate.seed.seed --reset --scenario "$@")
+args=(-m illuminate.seed.seed --reset "$@")
 
 if [ -n "$($COMPOSE ps -q --status running api 2>/dev/null)" ]; then
   exec $COMPOSE exec -T api python "${args[@]}"

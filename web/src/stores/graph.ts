@@ -2,7 +2,8 @@ import { defineStore } from 'pinia'
 import { api, qs } from '../api/client.ts'
 import type { StyleOp, LegendItem } from '../styles/styleOps.ts'
 import { deriveLegend } from '../styles/styleOps.ts'
-import { restrictDeltaToFocus } from './graphDelta.ts'
+import { filterSimulatedDelta, restrictDeltaToFocus } from './graphDelta.ts'
+import { useWorkspace } from './workspace.ts'
 
 export interface GNode { id: string; label: string; labels?: string[]; layer?: string | null; name: string; props: Record<string, any> }
 export interface GEdge { id: string; source: string; target: string; type: string; props: Record<string, any> }
@@ -71,6 +72,15 @@ export const useGraph = defineStore('graph', {
       this.replacementRequest = 0
       this.loading = false
     },
+    resetForSimulationPolicyChange() {
+      this.invalidatePendingRequests()
+      this.nodes = new Map(); this.edges = new Map(); this.fresh = []
+      this.selectedId = null; this.selectedEdgeId = null
+      this.lastCypher = null; this.truncated = false; this.highlightIds = []
+      this.clearFocus()
+      this.clearStyleOps()
+      this.version++
+    },
     prepareScope(entityId: string | null) {
       if (this.focusId === entityId) return
       this.nodes = new Map(); this.edges = new Map(); this.fresh = []
@@ -81,6 +91,8 @@ export const useGraph = defineStore('graph', {
     },
     applyDelta(sub: { nodes: GNode[]; edges: GEdge[] } | null | undefined, focus?: string[]) {
       if (!sub?.nodes?.length) return
+      sub = filterSimulatedDelta(sub, useWorkspace().ws.include_simulated)
+      if (!sub.nodes.length) return
       this.notePrograms(sub.nodes)
       if (this.focusId) {
         sub = restrictDeltaToFocus(sub, { nodes: this.nodeList, edges: this.edgeList }, this.focusId)

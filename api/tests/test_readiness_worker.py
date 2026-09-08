@@ -99,7 +99,23 @@ async def test_explicit_empty_connector_list_stays_empty(monkeypatch):
     assert job.to_dict()["terminal"] is True
     assert job.to_dict()["status_version"] == 2
 
+async def test_enqueue_deduplicates_only_inside_bounded_refresh_window(monkeypatch):
+    from illuminate.config import settings
 
+    monkeypatch.setattr("illuminate.enrichment.worker.db.read", _entity)
+    monkeypatch.setattr(settings, "enrichment_refresh_dedupe_window_s", 30)
+    w = Worker()
+    monkeypatch.setattr(w, "start", lambda: None)
+
+    first = await w.enqueue("e", connectors=[])
+    duplicate = await w.enqueue("e", connectors=[])
+    assert duplicate is first
+    assert w.queue.qsize() == 1
+
+    first.created_at -= 31
+    replacement = await w.enqueue("e", connectors=[])
+    assert replacement.id != first.id
+    assert w.queue.qsize() == 2
 class FactsConnector:
     name = "facts"
     trust = "authoritative"
@@ -670,3 +686,16 @@ async def test_seed_verification_failure_is_explicit_even_with_populated_graph(m
     assert payload["required"]["seed"]["status"] == "incomplete"
     assert payload["required"]["seed"]["coverage"]["status"] == "unavailable"
     assert payload["required"]["seed"]["action"]
+
+async def test_failed_refresh_and_explicit_manual_retry_are_not_deduplicated(monkeypatch):
+    monkeypatch.setattr("illuminate.enrichment.worker.db.read", _entity)
+    w = Worker()
+    monkeypatch.setattr(w, "start", lambda: None)
+
+    failed = await w.enqueue("e", connectors=[])
+    failed.status = "failed"
+    automatic_retry = await w.enqueue("e", connectors=[])
+    forced_retry = await w.enqueue("e", connectors=[], force=True)
+
+    assert automatic_retry is not failed
+    assert forced_retry is not automatic_retry

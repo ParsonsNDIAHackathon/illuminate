@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     connector_retries: int = 1
     connector_processing_timeout_s: float = 60.0
     enrichment_job_timeout_s: float = 180.0
+    enrichment_refresh_dedupe_window_s: float = 60.0
     supplier_enrichment_fanout: int = 20
     summary_timeout_s: float = 30.0
     readiness_timeout_s: float = 3.0
@@ -113,6 +114,7 @@ class WorkspaceSettings(BaseModel):
     model_strong: str | None = None
     model_fast: str | None = None
     openai_base_url: str | None = None
+    include_simulated: bool = False
     layers: dict[str, bool] = dict(LAYER_DEFAULTS)
 
 

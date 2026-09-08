@@ -48,9 +48,11 @@ import { api, getVendorRiskProfile, qs, type EntityListResponse, type EntitySumm
 import VendorRiskColumn from '../components/VendorRiskColumn.vue'
 import { TRUSTWORTHY_RISKY_PRESET } from '../data/vendorComparisonPreset'
 import { vendorCandidates } from '../lib/vendorIdentity'
+import { useWorkspace } from '../stores/workspace'
 
 const route = useRoute()
 const router = useRouter()
+const workspace = useWorkspace()
 const profiles = ref<[VendorRiskProfile, VendorRiskProfile] | null>(null)
 const leftId = ref(String(route.query.left || ''))
 const rightId = ref(String(route.query.right || ''))
@@ -120,9 +122,10 @@ async function applyRoute() {
   try {
     await ensureCandidates(selectedRoot)
     if (version !== requestVersion) return
+    const includeSimulated = Boolean(workspace.ws.include_simulated)
     const liveProfiles = await Promise.all([
-      getVendorRiskProfile(selectedLeft, undefined, selectedRoot),
-      getVendorRiskProfile(selectedRight, undefined, selectedRoot),
+      getVendorRiskProfile(selectedLeft, undefined, selectedRoot, includeSimulated),
+      getVendorRiskProfile(selectedRight, undefined, selectedRoot, includeSimulated),
     ]) as [VendorRiskProfile, VendorRiskProfile]
     if (version !== requestVersion || rootId.value !== selectedRoot || leftId.value !== selectedLeft || rightId.value !== selectedRight) return
     profiles.value = liveProfiles.map(profile => {
@@ -142,18 +145,20 @@ async function applyRoute() {
   }
 }
 function ensureCandidates(root: string) {
-  if (candidateRoot === root && candidatePromise) return candidatePromise
-  if (candidateRoot === root) return Promise.resolve()
+  const scope = `${root}\u0000${Boolean(workspace.ws.include_simulated)}`
+  if (candidateRoot === scope && candidatePromise) return candidatePromise
+  if (candidateRoot === scope) return Promise.resolve()
   const version = ++candidateVersion
-  candidateRoot = root
+  candidateRoot = scope
   candidatesLoading.value = true
   entities.value = []
   candidatePromise = (async () => {
     try {
-      const result = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: root, limit: 1000 })}`)
+      const includeSimulated = Boolean(workspace.ws.include_simulated)
+      const result = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: root, limit: 1000, include_simulated: includeSimulated })}`)
       const items = [...result.items]
       while (items.length < result.total) {
-        const page = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: root, limit: 1000, offset: items.length })}`)
+        const page = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: root, limit: 1000, offset: items.length, include_simulated: includeSimulated })}`)
         if (!page.items.length) break
         items.push(...page.items)
       }
@@ -174,7 +179,11 @@ function ensureCandidates(root: string) {
 }
 watch(leftId, value => { if (value === rightId.value) rightId.value = '' })
 watch(() => route.fullPath, applyRoute)
-onMounted(applyRoute)
+watch(() => workspace.ws.include_simulated, applyRoute)
+onMounted(async () => {
+  if (!workspace.loaded) await workspace.load()
+  await applyRoute()
+})
 </script>
 
 <style scoped>

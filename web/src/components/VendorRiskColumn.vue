@@ -7,6 +7,7 @@
             <h2 class="text-h6">{{ profile.name }}</h2>
             <v-chip v-if="profile.simulated" size="x-small" color="warning" variant="flat">SIMULATED</v-chip>
             <v-chip size="x-small" variant="tonal">{{ profile.sourceMode === 'frozen' ? 'FROZEN PRESET' : 'LIVE REPORT' }}</v-chip>
+            <v-chip v-if="profile.refresh?.status === 'queued' || profile.refresh?.status === 'deduplicated'" size="x-small" variant="tonal" color="info">REFRESH {{ String(profile.refresh?.job_status || profile.refresh?.status).toUpperCase() }}</v-chip>
           </div>
           <div class="text-caption">Framework {{ profile.contract_version }}</div>
            <div class="identity-line">{{ identityLine(profile) }}</div>

@@ -7,11 +7,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__, db, fetch_cache
-from .config import settings
 from .connectors import REGISTRY
 from .connectors.registry import capability_kind
 
 _cache: dict[str, tuple[float, dict]] = {}
+from .config import load_workspace, settings
 
 
 def invalidate_cache() -> None:
@@ -67,11 +67,13 @@ async def build_readiness(user: str = "local", *, refresh: bool = False) -> dict
     freshness = {"status": "empty", "latest_retrieved_at": None, "age_hours": None}
     operational_live_ready = False
     operational_coverage = {"supplier_paths": 0, "live_supplier_paths": 0, "latest_retrieved_at": None}
+    include_simulated = load_workspace().include_simulated
     if database.get("reachable"):
         try:
             rows = await asyncio.wait_for(db.read(
                 "CALL () { "
-                " MATCH (n) WHERE n.source IS NOT NULL AND NOT n:SourceRecord "
+                 " MATCH (n) WHERE n.source IS NOT NULL AND NOT n:SourceRecord "
+                 " AND ($include_simulated OR coalesce(n.simulated,false)=false) "
                 " AND coalesce(n.retrieval_mode, '') = 'operational_live' "
                 " AND coalesce(n.latest_retrieval_status, n.retrieval_status, n.source_status, '') <> 'error' "
                 " RETURN n.source AS source, count(n) AS nodes, 0 AS relationships, "
@@ -79,7 +81,9 @@ async def build_readiness(user: str = "local", *, refresh: bool = False) -> dict
                 " sum(CASE WHEN coalesce(n.latest_retrieval_status, n.retrieval_status, n.source_status, '') IN ['cached', 'stale_fallback'] THEN 1 ELSE 0 END) AS cached_records, "
                 " sum(CASE WHEN coalesce(n.latest_retrieval_status, n.retrieval_status, n.source_status, '') NOT IN ['live', 'retrieved', 'cached', 'stale_fallback'] THEN 1 ELSE 0 END) AS unknown_records "
                 " UNION ALL "
-                " MATCH ()-[r]->() WHERE r.source IS NOT NULL "
+                 " MATCH (a)-[r]->(b) WHERE r.source IS NOT NULL "
+                 " AND ($include_simulated OR (coalesce(a.simulated,false)=false "
+                 " AND coalesce(r.simulated,false)=false AND coalesce(b.simulated,false)=false)) "
                 " AND coalesce(r.retrieval_mode, '') = 'operational_live' "
                 " AND coalesce(r.latest_retrieval_status, r.retrieval_status, r.source_status, '') <> 'error' "
                 " RETURN r.source AS source, 0 AS nodes, count(r) AS relationships, "
@@ -88,7 +92,9 @@ async def build_readiness(user: str = "local", *, refresh: bool = False) -> dict
                 " sum(CASE WHEN coalesce(r.latest_retrieval_status, r.retrieval_status, r.source_status, '') NOT IN ['live', 'retrieved', 'cached', 'stale_fallback'] THEN 1 ELSE 0 END) AS unknown_records "
                 "} RETURN source, sum(nodes) AS nodes, sum(relationships) AS relationships, "
                 "max(live_latest) AS latest, sum(cached_records) AS cached_records, sum(unknown_records) AS unknown_records "
-                "ORDER BY nodes + relationships DESC", timeout=settings.readiness_timeout_s),
+                 "ORDER BY nodes + relationships DESC",
+                 {"include_simulated": include_simulated},
+                 timeout=settings.readiness_timeout_s),
                 timeout=settings.readiness_timeout_s + .25)
             procurement_rows = await asyncio.wait_for(
                 db.read(
@@ -219,6 +225,7 @@ async def build_readiness(user: str = "local", *, refresh: bool = False) -> dict
               "operational_live_ready": operational_live_ready,
               "operational_refresh_required": bool(startup_ready and not operational_live_ready),
               "operational_coverage": operational_coverage,
+               "simulation_data_enabled": include_simulated,
               "graph_counts": counts, "source_coverage": sources, "freshness": freshness,
               "optional_services": optional,
               "message": "Database is ready; live source refresh may continue in the background." if startup_ready

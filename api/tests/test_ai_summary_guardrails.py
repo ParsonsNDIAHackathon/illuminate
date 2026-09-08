@@ -184,7 +184,7 @@ async def test_report_transport_excludes_conflicting_legacy_risk(monkeypatch):
     )
     report["summary"] = deterministic_summary(report)
 
-    async def fake_build_report(entity_id, root_id=None):
+    async def fake_build_report(entity_id, root_id=None, **_kwargs):
         return report
 
     monkeypatch.setattr(handlers, "build_report", fake_build_report)

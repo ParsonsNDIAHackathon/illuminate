@@ -107,7 +107,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, ref, watch } from 'vue'
+import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, qs, type EntityListResponse, type EntityReportContract, type EntityRiskContract, type EntitySummary } from '../api/client'
 import { compareTrustworthy } from '../lib/portfolioTriage'
@@ -115,17 +115,22 @@ import { identityLine } from '../lib/vendorIdentity'
 import { missionRootFromQuery } from '../navigationState'
 import { useGraph } from '../stores/graph'
 import { ScopedRowRequests } from '../lib/latestRequest'
+import { useWorkspace } from '../stores/workspace'
 
 type Row = { entity: EntitySummary; contract: EntityRiskContract | null; pending?: boolean; retrying?: boolean; error?: string }
 const REPORT_BATCH_SIZE = 8
+let portfolioReady = false
 const route = useRoute()
 const graph = useGraph()
+const workspace = useWorkspace()
 const rows = ref<Row[]>([]); const portfolioTotal = ref(0); const loading = ref(true); const reportsLoading = ref(false); const fatalError = ref('')
 const advancedOpen = ref(false); const retrying = ref(false)
 const portfolioRequests = new ScopedRowRequests<string>()
 const search = ref(''); const tier = ref<string | number | null>(null); const category = ref<string | null>(null); const severity = ref<string | null>(null)
-const simulation = ref(String(route.query.simulation || 'all')); const sort = ref(String(route.query.sort || 'risk')); const confidenceFloor = ref(Number(route.query.confidence || 0)); const completenessFloor = ref(Number(route.query.completeness || 0)); const freshness = ref(String(route.query.freshness || 'all'))
-const simulationOptions = [{ title: 'All data', value: 'all' }, { title: 'Observed only', value: 'observed' }, { title: 'Simulated only', value: 'simulated' }]
+const simulation = ref(String(route.query.simulation || 'observed')); const sort = ref(String(route.query.sort || 'risk')); const confidenceFloor = ref(Number(route.query.confidence || 0)); const completenessFloor = ref(Number(route.query.completeness || 0)); const freshness = ref(String(route.query.freshness || 'all'))
+const simulationOptions = computed(() => workspace.ws.include_simulated
+  ? [{ title: 'Observed only', value: 'observed' }, { title: 'All data', value: 'all' }, { title: 'Simulated only', value: 'simulated' }]
+  : [{ title: 'Observed only', value: 'observed' }])
 const sortOptions = [{ title: 'Highest risk', value: 'risk' }, { title: 'Strongest evidence', value: 'trustworthy' }, { title: 'Lowest confidence', value: 'confidence' }, { title: 'Least complete', value: 'completeness' }, { title: 'Stalest evidence', value: 'freshness' }, { title: 'Vendor name', value: 'name' }]
 const freshnessOptions = [{ title: 'Any freshness', value: 'all' }, { title: 'Current evidence', value: 'current' }, { title: 'Diligence required', value: 'diligence_required' }, { title: 'Contains stale evidence', value: 'stale' }, { title: 'Contains missing evidence', value: 'missing' }]
 const severityOptions = [{ title: 'Critical', value: 'critical' }, { title: 'High', value: 'high' }, { title: 'Moderate', value: 'moderate' }, { title: 'Medium category', value: 'medium' }, { title: 'Low', value: 'low' }, { title: 'Clear category', value: 'clear' }, { title: 'Not assessed', value: 'not_assessed' }]
@@ -150,13 +155,13 @@ const duplicateNames = computed(() => {
   }
   return counts
 })
-const advancedCount = computed(() => Number(Boolean(severity.value)) + Number(simulation.value !== 'all') + Number(freshness.value !== 'all') + Number(confidenceFloor.value > 0) + Number(completenessFloor.value > 0))
+const advancedCount = computed(() => Number(Boolean(severity.value)) + Number(simulation.value !== 'observed') + Number(freshness.value !== 'all') + Number(confidenceFloor.value > 0) + Number(completenessFloor.value > 0))
 const activeConstraints = computed(() => [
   search.value && { key: 'search', label: `Search: ${search.value}`, clear: () => { search.value = '' } },
   tier.value != null && { key: 'tier', label: `Tier: ${tier.value}`, clear: () => { tier.value = null } },
   category.value && { key: 'category', label: `Category: ${category.value}`, clear: () => { category.value = null } },
   severity.value && { key: 'severity', label: `Severity: ${severity.value}`, clear: () => { severity.value = null } },
-  simulation.value !== 'all' && { key: 'simulation', label: `Data: ${simulationOptions.find(x => x.value === simulation.value)?.title}`, clear: () => { simulation.value = 'all' } },
+  simulation.value !== 'observed' && { key: 'simulation', label: `Data: ${simulationOptions.value.find(x => x.value === simulation.value)?.title}`, clear: () => { simulation.value = 'observed' } },
   freshness.value !== 'all' && { key: 'freshness', label: `Freshness: ${freshnessOptions.find(x => x.value === freshness.value)?.title}`, clear: () => { freshness.value = 'all' } },
   confidenceFloor.value > 0 && { key: 'confidence', label: `Confidence ≥ ${confidenceFloor.value}%`, clear: () => { confidenceFloor.value = 0 } },
   completenessFloor.value > 0 && { key: 'completeness', label: `Complete ≥ ${completenessFloor.value}%`, clear: () => { completenessFloor.value = 0 } },
@@ -172,11 +177,12 @@ async function load() {
   const generation = portfolioRequests.beginScope()
   const rootId = missionRoot.value
   loading.value = true; reportsLoading.value = false; retrying.value = false; fatalError.value = ''; rows.value = []; portfolioTotal.value = 0
+  const includeSimulated = Boolean(workspace.ws.include_simulated && simulation.value !== 'observed')
   try {
-    const list = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: rootId, limit: 1000 })}`)
+    const list = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: rootId, limit: 1000, include_simulated: includeSimulated })}`)
     if (portfolioRequests.currentScope() !== generation) return
     while (list.items.length < list.total) {
-      const page = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: rootId, limit: 1000, offset: list.items.length })}`)
+      const page = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: rootId, limit: 1000, offset: list.items.length, include_simulated: includeSimulated })}`)
       if (portfolioRequests.currentScope() !== generation) return
       if (!page.items.length) throw new Error(`The organization index stopped after ${list.items.length} of ${list.total} vendors.`)
       list.items.push(...page.items)
@@ -186,7 +192,10 @@ async function load() {
     rows.value = list.items.map(entity => ({ entity, contract: null, pending: true }))
     loading.value = false; reportsLoading.value = Boolean(rows.value.length)
     for (let offset = 0; offset < rows.value.length; offset += REPORT_BATCH_SIZE) {
-      await Promise.all(rows.value.slice(offset, offset + REPORT_BATCH_SIZE).map(row => loadReport(row, generation, rootId)))
+      await Promise.all(
+        rows.value.slice(offset, offset + REPORT_BATCH_SIZE)
+          .map(row => loadReport(row, includeSimulated, generation, rootId))
+      )
       if (portfolioRequests.currentScope() !== generation) return
     }
   } catch (e) {
@@ -197,13 +206,18 @@ async function load() {
     }
   }
 }
-async function loadReport(row: Row, generation = portfolioRequests.currentScope(), rootId = missionRoot.value) {
+async function loadReport(
+  row: Row,
+  includeSimulated = Boolean(workspace.ws.include_simulated && simulation.value !== 'observed'),
+  generation = portfolioRequests.currentScope(),
+  rootId = missionRoot.value,
+) {
   const request = portfolioRequests.beginRow(row.entity.id, generation)
   row.pending = true; row.retrying = Boolean(row.error); row.error = undefined
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 15000)
   try {
-    const contract = contractOf(await api.get<EntityReportContract>(`/api/entities/${encodeURIComponent(row.entity.id)}/report?${qs({ root_id: rootId })}`, { signal: controller.signal }))
+    const contract = contractOf(await api.get<EntityReportContract>(`/api/entities/${encodeURIComponent(row.entity.id)}/report?${qs({ root_id: rootId, include_simulated: includeSimulated, refresh: false })}`, { signal: controller.signal }))
     if (!portfolioRequests.isCurrent(row.entity.id, request)) return
     row.contract = contract
     if (!row.contract) row.error = 'The report did not include the supported uc11.vendor-risk.v1 contract.'
@@ -219,12 +233,13 @@ async function loadReport(row: Row, generation = portfolioRequests.currentScope(
 async function retryFailed() {
   const generation = portfolioRequests.currentScope()
   const rootId = missionRoot.value
+  const includeSimulated = Boolean(workspace.ws.include_simulated && simulation.value !== 'observed')
   retrying.value = true
   try {
     const failed = rows.value.filter(row => !row.contract && !row.pending)
     for (let offset = 0; offset < failed.length; offset += REPORT_BATCH_SIZE) {
       if (portfolioRequests.currentScope() !== generation) return
-      await Promise.all(failed.slice(offset, offset + REPORT_BATCH_SIZE).map(row => loadReport(row, generation, rootId)))
+      await Promise.all(failed.slice(offset, offset + REPORT_BATCH_SIZE).map(row => loadReport(row, includeSimulated, generation, rootId)))
     }
   } finally { if (portfolioRequests.currentScope() === generation) retrying.value = false }
 }
@@ -268,8 +283,19 @@ const filtered = computed(() => rows.value.filter(r => {
     && meetsFloor(r.contract?.confidence, confidenceFloor.value) && meetsFloor(r.contract?.completeness, completenessFloor.value)
     && matchesFreshness(r)
 }).sort((a, b) => sort.value === 'name' ? a.entity.name.localeCompare(b.entity.name) : sort.value === 'trustworthy' ? compareTrustworthy(a.contract || {}, b.contract || {}) : sort.value === 'confidence' ? (percent(a.contract?.confidence) ?? -1) - (percent(b.contract?.confidence) ?? -1) : sort.value === 'completeness' ? (percent(a.contract?.completeness) ?? -1) - (percent(b.contract?.completeness) ?? -1) : sort.value === 'freshness' ? Number(hasStaleEvidence(b)) - Number(hasStaleEvidence(a)) || Number(hasMissingEvidence(b)) - Number(hasMissingEvidence(a)) : (b.contract?.score ?? -1) - (a.contract?.score ?? -1)))
-function resetFilters() { search.value = ''; tier.value = null; category.value = null; severity.value = null; simulation.value = 'all'; confidenceFloor.value = 0; completenessFloor.value = 0; freshness.value = 'all' }
-watch(missionRoot, load, { immediate: true })
+function resetFilters() { search.value = ''; tier.value = null; category.value = null; severity.value = null; simulation.value = 'observed'; confidenceFloor.value = 0; completenessFloor.value = 0; freshness.value = 'all' }
+watch(simulation, () => {
+  if (portfolioReady) void load()
+})
+watch(missionRoot, () => {
+  if (portfolioReady) void load()
+})
+onMounted(async () => {
+  if (!workspace.loaded) await workspace.load()
+  if (!workspace.ws.include_simulated || !['observed', 'all', 'simulated'].includes(simulation.value)) simulation.value = 'observed'
+  portfolioReady = true
+  await load()
+})
 </script>
 
 <style scoped>

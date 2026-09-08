@@ -17,6 +17,7 @@
 - [Nested Docker verification](nested-docker-verification.md) — keep Replit daemon workarounds temporary; verify the committed portable Compose path separately.
 - [Seed replay identity](seed-replay-identity.md) — invalidate readiness before rebuilds and keep fixture-backed claim identities stable across destructive replay.
 - [Credential diagnostic truth](credential-diagnostic-truth.md) — accept credentials only from complete provider success envelopes; bounded unknown responses fail closed.
+- [Live projection policy](live-projection-policy.md) — apply data policy to snapshots and live deltas, then recompute derived fields from visible records.
 - [Inventory contract boundaries](inventory-contract-boundaries.md) — reconcile declarations bidirectionally and keep generated evidence separate from curated review conclusions.
 - [Judge-journey gates](judge-journey-gates.md) — rehearsal checks must assert conditional loaded outcomes through the browser origin, not static page chrome.
 - [Navigation context authority](navigation-context-authority.md) — mission scope and comparison mode are URL-owned so direct links and browser history reproduce the same decision state.

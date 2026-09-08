@@ -73,10 +73,16 @@ def test_epss_adapter_is_contextual_bounded_and_preserves_identifier(monkeypatch
     facts = asyncio.run(connector.enrich(entity, "local"))
     assert len(calls) == 1
     assert calls[0][2] == {"cve": "CVE-2021-44228"}
-    assert len(facts) == 1
-    assert facts[0].predicate == "vulnerability_screen"
-    assert facts[0].props["cve"] == "CVE-2021-44228"
-    assert facts[0].artifact.props["source_identifier"] == "CVE-2021-44228:2026-09-08"
+    assert [fact.predicate for fact in facts] == ["vulnerability_screen", "cyber_screen"]
+    assert all(fact.props["cve"] == "CVE-2021-44228" for fact in facts)
+    assert all(
+        fact.artifact.props["source_identifier"] == "CVE-2021-44228:2026-09-08"
+        for fact in facts
+    )
+    cyber = facts[1]
+    assert cyber.value == "high"
+    assert cyber.props["epss_probability"] == 0.975
+    assert cyber.confidence == 1.0
 
 
 def test_osm_and_far_do_not_read_without_explicit_context(monkeypatch):
@@ -110,4 +116,4 @@ def test_far_adapter_asserts_only_when_retrieved_document_contains_clause(monkey
 def test_contextual_predicates_are_committing_observations():
     from illuminate.enrichment.claims import OBSERVATION_PREDICATES
 
-    assert {"vulnerability_screen", "far_clause_screen", "location_context_screen"} <= OBSERVATION_PREDICATES
+    assert {"vulnerability_screen", "cyber_screen", "far_clause_screen", "location_context_screen"} <= OBSERVATION_PREDICATES

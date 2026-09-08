@@ -9,6 +9,7 @@ export interface DeltaEdge {
   source: string
   target: string
   type: string
+  props?: Record<string, any>
 }
 
 export interface GraphDelta<N extends DeltaNode = DeltaNode, E extends DeltaEdge = DeltaEdge> {
@@ -18,6 +19,21 @@ export interface GraphDelta<N extends DeltaNode = DeltaNode, E extends DeltaEdge
 
 function isProgram(node: DeltaNode) {
   return node.label === 'Entity' && node.props?.kind === 'program'
+}
+
+export function filterSimulatedDelta<N extends DeltaNode, E extends DeltaEdge>(
+  delta: GraphDelta<N, E>,
+  includeSimulated: boolean,
+): GraphDelta<N, E> {
+  if (includeSimulated) return delta
+  const nodes = delta.nodes.filter(node => !node.props?.simulated)
+  const nodeIds = new Set(nodes.map(node => node.id))
+  return {
+    nodes,
+    edges: (delta.edges || []).filter(edge =>
+      nodeIds.has(edge.source) && nodeIds.has(edge.target) && !edge.props?.simulated
+    ),
+  }
 }
 
 const CONTROL_UPSTREAM = new Set(['OWNS', 'ULTIMATE_PARENT_OF', 'BENEFICIAL_OWNER_OF'])

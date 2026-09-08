@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime, timezone
+from copy import deepcopy
 from typing import Any
 from urllib.parse import urlparse
 
@@ -47,7 +48,9 @@ RISK_DISPOSITIONS = {
 ULTIMATE_PARENT_DEPTH = 6
 
 
-async def ultimate_parents(entity_id: str) -> list[dict]:
+async def ultimate_parents(
+    entity_id: str, *, include_simulated: bool = False,
+) -> list[dict]:
     """Who ultimately controls this entity, derived rather than asserted.
 
     Nothing in the graph declares an ultimate parent — an :ULTIMATE_PARENT_OF edge only ever
@@ -63,11 +66,57 @@ async def ultimate_parents(entity_id: str) -> list[dict]:
     rows = await db.read(
         f"""
         MATCH path=(up:Entity)-[:OWNS|ULTIMATE_PARENT_OF*1..{ULTIMATE_PARENT_DEPTH}]->(e:Entity {{id:$id}})
-        WHERE up.id <> $id AND NOT EXISTS {{ (:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(up) }}
+        WHERE up.id <> $id
+          AND ($include_simulated OR (
+            all(n IN nodes(path) WHERE coalesce(n.simulated,false)=false)
+            AND all(h IN relationships(path) WHERE
+              coalesce(h.simulated,false)=false
+              AND (
+                h.claim_id IS NULL OR NOT EXISTS {{
+                  MATCH (hc:Claim {{id:h.claim_id}})
+                  WHERE coalesce(hc.simulated,false)
+                    OR EXISTS {{
+                      MATCH (ha:Artifact)-[:EVIDENCES]->(hc)
+                      WHERE coalesce(ha.simulated,false)
+                    }}
+                    OR EXISTS {{
+                      MATCH (:Artifact)-[he:EVIDENCES]->(hc)
+                      WHERE coalesce(he.simulated,false)
+                    }}
+                }}
+              )
+            )
+          ))
+          AND NOT EXISTS {{
+            MATCH (owner:Entity)-[incoming:OWNS|ULTIMATE_PARENT_OF]->(up)
+            WHERE $include_simulated OR (
+              coalesce(owner.simulated,false)=false
+              AND coalesce(incoming.simulated,false)=false
+              AND coalesce(up.simulated,false)=false
+              AND (
+                incoming.claim_id IS NULL OR NOT EXISTS {{
+                  MATCH (ic:Claim {{id:incoming.claim_id}})
+                  WHERE coalesce(ic.simulated,false)
+                    OR EXISTS {{
+                      MATCH (ia:Artifact)-[:EVIDENCES]->(ic)
+                      WHERE coalesce(ia.simulated,false)
+                    }}
+                    OR EXISTS {{
+                      MATCH (:Artifact)-[ie:EVIDENCES]->(ic)
+                      WHERE coalesce(ie.simulated,false)
+                    }}
+                }}
+              )
+            )
+          }}
         WITH up, path, relationships(path) AS hops, nodes(path) AS chain
         // Shortest first: the nearest root wins when a node is reachable by several routes.
         ORDER BY length(path), up.name
         WITH up, head(collect({{hops: hops, chain: chain}})) AS best
+        WITH up, best,
+             [h IN best.hops WHERE h.claim_id IS NOT NULL | h.claim_id] AS claim_ids
+        WITH up, best, claim_ids, head(claim_ids) AS claim_id
+        OPTIONAL MATCH (uc:Claim {{id:claim_id}})
         RETURN up.id AS id, up.name AS name,
                coalesce(up.simulated, false) AS simulated,
                size(best.hops) AS hops,
@@ -76,14 +125,33 @@ async def ultimate_parents(entity_id: str) -> list[dict]:
                coalesce(head(best.hops).id, elementId(head(best.hops))) AS relationship_id,
                any(h IN best.hops WHERE coalesce(h.simulated, false))
                  OR any(n IN best.chain WHERE coalesce(n.simulated, false)) AS relationship_simulated,
-               head([h IN best.hops WHERE h.claim_id IS NOT NULL | h.claim_id]) AS claim_id,
-               head([h IN best.hops WHERE h.source IS NOT NULL | h.source]) AS source,
-               head([h IN best.hops WHERE h.source_url IS NOT NULL | h.source_url]) AS source_url
+               claim_id,
+               claim_ids,
+               any(h IN best.hops WHERE h.claim_id IS NOT NULL AND EXISTS {{
+                 MATCH (hc:Claim {{id:h.claim_id}}) WHERE coalesce(hc.simulated,false)
+               }}) AS claim_simulated,
+               any(h IN best.hops WHERE h.claim_id IS NOT NULL AND EXISTS {{
+                 MATCH (ha:Artifact)-[:EVIDENCES]->(:Claim {{id:h.claim_id}})
+                 WHERE coalesce(ha.simulated,false)
+               }}) AS artifact_simulated,
+               any(h IN best.hops WHERE h.claim_id IS NOT NULL AND EXISTS {{
+                 MATCH (:Artifact)-[he:EVIDENCES]->(:Claim {{id:h.claim_id}})
+                 WHERE coalesce(he.simulated,false)
+               }}) AS evidence_simulated,
+               coalesce(
+                 head([h IN best.hops WHERE h.source IS NOT NULL | h.source]),
+                 uc.source
+               ) AS source,
+               coalesce(
+                 head([h IN best.hops WHERE h.source_url IS NOT NULL | h.source_url]),
+                 head([(ua:Artifact)-[:EVIDENCES]->(uc) | ua.url])
+               ) AS source_url
         ORDER BY hops, name
         """,
-        {"id": entity_id},
+        {"id": entity_id, "include_simulated": include_simulated},
     )
     for row in rows:
+        row["simulated"] = _graph_fact_simulated(row)
         # A single stated hop is the registry's claim; anything longer is our inference, and the
         # report should say so rather than borrow the top link's source as if it named the parent.
         if row["hops"] > 1:
@@ -91,30 +159,48 @@ async def ultimate_parents(entity_id: str) -> list[dict]:
     return [r for r in rows if r.get("id")]
 
 
-async def entity_core(entity_id: str) -> dict | None:
+async def entity_core(
+    entity_id: str, *, include_simulated: bool = False,
+) -> dict | None:
     rows = await db.read(
         """
         MATCH (e:Entity {id:$id})
-        OPTIONAL MATCH (e)-[:INCORPORATED_IN]->(inc:Location)
+        OPTIONAL MATCH (e)-[ir:INCORPORATED_IN]->(inc:Location)
         OPTIONAL MATCH (e)-[ps:PARENT_SEATED_IN]->(seat:Location)
-        OPTIONAL MATCH (e)-[:MANUFACTURES_IN]->(mfg:Location)
-        OPTIONAL MATCH (e)-[:OPERATES_IN]->(ops:Location)
+        OPTIONAL MATCH (e)-[mr:MANUFACTURES_IN]->(mfg:Location)
+        OPTIONAL MATCH (e)-[orr:OPERATES_IN]->(ops:Location)
         OPTIONAL MATCH (dp:Entity)-[o:OWNS]->(e)
-        OPTIONAL MATCH (e)-[:PROVIDES]->(c:Category)
+        OPTIONAL MATCH (e)-[pr:PROVIDES]->(c:Category)
         RETURN e{.*} AS e,
-               inc{.code,.name} AS incorporated,
+               inc{.code,.name,.simulated,
+                   relationship_simulated:coalesce(ir.simulated,false)} AS incorporated,
                seat{.id,.code,.name, simulated:coalesce(seat.simulated,false),
                    relationship_id:coalesce(ps.id, elementId(ps)),
                    relationship_simulated:coalesce(ps.simulated,false),
                    source:ps.source, source_url:ps.source_url} AS parent_seat,
-               collect(DISTINCT mfg{.code,.name}) AS manufactures,
-               collect(DISTINCT ops{.code,.name}) AS operates,
+               collect(DISTINCT mfg{.code,.name,.simulated,
+                   relationship_simulated:coalesce(mr.simulated,false)}) AS manufactures,
+               collect(DISTINCT ops{.code,.name,.simulated,
+                   relationship_simulated:coalesce(orr.simulated,false)}) AS operates,
                collect(DISTINCT {id: dp.id, name: dp.name, pct: o.pct,
                    simulated:coalesce(dp.simulated,false),
                    relationship_id:coalesce(o.id, elementId(o)),
                    relationship_simulated:coalesce(o.simulated,false),
+                    claim_id:o.claim_id,
+                    claim_simulated:CASE WHEN o.claim_id IS NULL THEN false ELSE EXISTS {
+                      MATCH (oc:Claim {id:o.claim_id}) WHERE coalesce(oc.simulated,false)
+                    } END,
+                    artifact_simulated:CASE WHEN o.claim_id IS NULL THEN false ELSE EXISTS {
+                      MATCH (oa:Artifact)-[:EVIDENCES]->(:Claim {id:o.claim_id})
+                      WHERE coalesce(oa.simulated,false)
+                    } END,
+                    evidence_simulated:CASE WHEN o.claim_id IS NULL THEN false ELSE EXISTS {
+                      MATCH (:Artifact)-[oe:EVIDENCES]->(:Claim {id:o.claim_id})
+                      WHERE coalesce(oe.simulated,false)
+                    } END,
                    source:o.source, source_url:o.source_url}) AS direct_parents,
-               collect(DISTINCT c{.id,.name,.kind}) AS categories
+               collect(DISTINCT c{.id,.name,.kind,.simulated,
+                   relationship_simulated:coalesce(pr.simulated,false)}) AS categories
         LIMIT 1
         """,
         {"id": entity_id},
@@ -123,7 +209,11 @@ async def entity_core(entity_id: str) -> dict | None:
         return None
     r = rows[0]
     r["direct_parents"] = [d for d in r["direct_parents"] if d.get("id")]
-    r["ultimate_parents"] = await ultimate_parents(entity_id)
+    for parent in r["direct_parents"]:
+        parent["simulated"] = _graph_fact_simulated(parent)
+    r["ultimate_parents"] = await ultimate_parents(
+        entity_id, include_simulated=include_simulated,
+    )
     r["manufactures"] = [d for d in r["manufactures"] if d and d.get("code")]
     r["operates"] = [d for d in r["operates"] if d and d.get("code")]
     r["categories"] = [d for d in r["categories"] if d and d.get("id")]
@@ -176,11 +266,17 @@ def _ownership_freshness(retrieved_at: str | None) -> str:
     except (TypeError, ValueError):
         return "unavailable"
     return "stale" if (datetime.now(timezone.utc) - observed).days > 365 else "current"
-async def supply_position(entity_id: str, root_id: str | None) -> dict:
+async def supply_position(
+    entity_id: str, root_id: str | None, *, include_simulated: bool = False,
+) -> dict:
     out: dict = {"supplies": [], "suppliers_count": 0, "tier_from_root": None, "sole_source_edges": 0}
     rows = await db.read(
         """
         MATCH (e:Entity {id:$id})-[s:SUPPLIES]->(c:Entity)
+        WHERE $include_simulated OR (
+          coalesce(e.simulated,false)=false AND coalesce(s.simulated,false)=false
+          AND coalesce(c.simulated,false)=false
+        )
          RETURN c.id AS id, c.name AS name, coalesce(s.id, elementId(s)) AS edge_id,
                  s.tier AS tier, s.sole_source AS sole_source, s.psc AS psc, s.naics AS naics,
                 s.contract_ref AS contract_ref, s.amount AS amount, s.source AS source,
@@ -198,12 +294,16 @@ async def supply_position(entity_id: str, root_id: str | None) -> dict:
                 coalesce(s.simulated,false) OR coalesce(c.simulated,false) AS simulated
         ORDER BY coalesce(s.amount, 0) DESC LIMIT 50
         """,
-        {"id": entity_id},
+        {"id": entity_id, "include_simulated": include_simulated},
     )
     out["supplies"] = rows
     risk_rows = await db.read(
         """
         MATCH (e:Entity {id:$id})-[s:SUPPLIES]->(c:Entity)
+        WHERE $include_simulated OR (
+          coalesce(e.simulated,false)=false AND coalesce(s.simulated,false)=false
+          AND coalesce(c.simulated,false)=false
+        )
         OPTIONAL MATCH (sc:Claim {id:s.claim_id})
         WITH e, s, c, sc ORDER BY coalesce(s.id, elementId(s))
         RETURN collect({
@@ -253,27 +353,68 @@ async def supply_position(entity_id: str, root_id: str | None) -> dict:
           } END
         }) AS evidence
         """,
-        {"id": entity_id},
+        {"id": entity_id, "include_simulated": include_simulated},
     )
     out["risk_evidence"] = risk_rows[0].get("evidence", []) if risk_rows else []
     out["sole_source_edges"] = sum(1 for r in rows if r.get("sole_source"))
-    cnt = await db.read("MATCH (:Entity)-[:SUPPLIES]->(e:Entity {id:$id}) RETURN count(*) AS n", {"id": entity_id})
+    cnt = await db.read(
+        "MATCH (supplier:Entity)-[s:SUPPLIES]->(e:Entity {id:$id}) "
+        "WHERE $include_simulated OR (coalesce(supplier.simulated,false)=false "
+        "AND coalesce(s.simulated,false)=false AND coalesce(e.simulated,false)=false) "
+        "RETURN count(*) AS n",
+        {"id": entity_id, "include_simulated": include_simulated},
+    )
     out["suppliers_count"] = cnt[0]["n"] if cnt else 0
     if root_id and root_id != entity_id:
         t = await db.read(
-            "MATCH p=shortestPath((e:Entity {id:$id})-[:SUPPLIES*1..6]->(r:Entity {id:$root})) RETURN length(p) AS tier LIMIT 1",
-            {"id": entity_id, "root": root_id},
+            "MATCH p=shortestPath((e:Entity {id:$id})-[:SUPPLIES*1..6]->(r:Entity {id:$root})) "
+            "WHERE $include_simulated OR (all(n IN nodes(p) WHERE coalesce(n.simulated,false)=false) "
+            "AND all(rel IN relationships(p) WHERE coalesce(rel.simulated,false)=false)) "
+            "RETURN length(p) AS tier LIMIT 1",
+            {"id": entity_id, "root": root_id, "include_simulated": include_simulated},
         )
         out["tier_from_root"] = t[0]["tier"] if t else None
     awards = await db.read(
-        "MATCH (a:Artifact {kind:'award'})-[:ABOUT]->(e:Entity {id:$id}) RETURN count(a) AS n, sum(a.amount) AS total",
-        {"id": entity_id},
+        "MATCH (a:Artifact {kind:'award'})-[r:ABOUT]->(e:Entity {id:$id}) "
+        "WHERE $include_simulated OR (coalesce(a.simulated,false)=false "
+        "AND coalesce(r.simulated,false)=false AND coalesce(e.simulated,false)=false) "
+        "RETURN count(a) AS n, sum(a.amount) AS total",
+        {"id": entity_id, "include_simulated": include_simulated},
     )
     out["awards"] = {"count": awards[0]["n"], "total": awards[0]["total"]} if awards else {"count": 0, "total": None}
     return out
 
-
-async def people(entity_id: str) -> dict:
+def _derive_person_context(person: dict) -> None:
+    """Rebuild role-derived flags from the currently visible affiliations."""
+    elsewhere = [
+        item for item in (person.get("elsewhere") or [])
+        if item.get("entity_id")
+    ]
+    person["elsewhere"] = elsewhere
+    government = [item for item in elsewhere if item.get("kind") == "agency"]
+    # An interlock is a seat at another *supplier* in the network. LittleSis also
+    # records seats at banks, law firms and think tanks; those stay visible but
+    # do not score.
+    suppliers = [
+        item for item in elsewhere
+        if item.get("supplier", True) and item.get("kind") != "agency"
+    ]
+    current = bool(person.get("current"))
+    person["interlock"] = current and any(item.get("current") for item in suppliers)
+    person["moved_to_flagged"] = not current and any(
+        item.get("flagged") and item.get("current") for item in elsewhere
+    )
+    person["formerly_elsewhere"] = current and any(
+        not item.get("current") for item in suppliers
+    )
+    person["government"] = government
+    person["concurrent_government"] = current and any(
+        item.get("current") for item in government
+    )
+    person["former_government"] = current and any(
+        not item.get("current") for item in government
+    )
+async def people(entity_id: str, *, include_simulated: bool = False) -> dict:
     rows = await db.read(
         """
         MATCH (p:Person)-[r:HELD_ROLE]->(e:Entity {id:$id})
@@ -282,7 +423,28 @@ async def people(entity_id: str) -> dict:
         OPTIONAL MATCH (rc2:Claim {id:r2.claim_id})
         WITH p, r, rc, collect(DISTINCT {entity_id:o.id, entity:o.name, title:r2.title, current:r2.current,
             flagged:coalesce(o.flagged,false),
-            from:r2.from, to:r2.to, kind:o.kind, federal:coalesce(o.federal,false), supplier:EXISTS { (o)-[:SUPPLIES]->() },
+            from:r2.from, to:r2.to, kind:o.kind, federal:coalesce(o.federal,false), supplier:EXISTS {
+              MATCH (o)-[sr:SUPPLIES]->(consumer:Entity)
+              WHERE $include_simulated OR (
+                coalesce(o.simulated,false)=false
+                AND coalesce(sr.simulated,false)=false
+                AND coalesce(consumer.simulated,false)=false
+                AND (
+                  sr.claim_id IS NULL OR NOT EXISTS {
+                    MATCH (src:Claim {id:sr.claim_id})
+                    WHERE coalesce(src.simulated,false)
+                      OR EXISTS {
+                        MATCH (sa:Artifact)-[:EVIDENCES]->(src)
+                        WHERE coalesce(sa.simulated,false)
+                      }
+                      OR EXISTS {
+                        MATCH (:Artifact)-[se:EVIDENCES]->(src)
+                        WHERE coalesce(se.simulated,false)
+                      }
+                  }
+                )
+              )
+            },
             simulated:coalesce(o.simulated,false) OR coalesce(r2.simulated,false) OR coalesce(rc2.simulated,false)
               OR CASE WHEN rc2 IS NULL THEN false ELSE EXISTS {
                 MATCH (r2a:Artifact)-[:EVIDENCES]->(rc2) WHERE coalesce(r2a.simulated,false)
@@ -351,22 +513,12 @@ async def people(entity_id: str) -> dict:
         ORDER BY current DESC, r.from DESC
         LIMIT 200
         """,
-        {"id": entity_id},
+        {"id": entity_id, "include_simulated": include_simulated},
     )
     current = [r for r in rows if r["current"]]
     former = [r for r in rows if not r["current"]]
     for r in rows:
-        r["elsewhere"] = [x for x in r["elsewhere"] if x.get("entity_id")]
-        gov = [x for x in r["elsewhere"] if x.get("kind") == "agency"]
-        # An interlock is a seat at another *supplier* in the network. LittleSis also records
-        # seats at banks, law firms and think tanks; those stay visible but do not score.
-        suppliers = [x for x in r["elsewhere"] if x.get("supplier", True) and x.get("kind") != "agency"]
-        r["interlock"] = any(x["current"] for x in suppliers) and r["current"]
-        r["moved_to_flagged"] = any(x["flagged"] and x["current"] for x in r["elsewhere"]) and not r["current"]
-        r["formerly_elsewhere"] = bool(r["current"]) and any(not x["current"] for x in suppliers)
-        r["government"] = gov
-        r["concurrent_government"] = bool(r["current"]) and any(x["current"] for x in gov)
-        r["former_government"] = bool(r["current"]) and any(not x["current"] for x in gov)
+        _derive_person_context(r)
     seats = await db.read("MATCH (e:Entity {id:$id}) RETURN e.board_size AS n", {"id": entity_id})
     return {"current": current, "former": former, "board_size": seats[0]["n"] if seats else None, "resolved_current_count": len(current)}
 
@@ -393,35 +545,54 @@ def _string_list(value: Any) -> list[str]:
     return list(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
 
 
-async def affiliations(entity_id: str) -> dict:
+async def affiliations(entity_id: str, *, include_simulated: bool = False) -> dict:
     """The entity's recorded ties beyond supply and ownership: memberships, lobbying,
     transactions and donations, with the counterparty's kind, jurisdiction and flag."""
     rows = await db.read(
         """
         MATCH (e:Entity {id:$id})-[r:MEMBER_OF|TRANSACTS_WITH|LOBBIES|DONATED_TO]-(o:Entity)
-        OPTIONAL MATCH (o)-[:INCORPORATED_IN]->(inc:Location)
-        OPTIONAL MATCH (o)-[:PARENT_SEATED_IN]->(seat:Location)
+        WHERE $include_simulated OR (
+          coalesce(e.simulated,false)=false AND coalesce(r.simulated,false)=false
+          AND coalesce(o.simulated,false)=false
+        )
+        OPTIONAL MATCH (o)-[ir:INCORPORATED_IN]->(inc:Location)
+          WHERE $include_simulated OR (
+            coalesce(ir.simulated,false)=false AND coalesce(inc.simulated,false)=false
+          )
+        OPTIONAL MATCH (o)-[ps:PARENT_SEATED_IN]->(seat:Location)
+          WHERE $include_simulated OR (
+            coalesce(ps.simulated,false)=false AND coalesce(seat.simulated,false)=false
+          )
         RETURN type(r) AS type, r.id AS edge_id, startNode(r).id = e.id AS outbound, o.id AS entity_id, o.name AS entity, o.kind AS kind,
                coalesce(o.federal,false) AS federal, coalesce(o.flagged,false) AS flagged, o.org_types AS org_types,
                inc.code AS incorporated, seat.code AS parent_seat, r.from AS from, r.to AS to, coalesce(r.current, r.to IS NULL) AS current,
-               r.amount AS amount, r.description AS description, r.source AS source, r.source_url AS source_url
+               r.amount AS amount, r.description AS description, r.source AS source, r.source_url AS source_url,
+               coalesce(e.simulated,false) OR coalesce(r.simulated,false) OR coalesce(o.simulated,false) AS simulated
         ORDER BY current DESC, coalesce(r.from,'') DESC LIMIT 200
         """,
-        {"id": entity_id},
+        {"id": entity_id, "include_simulated": include_simulated},
     )
     # Subsidiaries sit here too: the ownership family looks *up* the chain, and a unit
     # seated abroad is exposure the parent chain never shows.
     subs = await db.read(
         """
         MATCH (e:Entity {id:$id})-[r:OWNS]->(o:Entity)
-        OPTIONAL MATCH (o)-[:INCORPORATED_IN]->(inc:Location)
+        WHERE $include_simulated OR (
+          coalesce(e.simulated,false)=false AND coalesce(r.simulated,false)=false
+          AND coalesce(o.simulated,false)=false
+        )
+        OPTIONAL MATCH (o)-[ir:INCORPORATED_IN]->(inc:Location)
+          WHERE $include_simulated OR (
+            coalesce(ir.simulated,false)=false AND coalesce(inc.simulated,false)=false
+          )
         RETURN 'OWNS' AS type, r.id AS edge_id, true AS outbound, o.id AS entity_id, o.name AS entity, o.kind AS kind, false AS federal,
                coalesce(o.flagged,false) AS flagged, o.org_types AS org_types, inc.code AS incorporated, null AS parent_seat,
                r.from AS from, r.to AS to, coalesce(r.current, r.to IS NULL) AS current, r.pct AS amount, r.description AS description,
-               r.source AS source, r.source_url AS source_url
+               r.source AS source, r.source_url AS source_url,
+               coalesce(e.simulated,false) OR coalesce(r.simulated,false) OR coalesce(o.simulated,false) AS simulated
         ORDER BY current DESC LIMIT 100
         """,
-        {"id": entity_id},
+        {"id": entity_id, "include_simulated": include_simulated},
     )
     rows += subs
     for r in rows:
@@ -627,8 +798,7 @@ def _screen_artifacts(item: dict) -> list[dict]:
     return evidence
 def _screen_simulated(item: dict) -> bool:
     return bool(
-        item.get("simulated")
-        or item.get("artifact_simulated")
+        _graph_fact_simulated(item)
         or any(a.get("simulated") or a.get("evidence_simulated") for a in _screen_artifacts(item))
     )
 
@@ -834,34 +1004,66 @@ def evaluate_risk_contract(
     }
 
 
-async def artifacts(entity_id: str, limit: int = 50) -> list[dict]:
+async def artifacts(
+    entity_id: str, limit: int = 50, *, include_simulated: bool = False,
+) -> list[dict]:
     return await db.read(
         """
         MATCH (e:Entity {id:$id})
-        OPTIONAL MATCH (a1:Artifact)-[:ABOUT]->(e)
-        OPTIONAL MATCH (a2:Artifact)-[:EVIDENCES]->(c:Claim)-[:ASSERTS]->(e)
-        WITH collect(DISTINCT a1) + collect(DISTINCT a2) AS arts
-        UNWIND arts AS a
-        WITH DISTINCT a WHERE a IS NOT NULL
+        CALL (e) {
+          MATCH (a1:Artifact)-[about:ABOUT]->(e)
+          WHERE $include_simulated OR (
+            coalesce(a1.simulated,false)=false
+            AND coalesce(about.simulated,false)=false
+            AND coalesce(e.simulated,false)=false
+          )
+          RETURN a1 AS a,
+                 coalesce(a1.simulated,false) OR coalesce(about.simulated,false)
+                   OR coalesce(e.simulated,false) AS association_simulated
+          UNION
+          MATCH (a2:Artifact)-[evidences:EVIDENCES]->(c:Claim)-[asserts:ASSERTS]->(e)
+          WHERE $include_simulated OR (
+            coalesce(a2.simulated,false)=false
+            AND coalesce(evidences.simulated,false)=false
+            AND coalesce(c.simulated,false)=false
+            AND coalesce(asserts.simulated,false)=false
+            AND coalesce(e.simulated,false)=false
+          )
+          RETURN a2 AS a,
+                 coalesce(a2.simulated,false) OR coalesce(evidences.simulated,false)
+                   OR coalesce(c.simulated,false) OR coalesce(asserts.simulated,false)
+                   OR coalesce(e.simulated,false) AS association_simulated
+        }
+        WITH a, collect(association_simulated) AS association_states
         RETURN a.id AS id, a.kind AS kind, a.title AS title, a.url AS url, a.source AS source,
                coalesce(a.latest_retrieved_at,a.retrieved_at) AS retrieved_at,
                a.retrieved_at AS first_retrieved_at, a.latest_retrieved_at AS latest_retrieved_at,
-               coalesce(a.simulated,false) AS simulated,
+               any(state IN association_states WHERE state) AS simulated,
                a.published_at AS published_at, a.sentiment AS sentiment, a.amount AS amount, a.summary AS summary
         ORDER BY coalesce(a.published_at, a.latest_retrieved_at, a.retrieved_at) DESC LIMIT $limit
         """,
-        {"id": entity_id, "limit": limit},
+        {"id": entity_id, "limit": limit, "include_simulated": include_simulated},
     )
 
 
-async def news(entity_id: str, limit: int = 10) -> list[dict]:
+async def news(
+    entity_id: str, limit: int = 10, *, include_simulated: bool = False,
+) -> list[dict]:
     return await db.read(
         """
-        MATCH (a:Artifact {kind:'news'})-[:ABOUT]->(e:Entity {id:$id})
-        RETURN a.id AS id, a.title AS title, a.url AS url, a.source AS source, a.published_at AS published_at, a.sentiment AS sentiment, a.domain AS domain
+        MATCH (a:Artifact {kind:'news'})-[about:ABOUT]->(e:Entity {id:$id})
+        WHERE $include_simulated OR (
+          coalesce(a.simulated,false)=false
+          AND coalesce(about.simulated,false)=false
+          AND coalesce(e.simulated,false)=false
+        )
+        RETURN a.id AS id, a.title AS title, a.url AS url, a.source AS source, a.published_at AS published_at,
+               a.sentiment AS sentiment, a.domain AS domain,
+               coalesce(a.simulated,false) OR coalesce(about.simulated,false)
+                 OR coalesce(e.simulated,false) AS simulated
         ORDER BY a.published_at DESC LIMIT $limit
         """,
-        {"id": entity_id, "limit": limit},
+        {"id": entity_id, "limit": limit, "include_simulated": include_simulated},
     )
 
 
@@ -944,7 +1146,10 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
             u0.get("source") or "GLEIF",
             u0["name"],
             u0.get("source_url"),
-            [u0.get("id"), u0.get("relationship_id"), u0.get("claim_id")],
+            [
+                u0.get("id"), u0.get("relationship_id"), u0.get("claim_id"),
+                *(u0.get("claim_ids") or ()),
+            ],
             _graph_fact_simulated(u0),
         ))
     elif core.get("direct_parents"):
@@ -1200,17 +1405,84 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
         "disclaimer": "Every indicator marks opacity, concentration or foreign control — conditions warranting human review. This tool flags; it does not accuse.",
     }
 
-
-async def build_report(entity_id: str, root_id: str | None = None) -> dict | None:
-    core = await entity_core(entity_id)
+def _without_simulated_report_data(
+    core: dict, supply: dict, ppl: dict, scr: list[dict], arts: list[dict], nws: list[dict],
+) -> tuple[dict, dict, dict, list[dict], list[dict], list[dict]]:
+    """Remove scenario-backed display data before indicators and summaries are derived."""
+    core = deepcopy(core)
+    supply = deepcopy(supply)
+    ppl = deepcopy(ppl)
+    if core.get("e", {}).get("simulated"):
+        return {}, supply, ppl, [], [], []
+    for key in ("direct_parents", "ultimate_parents", "ownership", "parent_seat_evidence"):
+        core[key] = [
+            item for item in (core.get(key) or [])
+            if not _graph_fact_simulated(item)
+        ]
+    for key in ("incorporated", "parent_seat"):
+        item = core.get(key)
+        if item and _graph_fact_simulated(item):
+            core[key] = None
+    for key in ("manufactures", "operates", "categories"):
+        core[key] = [
+            item for item in (core.get(key) or [])
+            if item and not _graph_fact_simulated(item)
+        ]
+    supply["supplies"] = [
+        item for item in (supply.get("supplies") or [])
+        if not _graph_fact_simulated(item)
+    ]
+    supply["risk_evidence"] = [
+        item for item in (supply.get("risk_evidence") or [])
+        if not _graph_fact_simulated(item)
+    ]
+    supply["sole_source_edges"] = sum(
+        1 for item in supply["supplies"] if item.get("sole_source")
+    )
+    for group in ("current", "former"):
+        filtered = []
+        for item in ppl.get(group) or []:
+            if _graph_fact_simulated(item):
+                continue
+            item["elsewhere"] = [
+                other for other in (item.get("elsewhere") or [])
+                if not _graph_fact_simulated(other)
+            ]
+            _derive_person_context(item)
+            filtered.append(item)
+        ppl[group] = filtered
+    ppl["resolved_current_count"] = len(ppl.get("current") or [])
+    screens_data = [item for item in scr if not _screen_simulated(item)]
+    return (
+        core,
+        supply,
+        ppl,
+        screens_data,
+        [item for item in arts if not item.get("simulated")],
+        [item for item in nws if not item.get("simulated")],
+    )
+async def build_report(
+    entity_id: str, root_id: str | None = None, *, include_simulated: bool = False,
+) -> dict | None:
+    core = await entity_core(entity_id, include_simulated=include_simulated)
     if not core:
         return None
-    supply = await supply_position(entity_id, root_id)
-    ppl = await people(entity_id)
+    supply = await supply_position(
+        entity_id, root_id, include_simulated=include_simulated
+    )
+    ppl = await people(entity_id, include_simulated=include_simulated)
     scr = await screens(entity_id)
-    arts = await artifacts(entity_id)
-    nws = await news(entity_id)
-    aff = await affiliations(entity_id)
+    for item in scr:
+        item["simulated"] = _screen_simulated(item)
+    arts = await artifacts(entity_id, include_simulated=include_simulated)
+    nws = await news(entity_id, include_simulated=include_simulated)
+    if not include_simulated:
+        core, supply, ppl, scr, arts, nws = _without_simulated_report_data(
+            core, supply, ppl, scr, arts, nws
+        )
+        if not core:
+            return None
+    aff = await affiliations(entity_id, include_simulated=include_simulated)
     risk = await risk_indicators(entity_id, core, supply, ppl, scr, aff)
     risk.update(evaluate_risk_contract(core, supply, scr))
     e = core["e"]
@@ -1221,7 +1493,8 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
             "id": e.get("id"), "name": e.get("name"), "uei": e.get("uei"), "cage": e.get("cage"), "lei": e.get("lei"),
             "aliases": e.get("aliases") or [], "kind": e.get("kind"), "registration_status": e.get("registration_status"),
             "public": e.get("public"), "ticker": e.get("ticker"), "simulated": bool(e.get("simulated")),
-            "revenue": _int(e.get("revenue")), "lda_registrant_id": e.get("lda_registrant_id"), "org_types": e.get("org_types"), "blurb": e.get("blurb"),
+            "revenue": _int(e.get("revenue")), "lda_registrant_id": e.get("lda_registrant_id"),
+            "org_types": e.get("org_types"), "blurb": e.get("blurb"),
         },
         "affiliations": aff,
         "geography": {
@@ -1236,9 +1509,7 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
         "categories": core.get("categories"),
         "supply": supply,
         "people": ppl,
-        "screens": [] if e.get("simulated") else [
-            s for s in scr if s.get("status") == "committed" and not _screen_simulated(s)
-        ],
+        "screens": [s for s in scr if s.get("status") == "committed"],
         "screen_evidence": scr,
         "risk": risk,
         "artifacts": arts,

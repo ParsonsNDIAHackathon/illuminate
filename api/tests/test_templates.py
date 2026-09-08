@@ -22,6 +22,29 @@ def test_neighbourhood_result_size_is_bounded():
     assert params["limit"] == 1
 
 
+def test_named_ownership_paths_filter_backing_simulation_provenance():
+    sample = {
+        "entity_id": "vendor", "root_id": "program", "home_country": "US",
+    }
+    for name in ("ownership_chain", "foreign_parent"):
+        cypher, _ = TEMPLATES[name].build(sample)
+        ownership_scope = cypher.split("OPTIONAL MATCH up=", 1)[1]
+        assert "all(r IN relationships(up) WHERE" in ownership_scope
+        assert "MATCH (rc:Claim {id:r.claim_id})" in ownership_scope
+        assert "MATCH (ra:Artifact)-[:EVIDENCES]->(rc)" in ownership_scope
+        assert "MATCH (:Artifact)-[re:EVIDENCES]->(rc)" in ownership_scope
+        assert ownership_scope.index("$include_simulated") < ownership_scope.index(
+            "RETURN",
+        )
+    foreign, _ = TEMPLATES["foreign_parent"].build(sample)
+    seat_scope = foreign.split("MATCH (v)-[ps:PARENT_SEATED_IN]", 1)[1].split(
+        "OPTIONAL MATCH up=", 1,
+    )[0]
+    assert "MATCH (rc:Claim {id:ps.claim_id})" in seat_scope
+    assert "MATCH (ra:Artifact)-[:EVIDENCES]->(rc)" in seat_scope
+    assert "MATCH (:Artifact)-[re:EVIDENCES]->(rc)" in seat_scope
+
+
 def test_intent_matching():
     assert match_intent("for all of Sikorsky's vendors, highlight goods in purple and services in yellow") == "color_by_category"
     assert match_intent("highlight all entities that rely on manufacturing in country CN, include tier 2 and below") == "manufactures_in"

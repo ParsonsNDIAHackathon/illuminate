@@ -97,8 +97,8 @@ def test_rejected_claim_cannot_be_committed():
 
 def test_report_queries_require_committed_screens():
     report = (Path(__file__).parents[1] / "illuminate" / "report.py").read_text()
-    assert '"screens": [] if e.get("simulated") else [' in report
-    assert 's for s in scr if s.get("status") == "committed" and not _screen_simulated(s)' in report
+    assert '"screens": [s for s in scr if s.get("status") == "committed"]' in report
+    assert "if not include_simulated:" in report
     assert '"screen_evidence": scr' in report
 
 def test_exact_claim_lookup_bypasses_list_pagination():

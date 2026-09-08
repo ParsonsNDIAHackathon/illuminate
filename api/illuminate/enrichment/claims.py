@@ -30,7 +30,8 @@ ATTR_ALLOWLIST = {"uei", "cage", "lei", "registration_status", "public", "ticker
                   # LittleSis org record and person markers
                   "revenue", "lda_registrant_id", "fedspending_id", "aliases_text", "blurb", "org_types", "littlesis_tags", "public_official"}
 SCREEN_PREDICATES = {
-    "sanctions_screen", "exclusion_screen", "financial_screen", "adverse_media_screen", "registry_screen",
+    "sanctions_screen", "exclusion_screen", "financial_screen", "adverse_media_screen",
+    "registry_screen", "cyber_screen",
     # Contextual adapters record dated source observations rather than overwrite a
     # scalar entity property (one entity can have many CVEs, clauses, and places).
     "vulnerability_screen", "far_clause_screen", "location_context_screen",

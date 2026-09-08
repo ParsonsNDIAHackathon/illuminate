@@ -6,8 +6,6 @@ import pytest
 
 import illuminate.report as report_module
 from illuminate.report import build_report, evaluate_risk_contract, risk_indicators
-
-
 def core(*, simulated: bool = False) -> dict:
     return {
         "e": {"id": "vendor", "name": "Vendor", "simulated": simulated},
@@ -333,7 +331,7 @@ async def test_report_uses_guarded_score_for_simulated_screen(monkeypatch):
     monkeypatch.setattr(report_module, "artifacts", async_value([]))
     monkeypatch.setattr(report_module, "news", async_value([]))
 
-    report = await build_report("vendor")
+    report = await build_report("vendor", include_simulated=True)
     assert report is not None
     assert report["risk"]["score"] is None
     assert "composite" not in report["risk"]
@@ -374,7 +372,7 @@ async def test_report_marks_graph_finding_with_simulated_backing_evidence(monkey
     monkeypatch.setattr(report_module, "artifacts", async_value([]))
     monkeypatch.setattr(report_module, "news", async_value([]))
 
-    report = await build_report("vendor")
+    report = await build_report("vendor", include_simulated=True)
     assert report is not None
     assert report["risk"]["score"] is None
     indicator = next(i for i in report["risk"]["indicators"] if i["family"] == "concentration")
@@ -413,7 +411,7 @@ async def test_report_marks_clear_concentration_with_simulated_backing_evidence(
     monkeypatch.setattr(report_module, "artifacts", async_value([]))
     monkeypatch.setattr(report_module, "news", async_value([]))
 
-    report = await build_report("vendor")
+    report = await build_report("vendor", include_simulated=True)
     assert report is not None
     assert report["risk"]["score"] is None
     indicator = next(i for i in report["risk"]["indicators"] if i["family"] == "concentration")
@@ -450,7 +448,7 @@ async def test_report_marks_clear_people_finding_from_simulated_roles(monkeypatc
     monkeypatch.setattr(report_module, "artifacts", async_value([]))
     monkeypatch.setattr(report_module, "news", async_value([]))
 
-    report = await build_report("vendor")
+    report = await build_report("vendor", include_simulated=True)
     assert report is not None
     indicator = next(i for i in report["risk"]["indicators"] if i["family"] == "people")
     assert indicator["severity"] == "clear"
@@ -481,7 +479,7 @@ async def test_report_marks_unseated_parent_with_simulated_backing_evidence(monk
     monkeypatch.setattr(report_module, "artifacts", async_value([]))
     monkeypatch.setattr(report_module, "news", async_value([]))
 
-    report = await build_report("vendor")
+    report = await build_report("vendor", include_simulated=True)
     assert report is not None
     indicator = next(i for i in report["risk"]["indicators"] if i["family"] == "ownership")
     assert indicator["simulated"] is True
@@ -535,3 +533,149 @@ async def test_a_former_employee_who_moved_to_a_flagged_entity_stays_medium():
     indicator = next(i for i in risk["indicators"] if i["family"] == "people")
     assert indicator["severity"] == "medium"
     assert indicator["label"].startswith("Former")
+
+@pytest.mark.asyncio
+async def test_operational_report_omits_simulated_nested_entities_and_evidence(monkeypatch):
+    base_core = core()
+    base_core.update({
+        "direct_parents": [
+            {"id": "real-parent", "name": "Real", "simulated": False},
+            {"id": "sim-parent", "name": "Scenario (simulated)", "simulated": True},
+        ],
+        "ultimate_parents": [],
+        "ownership": [],
+        "parent_seat_evidence": [],
+        "manufactures": [],
+        "operates": [],
+        "categories": [],
+    })
+    simulated_supply = {
+        "id": "scenario-customer", "sole_source": True, "simulated": True,
+    }
+    monkeypatch.setattr(report_module, "entity_core", async_value(base_core))
+    monkeypatch.setattr(report_module, "supply_position", async_value({
+        "supplies": [simulated_supply],
+        "risk_evidence": [{"evidence_id": "sim-edge", "simulated": True}],
+        "sole_source_edges": 1,
+    }))
+    scenario_agency = {
+        "entity_id": "scenario-agency", "entity": "Scenario Agency",
+        "kind": "agency", "current": True, "supplier": False,
+        "flagged": False, "simulated": True,
+    }
+    unrelated_bank = {
+        "entity_id": "real-bank", "entity": "Unrelated Bank",
+        "kind": "organization", "current": True, "supplier": False,
+        "flagged": False, "simulated": False,
+    }
+    monkeypatch.setattr(report_module, "people", async_value({
+        "current": [
+            {"person_id": "sim-person", "simulated": True, "elsewhere": []},
+            {
+                "person_id": "live-person", "name": "Live Director", "title": "Director",
+                "current": True, "simulated": False, "source": "registry",
+                "elsewhere": [scenario_agency, unrelated_bank],
+                "government": [scenario_agency], "concurrent_government": True,
+                "former_government": False, "interlock": False,
+                "formerly_elsewhere": False, "moved_to_flagged": False,
+            },
+        ],
+        "former": [], "resolved_current_count": 1, "board_size": 1,
+    }))
+    monkeypatch.setattr(report_module, "screens", async_value([{
+        "claim_id": "sim-screen", "predicate": "sanctions_screen",
+        "status": "committed", "result": "high", "simulated": True,
+        "source": "scenario", "artifacts": [],
+    }]))
+    monkeypatch.setattr(report_module, "artifacts", async_value([
+        {"id": "real-artifact", "source": "registry", "simulated": False},
+        {"id": "sim-artifact", "source": "scenario", "simulated": True},
+    ]))
+    monkeypatch.setattr(report_module, "news", async_value([]))
+    monkeypatch.setattr(report_module, "affiliations", async_value([]))
+
+    operational = await build_report("vendor", include_simulated=False)
+    opted_in = await build_report("vendor", include_simulated=True)
+
+    assert [item["id"] for item in operational["control"]["direct_parents"]] == ["real-parent"]
+    assert operational["supply"]["supplies"] == []
+    assert operational["supply"]["risk_evidence"] == []
+    assert [item["person_id"] for item in operational["people"]["current"]] == ["live-person"]
+    live_person = operational["people"]["current"][0]
+    assert live_person["government"] == []
+    assert live_person["concurrent_government"] is False
+    assert live_person["interlock"] is False
+    assert [item["entity_id"] for item in live_person["elsewhere"]] == ["real-bank"]
+    assert not [
+        indicator for indicator in operational["risk"]["indicators"]
+        if indicator["family"] == "government" and indicator["severity"] == "medium"
+    ]
+    assert not [
+        indicator for indicator in operational["risk"]["indicators"]
+        if indicator["family"] == "people"
+        and indicator["severity"] != "clear"
+        and "interlock" in indicator["label"].lower()
+    ]
+    assert operational["screen_evidence"] == []
+    assert [item["id"] for item in operational["artifacts"]] == ["real-artifact"]
+    assert any(item["id"] == "sim-parent" for item in opted_in["control"]["direct_parents"])
+    assert opted_in["artifacts"][1]["simulated"] is True
+    assert opted_in["screens"][0]["simulated"] is True
+
+
+@pytest.mark.asyncio
+async def test_artifact_and_news_queries_filter_simulated_association_paths_before_limit(
+    monkeypatch,
+):
+    queries: list[tuple[str, dict]] = []
+
+    async def read(query: str, params: dict):
+        queries.append((query, params))
+        return []
+
+    monkeypatch.setattr(report_module.db, "read", read)
+
+    await report_module.artifacts("vendor", include_simulated=False)
+    await report_module.news("vendor", include_simulated=False)
+
+    artifact_query, artifact_params = queries[0]
+    news_query, news_params = queries[1]
+    assert artifact_params["include_simulated"] is False
+    assert news_params["include_simulated"] is False
+    assert "coalesce(about.simulated,false)=false" in artifact_query
+    assert "coalesce(evidences.simulated,false)=false" in artifact_query
+    assert "coalesce(c.simulated,false)=false" in artifact_query
+    assert "coalesce(asserts.simulated,false)=false" in artifact_query
+    assert artifact_query.index("WHERE $include_simulated") < artifact_query.index("LIMIT $limit")
+    assert "any(state IN association_states WHERE state) AS simulated" in artifact_query
+    assert "coalesce(about.simulated,false)=false" in news_query
+    assert news_query.index("WHERE $include_simulated") < news_query.index("LIMIT $limit")
+    assert "coalesce(about.simulated,false)" in news_query.split(" AS simulated")[0]
+
+
+@pytest.mark.asyncio
+async def test_person_interlock_supplier_check_excludes_simulated_supply_associations(
+    monkeypatch,
+):
+    queries: list[tuple[str, dict]] = []
+
+    async def read(query: str, params: dict):
+        queries.append((query, params))
+        return [] if "MATCH (p:Person)" in query else [{"n": None}]
+
+    monkeypatch.setattr(report_module.db, "read", read)
+
+    result = await report_module.people("vendor", include_simulated=False)
+
+    people_query, params = queries[0]
+    assert result["current"] == []
+    assert params["include_simulated"] is False
+    supplier_scope = people_query.split("supplier:EXISTS {", 1)[1].split(
+        "},\n            simulated:", 1,
+    )[0]
+    assert "MATCH (o)-[sr:SUPPLIES]->(consumer:Entity)" in supplier_scope
+    assert "coalesce(sr.simulated,false)=false" in supplier_scope
+    assert "coalesce(consumer.simulated,false)=false" in supplier_scope
+    assert "coalesce(src.simulated,false)" in supplier_scope
+    assert "coalesce(sa.simulated,false)" in supplier_scope
+    assert "coalesce(se.simulated,false)" in supplier_scope

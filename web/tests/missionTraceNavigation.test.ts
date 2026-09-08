@@ -16,8 +16,8 @@ test('finding traces carry and apply their mission before loading the vendor', (
 })
 
 test('query-only mission changes reload report and portfolio scopes', () => {
-  assert.match(report, /watch\(\[\(\) => props\.id, reportRoot\], load, \{ immediate: true \}\)/)
-  assert.match(portfolio, /watch\(missionRoot, load, \{ immediate: true \}\)/)
+  assert.match(report, /watch\(\[\(\) => props\.id, reportRoot, \(\) => ws\.ws\.include_simulated\], \(\) => load\(true\), \{ immediate: true \}\)/)
+  assert.match(portfolio, /watch\(missionRoot, \(\) => \{\s*if \(portfolioReady\) void load\(\)/)
   assert.match(report, /reportRequest\.isCurrent\(generation\)/)
   assert.match(portfolio, /portfolioRequests\.currentScope\(\) === generation/)
 })

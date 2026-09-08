@@ -15,6 +15,21 @@
       · {{ rep.identity.public ? `public${rep.identity.ticker ? ' (' + rep.identity.ticker + ')' : ''}` : 'private' }}<span v-if="rep.control.ultimate_parents?.length">, subsidiary of {{ rep.control.ultimate_parents[0].name }}</span>
       <span v-if="rep.identity.registration_status"> · {{ rep.identity.registration_status }}</span>
     </div>
+    <v-alert
+      v-if="refreshSummary"
+      :type="refreshTone"
+      variant="tonal"
+      density="compact"
+      class="mb-3"
+    >
+      <div class="d-flex align-center ga-2 flex-wrap">
+        <strong>{{ refreshSummary }}</strong>
+        <span v-if="refreshDetail" class="text-caption">{{ refreshDetail }}</span>
+        <v-spacer />
+        <v-btn v-if="refreshNeedsConfiguration" size="x-small" variant="text" to="/settings">Configure sources</v-btn>
+        <v-btn v-if="refreshCanRetry" size="x-small" variant="text" @click="enrich" :loading="enriching">Retry now</v-btn>
+      </div>
+    </v-alert>
     <v-tabs v-model="tab" density="compact"><v-tab value="overview">Overview</v-tab><v-tab value="people">People</v-tab><v-tab value="affiliations">Affiliations<v-badge v-if="rep.affiliations?.count" :content="rep.affiliations.count" inline /></v-tab><v-tab value="risk">Risk</v-tab><v-tab value="artifacts">Artifacts</v-tab><v-tab value="graph">Graph</v-tab></v-tabs>
     <v-window v-model="tab" class="mt-3">
       <v-window-item value="overview">
@@ -32,7 +47,7 @@
             <v-card variant="outlined" class="mb-3"><v-card-text>
               <span class="section">Recent news</span>
               <div v-if="!rep.news.length" class="text-body-2" style="opacity:.6">No news artifacts. Run enrichment with GDELT to fetch recent coverage.</div>
-              <div v-for="n in rep.news" :key="n.id" class="text-body-2 my-1"><a :href="n.url" target="_blank" rel="noopener">{{ n.title }}</a> <span class="text-caption" style="opacity:.7">{{ n.domain }} · {{ n.published_at }}<span v-if="n.sentiment"> · sentiment {{ n.sentiment }}</span></span></div>
+              <div v-for="n in rep.news" :key="n.id" class="text-body-2 my-1"><a :href="n.url" target="_blank" rel="noopener">{{ n.title }}</a> <TruthBadge v-if="n.simulated" value="simulated" /> <span class="text-caption" style="opacity:.7">{{ n.domain }} · {{ n.published_at }}<span v-if="n.sentiment"> · sentiment {{ n.sentiment }}</span></span></div>
             </v-card-text></v-card>
             <v-card variant="outlined" class="mb-3"><v-card-text>
               <div class="d-flex align-center ga-2 mb-2"><span class="section">Ownership</span><v-spacer /><span class="text-caption">{{ rep.control.ownership?.length || 0 }} records</span></div>
@@ -91,7 +106,7 @@
             <v-card variant="outlined" class="mb-3"><v-card-text>
               <span class="section">Screens</span>
               <div class="d-flex flex-wrap ga-1 mt-1">
-                <v-chip v-for="s in rep.screens" :key="s.predicate" size="small" variant="tonal" :color="s.result === 'hit' ? 'error' : s.result === 'clear' ? 'success' : undefined" :title="s.detail">{{ s.source }} {{ s.result }}</v-chip>
+                <v-chip v-for="s in rep.screens" :key="s.predicate" size="small" variant="tonal" :color="s.result === 'hit' ? 'error' : s.result === 'clear' ? 'success' : undefined" :title="s.detail">{{ s.source }} {{ s.result }}<span v-if="s.simulated"> · SIMULATED</span></v-chip>
                 <v-chip v-if="rep.geography.parent_seat && !rep.geography.parent_seat.code.startsWith('US')" size="small" variant="tonal" color="warning">Foreign seat</v-chip>
                 <span v-if="!rep.screens.length" class="text-body-2" style="opacity:.6">Not yet screened — run enrichment.</span>
               </div>
@@ -104,12 +119,12 @@
         <p class="text-caption mb-2" style="opacity:.7">Current — {{ rep.people.resolved_current_count }} resolved<span v-if="rep.people.board_size"> of {{ rep.people.board_size }} seats</span>. Two tenures are two edges, not one record overwritten.</p>
         <v-list density="compact" lines="two">
           <v-list-subheader>Current</v-list-subheader>
-          <v-list-item v-for="p in rep.people.current" :key="p.edge_id" :title="`${p.name} — ${p.title || ''}`" :subtitle="`${p.role_type || ''} · since ${p.from || '?'}${p.elsewhere.length ? ' · also: ' + p.elsewhere.map((x:any) => x.entity + (x.current ? '' : ' (former)')).join(', ') : ''}`">
-            <template #append><v-chip v-if="p.interlock" size="x-small" color="secondary" variant="tonal">Interlock</v-chip><v-chip v-if="p.concurrent_government" size="x-small" color="warning" variant="tonal" class="ml-1">Government post</v-chip><v-chip v-else-if="p.former_government" size="x-small" color="secondary" variant="tonal" class="ml-1">Ex-government</v-chip><v-chip v-if="p.public_official" size="x-small" color="secondary" variant="tonal" class="ml-1">Public official</v-chip><v-chip v-if="p.elsewhere.some((x:any) => x.flagged)" size="x-small" color="error" variant="tonal" class="ml-1">Linked to flagged</v-chip><a v-if="p.source_url" :href="p.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ p.source }}</a></template>
+          <v-list-item v-for="p in rep.people.current" :key="p.edge_id" :title="`${p.name} — ${p.title || ''}`" :subtitle="`${p.role_type || ''} · since ${p.from || '?'}${p.elsewhere.length ? ' · also: ' + p.elsewhere.map((x:any) => x.entity + (x.current ? '' : ' (former)') + (x.simulated ? ' (SIMULATED)' : '')).join(', ') : ''}`">
+            <template #append><TruthBadge v-if="p.simulated" value="simulated" /><v-chip v-if="p.interlock" size="x-small" color="secondary" variant="tonal">Interlock</v-chip><v-chip v-if="p.concurrent_government" size="x-small" color="warning" variant="tonal" class="ml-1">Government post</v-chip><v-chip v-else-if="p.former_government" size="x-small" color="secondary" variant="tonal" class="ml-1">Ex-government</v-chip><v-chip v-if="p.public_official" size="x-small" color="secondary" variant="tonal" class="ml-1">Public official</v-chip><v-chip v-if="p.elsewhere.some((x:any) => x.flagged)" size="x-small" color="error" variant="tonal" class="ml-1">Linked to flagged</v-chip><a v-if="p.source_url" :href="p.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ p.source }}</a></template>
           </v-list-item>
           <v-list-subheader>Former</v-list-subheader>
-          <v-list-item v-for="p in rep.people.former" :key="p.edge_id" :title="`${p.name} — ${p.title || ''}`" :subtitle="`${p.role_type || ''} · ${p.from || '?'} – ${p.to || '?'}${p.elsewhere.length ? ' · now: ' + p.elsewhere.filter((x:any) => x.current).map((x:any) => x.entity).join(', ') : ''}`">
-            <template #append><v-chip v-if="p.moved_to_flagged" size="x-small" color="error" variant="tonal">Moved to flagged</v-chip><a v-if="p.source_url" :href="p.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ p.source }}</a></template>
+          <v-list-item v-for="p in rep.people.former" :key="p.edge_id" :title="`${p.name} — ${p.title || ''}`" :subtitle="`${p.role_type || ''} · ${p.from || '?'} – ${p.to || '?'}${p.elsewhere.length ? ' · now: ' + p.elsewhere.filter((x:any) => x.current).map((x:any) => x.entity + (x.simulated ? ' (SIMULATED)' : '')).join(', ') : ''}`">
+            <template #append><TruthBadge v-if="p.simulated" value="simulated" /><v-chip v-if="p.moved_to_flagged" size="x-small" color="error" variant="tonal">Moved to flagged</v-chip><a v-if="p.source_url" :href="p.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ p.source }}</a></template>
           </v-list-item>
           <v-list-item v-if="!rep.people.current.length && !rep.people.former.length" subtitle="No officers or directors resolved. LittleSis and EDGAR coverage is strongest for large listed firms." />
         </v-list>
@@ -121,7 +136,7 @@
           <v-list density="compact" lines="two">
             <v-list-item v-for="t in rep.affiliations[sec[1]]" :key="t.edge_id" :subtitle="`${t.kind === 'agency' ? (t.federal ? 'federal body' : 'government body') : (t.org_types || []).filter((x:string) => x !== 'Organization').join(', ') || 'organization'}${t.from || t.to ? ' · ' + (t.from || '?') + ' – ' + (t.current ? 'present' : t.to || '?') : ''}${t.amount ? ' · $' + Number(t.amount).toLocaleString() : ''}`">
               <template #title><router-link :to="{ path: `/entities/${t.entity_id}`, query: reportQuery({ vendor: t.entity_id }) }">{{ t.entity }}</router-link><span v-if="!t.outbound" class="text-caption ml-1" style="opacity:.7">(inbound)</span></template>
-              <template #append><v-chip v-if="t.flagged" size="x-small" color="error" variant="tonal">Flagged</v-chip><v-chip v-else-if="t.foreign" size="x-small" color="warning" variant="tonal">Foreign · {{ t.incorporated || t.parent_seat }}</v-chip><v-chip v-else-if="t.foreign_hint" size="x-small" color="secondary" variant="tonal">Foreign? (name)</v-chip><a v-if="t.source_url" :href="t.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ t.source }}</a></template>
+              <template #append><TruthBadge v-if="t.simulated" value="simulated" /><v-chip v-if="t.flagged" size="x-small" color="error" variant="tonal">Flagged</v-chip><v-chip v-else-if="t.foreign" size="x-small" color="warning" variant="tonal">Foreign · {{ t.incorporated || t.parent_seat }}</v-chip><v-chip v-else-if="t.foreign_hint" size="x-small" color="secondary" variant="tonal">Foreign? (name)</v-chip><a v-if="t.source_url" :href="t.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ t.source }}</a></template>
             </v-list-item>
             <v-list-item v-if="!rep.affiliations[sec[1]].length" subtitle="None on record." />
           </v-list>
@@ -291,7 +306,31 @@ const loadedReportScope = ref('')
 const reportScope = computed(() => `${props.id}\u0000${reportRoot.value}`)
 const reportReady = computed(() => Boolean(rep.value) && loadedReportScope.value === reportScope.value)
 const activeFinding = computed(() => rep.value?.risk?.indicators?.find((i: any) => i.family === selectedFinding.value) || null)
-async function load() {
+const refreshState = computed<any>(() => jobs.latestFor(props.id) || rep.value?.refresh || null)
+const refreshResults = computed<any[]>(() => Object.values(refreshState.value?.results || {}).filter(value => value && typeof value === 'object'))
+const refreshStatus = computed(() => String(refreshState.value?.job_status || refreshState.value?.status || ''))
+const refreshNeedsConfiguration = computed(() => refreshResults.value.some(result => result.status === 'credential-required' || result.availability === 'credential-required'))
+const refreshUnavailableCount = computed(() => refreshResults.value.filter(result => ['failed', 'timed_out', 'unavailable'].includes(result.status) || result.availability === 'unavailable').length)
+const refreshEmptyCount = computed(() => refreshResults.value.filter(result => result.status === 'empty').length)
+const refreshCanRetry = computed(() => ['partial', 'failed', 'timed_out'].includes(refreshStatus.value) || refreshUnavailableCount.value > 0)
+const refreshSummary = computed(() => {
+  if (['queued', 'running', 'deduplicated'].includes(refreshStatus.value)) return 'Refreshing applicable live sources'
+  if (refreshStatus.value === 'succeeded') return 'Live-source refresh completed'
+  if (refreshStatus.value === 'empty') return 'Live-source refresh completed with no new facts'
+  if (refreshStatus.value === 'partial') return 'Live-source refresh completed with partial results'
+  if (refreshStatus.value === 'timed_out') return 'Live-source refresh timed out'
+  if (refreshStatus.value === 'failed') return 'Live-source refresh failed'
+  return ''
+})
+const refreshDetail = computed(() => {
+  const parts = []
+  if (refreshNeedsConfiguration.value) parts.push('credentials required')
+  if (refreshUnavailableCount.value) parts.push(`${refreshUnavailableCount.value} unavailable`)
+  if (refreshEmptyCount.value) parts.push(`${refreshEmptyCount.value} returned no new facts`)
+  return parts.join(' · ')
+})
+const refreshTone = computed(() => refreshCanRetry.value || refreshNeedsConfiguration.value ? 'warning' : refreshStatus.value === 'succeeded' ? 'success' : 'info')
+async function load(refresh = true) {
   const generation = reportRequest.begin()
   const entityId = props.id
   const rootId = reportRoot.value
@@ -300,9 +339,15 @@ async function load() {
   decisionHistory.value = { current: null, events: [] }
   decisionDialog.value = false
   loadedReportScope.value = ''
-  const report = await api.get(`/api/entities/${entityId}/report?${qs({ root_id: rootId })}`)
-  const profile = await getVendorRiskProfile(entityId, report, rootId)
-  if (!reportRequest.isCurrent(generation) || entityId !== props.id || rootId !== reportRoot.value) return
+  const includeSimulated = Boolean(ws.ws.include_simulated)
+  const report = await api.get(`/api/entities/${entityId}/report?${qs({ root_id: rootId, include_simulated: includeSimulated, refresh })}`)
+  const profile = await getVendorRiskProfile(entityId, report, rootId, includeSimulated)
+  if (
+    !reportRequest.isCurrent(generation)
+    || entityId !== props.id
+    || rootId !== reportRoot.value
+    || includeSimulated !== Boolean(ws.ws.include_simulated)
+  ) return
   rep.value = report
   decisionHistory.value = report.analyst_decisions || { current: null, events: [] }
   riskProfile.value = profile
@@ -342,7 +387,7 @@ function supplyTruthStatus(s: any) {
 function sevIcon(s: string | null) { return s === 'high' ? 'mdi-alert-octagon' : s === 'medium' ? 'mdi-alert' : s === 'low' ? 'mdi-information-outline' : s === 'clear' ? 'mdi-check-circle-outline' : 'mdi-help-circle-outline' }
 function sevColor(s: string | null) { return s === 'high' ? 'error' : s === 'medium' ? 'warning' : s === 'low' ? 'secondary' : s === 'clear' ? 'success' : undefined }
 async function enrich() { enriching.value = true; try { await jobs.enqueue(props.id) } finally { enriching.value = false } }
-async function regen() { regen_busy.value = true; try { await api.post(`/api/entities/${props.id}/summary`); await load() } catch (e: any) { alert(e.message) } finally { regen_busy.value = false } }
+async function regen() { regen_busy.value = true; try { await api.post(`/api/entities/${props.id}/summary`); await load(false) } catch (e: any) { alert(e.message) } finally { regen_busy.value = false } }
 function reportQuery(overrides: Record<string, any> = {}) {
   return reportRouteQuery(route.query, reportRoot.value, props.id, overrides)
 }
@@ -395,14 +440,17 @@ async function saveDecision() {
     )
     await api.post(`/api/claims/entities/${encodeURIComponent(props.id)}/decisions`, decisionForm.value)
     decisionDialog.value = false
-    await load()
+    await load(false)
   } catch (error: any) {
     decisionError.value = error.message
   } finally { decisionSaving.value = false }
 }
 watch(tab, async (t) => { if (t === 'graph') await loadReportGraph() })
-watch(() => jobs.jobs.filter(j => j.entity_id === props.id && ['succeeded', 'empty', 'partial', 'failed', 'timed_out'].includes(j.status)).length, load)
-watch([() => props.id, reportRoot], load, { immediate: true })
+watch(
+  () => jobs.jobs.filter(j => j.entity_id === props.id && ['succeeded', 'empty', 'partial', 'failed', 'timed_out'].includes(j.status)).length,
+  () => load(false),
+)
+watch([() => props.id, reportRoot, () => ws.ws.include_simulated], () => load(true), { immediate: true })
 </script>
 <style scoped>
 .section { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; }

@@ -16,6 +16,7 @@ class EnrichIn(BaseModel):
     connectors: list[str] | None = None
     retrieval_mode: Literal["operational_live", "offline_fixture"] = "operational_live"
     resume_job_id: str | None = None
+    force: bool = False
 
 
 class DiscoverIn(BaseModel):
@@ -37,6 +38,7 @@ async def enrich(entity_id: str, body: EnrichIn | None = None, user: str = Depen
             requested_by="ui",
             retrieval_mode=body.retrieval_mode if body else "operational_live",
             resume_job_id=body.resume_job_id if body else None,
+            force=body.force if body else False,
         )
     except ValueError as error:
         raise HTTPException(400, str(error)) from error

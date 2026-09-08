@@ -155,6 +155,7 @@ export type VendorRiskProfile = {
   lei?: string | null
   tier?: number | string | null
   sourceMode: 'live' | 'frozen'
+  refresh?: Record<string, unknown>
   contract_version: string
   score: number | null
   band: string
@@ -233,8 +234,8 @@ function safeEvidenceUrl(value?: string): string | undefined {
   }
 }
 
-export async function getVendorRiskProfile(id: string, suppliedReport?: any, rootId?: string): Promise<VendorRiskProfile> {
-  const report = suppliedReport || await api.get<any>(`/api/entities/${encodeURIComponent(id)}/report?${qs({ root_id: rootId })}`)
+export async function getVendorRiskProfile(id: string, suppliedReport?: any, rootId?: string, includeSimulated = false): Promise<VendorRiskProfile> {
+  const report = suppliedReport || await api.get<any>(`/api/entities/${encodeURIComponent(id)}/report?${qs({ root_id: rootId, include_simulated: includeSimulated })}`)
   const risk = report.risk || {}
   const evidenceByRef = new Map<string, RiskEvidence>()
   for (const evidence of report.screen_evidence || []) {
@@ -301,7 +302,8 @@ export async function getVendorRiskProfile(id: string, suppliedReport?: any, roo
     cage: report.identity?.cage,
     lei: report.identity?.lei,
     tier: report.identity?.tier,
-    sourceMode: 'live',
+    sourceMode: ['live', 'frozen'].includes(report.source_mode) ? report.source_mode : 'live',
+    refresh: report.refresh,
     contract_version: risk.contract_version || 'unavailable',
     score: risk.score ?? null,
     band: risk.band || 'not_assessed',
@@ -316,6 +318,8 @@ export async function getVendorRiskProfile(id: string, suppliedReport?: any, roo
 
 export interface EntityReportContract {
   identity: EntitySummary & Record<string, unknown>
+  source_mode?: 'live' | 'frozen'
+  refresh?: Record<string, unknown>
   control?: {
     direct_parents?: Record<string, unknown>[]
     ultimate_parents?: Record<string, unknown>[]

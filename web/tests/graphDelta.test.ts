@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { restrictDeltaToFocus } from '../src/stores/graphDelta.ts'
+import { filterSimulatedDelta, restrictDeltaToFocus } from '../src/stores/graphDelta.ts'
 
 const program = (id: string) => ({ id, label: 'Entity', props: { kind: 'program' } })
 const supplier = (id: string) => ({ id, label: 'Entity', props: { kind: 'organization' } })
@@ -10,6 +10,23 @@ const canvas = {
   nodes: [program('program-a'), supplier('prime-a')],
   edges: [edge('prime-link', 'prime-a', 'program-a')],
 }
+
+test('live-only graph deltas drop simulated nodes and relationships', () => {
+  const delta = filterSimulatedDelta({
+    nodes: [
+      supplier('vendor'),
+      { ...supplier('scenario'), props: { simulated: true } },
+      supplier('other'),
+    ],
+    edges: [
+      edge('sim-node-edge', 'vendor', 'scenario', 'SUPPLIES'),
+      { ...edge('sim-edge', 'vendor', 'other', 'SUPPLIES'), props: { simulated: true } },
+    ],
+  }, false)
+
+  assert.deepEqual(delta.nodes.map(item => item.id), ['vendor', 'other'])
+  assert.deepEqual(delta.edges, [])
+})
 
 test('an unrelated program update cannot add its supplier to a focused canvas', () => {
   const result = restrictDeltaToFocus(

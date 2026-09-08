@@ -127,4 +127,28 @@ class EPSSConnector(Connector):
                                   "as_of": record.get("date"),
                               }, artifact=artifact, confidence=1.0,
                               detail="Probability estimate; does not establish entity exposure"))
+            try:
+                probability = max(0.0, min(1.0, float(record.get("epss"))))
+            except (TypeError, ValueError):
+                continue
+            severity = "high" if probability >= 0.1 else ("medium" if probability >= 0.01 else "low")
+            facts.append(Fact(
+                NodeRef("Entity", entity["id"]),
+                "cyber_screen",
+                value=severity,
+                props={
+                    "cve": cve,
+                    "epss_probability": probability,
+                    "percentile": record.get("percentile"),
+                    "as_of": record.get("date"),
+                    "classification_rule": "EPSS >= 0.10 high; >= 0.01 medium; otherwise low",
+                },
+                artifact=artifact,
+                confidence=1.0,
+                detail=(
+                    f"{cve} is explicitly associated with this entity and has an EPSS "
+                    f"probability of {probability:.3f}; this prioritizes review and does "
+                    "not establish exploitability or compromise."
+                ),
+            ))
         return facts

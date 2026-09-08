@@ -5,15 +5,17 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from .. import db, events
+from ..config import load_workspace, settings
 from ..content import document, summarize
 from ..connectors.http import HttpError, fetch_document
 from ..graphio import subgraph_from_graph
 from ..raw import find_raw
 from ..report import build_report, deterministic_summary, persist_summary
 from ..enrichment import decisions
+from ..enrichment.worker import worker
 from ..supply_chain import SupplyChainAnalysis, get_supply_chain_analysis
 from ..schema import SOURCE_KINDS, SUPPLY_SCOPE_MAX_DEPTH
-from ..tools.handlers import ToolContext, expand_subgraph, search_entities
+from ..tools.handlers import ToolContext, expand_subgraph, filter_simulated_subgraph, search_entities
 from .deps import user_id
 
 router = APIRouter(prefix="/api", tags=["graph"])
@@ -27,10 +29,19 @@ _PUBLIC_ARTIFACT_PROJECTION = (
 
 @router.get("/graph/stats")
 async def stats():
+    include_simulated = load_workspace().include_simulated
     rows = await db.read(
-        "MATCH (n) WITH labels(n)[0] AS l, count(*) AS c RETURN collect({label:l, count:c}) AS nodes"
+        "MATCH (n) WHERE $include_simulated OR coalesce(n.simulated,false)=false "
+        "WITH labels(n)[0] AS l, count(*) AS c RETURN collect({label:l, count:c}) AS nodes",
+        {"include_simulated": include_simulated},
     )
-    rels = await db.read("MATCH ()-[r]->() WITH type(r) AS t, count(*) AS c RETURN collect({type:t, count:c}) AS rels")
+    rels = await db.read(
+        "MATCH (a)-[r]->(b) WHERE $include_simulated OR "
+        "(coalesce(a.simulated,false)=false AND coalesce(r.simulated,false)=false "
+        "AND coalesce(b.simulated,false)=false) "
+        "WITH type(r) AS t, count(*) AS c RETURN collect({type:t, count:c}) AS rels",
+        {"include_simulated": include_simulated},
+    )
     return {"nodes": rows[0]["nodes"] if rows else [], "rels": rels[0]["rels"] if rels else []}
 
 
@@ -57,7 +68,10 @@ async def subgraph(entity_id: str, depth: int = Query(2, ge=1, le=6), people: bo
 async def programs():
     """The programs the canvas can be narrowed to. The list the focus picker is built from."""
     rows = await db.read(
-        "MATCH (e:Entity) WHERE e.kind = 'program' RETURN e.id AS id, e.name AS name ORDER BY e.name"
+        "MATCH (e:Entity) WHERE e.kind = 'program' "
+        "AND ($include_simulated OR coalesce(e.simulated,false)=false) "
+        "RETURN e.id AS id, e.name AS name ORDER BY e.name",
+        {"include_simulated": load_workspace().include_simulated},
     )
     return {"items": rows}
 
@@ -77,33 +91,41 @@ async def graph_all(people: bool = True, countries: bool = False, artifacts: boo
     labels = ["Entity"] + [l for k, v in on.items() if v for l in _LAYER_LABELS[k]]
     # Collected into two lists rather than a row per edge: the read cap counts records, and
     # the graph is hydrated from whatever the row references however deeply it is nested.
+    include_simulated = load_workspace().include_simulated
     _, graph, _ = await db.read_graph(
         """
-        MATCH (n) WHERE any(l IN labels(n) WHERE l IN $labels)
-           OR (n:Artifact AND CASE WHEN coalesce(n.kind, 'record') IN $source_kinds THEN $sources ELSE $artifacts END)
+        MATCH (n) WHERE ($include_simulated OR coalesce(n.simulated,false)=false)
+          AND (any(l IN labels(n) WHERE l IN $labels)
+           OR (n:Artifact AND CASE WHEN coalesce(n.kind, 'record') IN $source_kinds THEN $sources ELSE $artifacts END))
         WITH n, CASE WHEN n:Entity THEN 0 WHEN n:Person THEN 1 WHEN n:Location THEN 2
                      WHEN n:Category THEN 3 WHEN n:Artifact THEN 4 ELSE 5 END AS rank
         ORDER BY rank, coalesce(n.name, n.id)
         WITH collect(n)[..$limit] AS nodes
         UNWIND nodes AS n
         OPTIONAL MATCH (n)-[r]->(m) WHERE m IN nodes
+          AND ($include_simulated OR coalesce(r.simulated,false)=false)
         RETURN nodes, collect(DISTINCT r) AS rels
         """,
-        {"labels": labels, "limit": limit, "artifacts": artifacts, "sources": sources, "source_kinds": list(SOURCE_KINDS)},
+        {"labels": labels, "limit": limit, "artifacts": artifacts, "sources": sources,
+         "source_kinds": list(SOURCE_KINDS), "include_simulated": include_simulated},
     )
-    sub = subgraph_from_graph(graph)
+    sub = filter_simulated_subgraph(subgraph_from_graph(graph), include_simulated)
     return {"subgraph": sub, "truncated": len(sub["nodes"]) >= limit}
 
 
 @router.get("/graph/node/{node_id}")
 async def node(node_id: str):
+    include_simulated = load_workspace().include_simulated
     rows = await db.read(
-        "MATCH (n {id:$id}) OPTIONAL MATCH (n)-[r]-(m) WITH n, type(r) AS t, count(m) AS c "
+        "MATCH (n {id:$id}) WHERE $include_simulated OR coalesce(n.simulated,false)=false "
+        "OPTIONAL MATCH (n)-[r]-(m) WHERE $include_simulated OR "
+        "(coalesce(r.simulated,false)=false AND coalesce(m.simulated,false)=false) "
+        "WITH n, type(r) AS t, count(m) AS c "
         "RETURN n{.id,.name,.title,.kind,.uei,.cage,.lei,.code,.source,.source_url,"
         ".retrieved_at,.published_at,.simulated,.flagged,.registration_status,"
         ".source_status,.confidence} AS props, labels(n) AS labels, "
         "collect({type:t, count:c}) AS degree",
-        {"id": node_id},
+        {"id": node_id, "include_simulated": include_simulated},
     )
     if not rows:
         raise HTTPException(404, "no such node")
@@ -111,9 +133,12 @@ async def node(node_id: str):
 
 
 @router.get("/entities")
-async def entities(q: str | None = None, kind: str | None = None, flagged: bool | None = None, root_id: str | None = None, limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0, le=100000)):
-    where = ["1=1"]
-    params: dict = {"limit": limit, "offset": offset}
+async def entities(q: str | None = None, kind: str | None = None, flagged: bool | None = None,
+                   root_id: str | None = None, include_simulated: bool | None = None,
+                   limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0, le=100000)):
+    include_simulated = load_workspace().include_simulated and include_simulated is not False
+    where = ["($include_simulated OR coalesce(e.simulated,false)=false)"]
+    params: dict = {"limit": limit, "offset": offset, "include_simulated": include_simulated}
     if q:
         where.append("toLower(e.name) CONTAINS toLower($q)")
         params["q"] = q
@@ -129,12 +154,16 @@ async def entities(q: str | None = None, kind: str | None = None, flagged: bool 
             f"MATCH path=(e:Entity)-[:SUPPLIES*1..{SUPPLY_SCOPE_MAX_DEPTH}]->"
             "(program:Entity {id:$root_id}) "
             f"WHERE program.kind='program' AND {' AND '.join(where)} "
+            "AND ($include_simulated OR (all(n IN nodes(path) WHERE coalesce(n.simulated,false)=false) "
+            "AND all(r IN relationships(path) WHERE coalesce(r.simulated,false)=false))) "
             "WITH e, min(length(path)) AS tier"
         )
         total_query = (
             f"MATCH path=(e:Entity)-[:SUPPLIES*1..{SUPPLY_SCOPE_MAX_DEPTH}]->"
             "(program:Entity {id:$root_id}) "
             f"WHERE program.kind='program' AND {' AND '.join(where)} "
+            "AND ($include_simulated OR (all(n IN nodes(path) WHERE coalesce(n.simulated,false)=false) "
+            "AND all(r IN relationships(path) WHERE coalesce(r.simulated,false)=false))) "
             "WITH DISTINCT e RETURN count(e) AS n"
         )
     else:
@@ -144,15 +173,60 @@ async def entities(q: str | None = None, kind: str | None = None, flagged: bool 
         f"""
         {scoped_match}
         OPTIONAL MATCH (e)-[s:SUPPLIES]->(c:Entity)
-        OPTIONAL MATCH (e)-[:INCORPORATED_IN]->(inc:Location)
-        OPTIONAL MATCH (e)-[:PARENT_SEATED_IN]->(seat:Location)
+          WHERE $include_simulated OR (coalesce(s.simulated,false)=false AND coalesce(c.simulated,false)=false)
+        OPTIONAL MATCH (e)-[ir:INCORPORATED_IN]->(inc:Location)
+          WHERE $include_simulated OR (coalesce(ir.simulated,false)=false AND coalesce(inc.simulated,false)=false)
+        OPTIONAL MATCH (e)-[ps:PARENT_SEATED_IN]->(seat:Location)
+          WHERE $include_simulated OR (coalesce(ps.simulated,false)=false AND coalesce(seat.simulated,false)=false)
         WITH e, {"tier" if root_id else "min(s.tier)"} AS tier, count(DISTINCT c) AS consumers, head(collect(DISTINCT inc.code)) AS inc, head(collect(DISTINCT seat.code)) AS seat,
              any(x IN collect(s.sole_source) WHERE x = true) AS sole_source
         // The ultimate parent is the root of the control chain, walked rather than looked up.
         CALL {{
           WITH e
           OPTIONAL MATCH path=(up:Entity)-[:OWNS|ULTIMATE_PARENT_OF*1..6]->(e)
-          WHERE up.id <> e.id AND NOT EXISTS {{ (:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(up) }}
+          WHERE up.id <> e.id
+            AND ($include_simulated OR (
+              all(n IN nodes(path) WHERE coalesce(n.simulated,false)=false)
+              AND all(r IN relationships(path) WHERE
+                coalesce(r.simulated,false)=false
+                AND (
+                  r.claim_id IS NULL OR NOT EXISTS {{
+                    MATCH (rc:Claim {{id:r.claim_id}})
+                    WHERE coalesce(rc.simulated,false)
+                      OR EXISTS {{
+                        MATCH (ra:Artifact)-[:EVIDENCES]->(rc)
+                        WHERE coalesce(ra.simulated,false)
+                      }}
+                      OR EXISTS {{
+                        MATCH (:Artifact)-[re:EVIDENCES]->(rc)
+                        WHERE coalesce(re.simulated,false)
+                      }}
+                  }}
+                )
+              )
+            ))
+            AND NOT EXISTS {{
+              MATCH (owner:Entity)-[incoming:OWNS|ULTIMATE_PARENT_OF]->(up)
+              WHERE $include_simulated OR (
+                coalesce(owner.simulated,false)=false
+                AND coalesce(incoming.simulated,false)=false
+                AND coalesce(up.simulated,false)=false
+                AND (
+                  incoming.claim_id IS NULL OR NOT EXISTS {{
+                    MATCH (ic:Claim {{id:incoming.claim_id}})
+                    WHERE coalesce(ic.simulated,false)
+                      OR EXISTS {{
+                        MATCH (ia:Artifact)-[:EVIDENCES]->(ic)
+                        WHERE coalesce(ia.simulated,false)
+                      }}
+                      OR EXISTS {{
+                        MATCH (:Artifact)-[ie:EVIDENCES]->(ic)
+                        WHERE coalesce(ie.simulated,false)
+                      }}
+                  }}
+                )
+              )
+            }}
           RETURN up.name AS parent ORDER BY length(path), up.name LIMIT 1
         }}
         RETURN e.id AS id, e.name AS name, e.kind AS kind, e.uei AS uei, e.cage AS cage, e.lei AS lei, tier, consumers, inc AS incorporated, seat AS parent_seat, parent,
@@ -167,14 +241,17 @@ async def entities(q: str | None = None, kind: str | None = None, flagged: bool 
 
 @router.get("/people")
 async def people(q: str | None = None, limit: int = Query(200, ge=1, le=1000)):
-    params: dict = {"limit": limit}
-    where = "WHERE toLower(p.name) CONTAINS toLower($q)" if q else ""
+    params: dict = {"limit": limit, "include_simulated": load_workspace().include_simulated}
+    clauses = ["($include_simulated OR coalesce(p.simulated,false)=false)"]
     if q:
+        clauses.append("toLower(p.name) CONTAINS toLower($q)")
         params["q"] = q
+    where = "WHERE " + " AND ".join(clauses)
     return await db.read(
         f"""
         MATCH (p:Person) {where}
         OPTIONAL MATCH (p)-[r:HELD_ROLE]->(e:Entity)
+          WHERE $include_simulated OR (coalesce(r.simulated,false)=false AND coalesce(e.simulated,false)=false)
         WITH p, collect({{entity_id:e.id, lei:e.lei, entity:e.name, title:r.title, role_type:r.role_type, from:r.from, to:r.to, current:coalesce(r.current, r.to IS NULL), edge_id:r.id}}) AS roles
         RETURN p.id AS id, p.name AS name, p.source AS source, p.source_url AS source_url, coalesce(p.simulated,false) AS simulated, roles,
                size([x IN roles WHERE x.current]) AS current_roles, size(apoc.coll.toSet([x IN roles | coalesce(x.lei, x.entity_id)])) AS entities
@@ -186,19 +263,29 @@ async def people(q: str | None = None, limit: int = Query(200, ge=1, le=1000)):
 
 @router.get("/artifacts")
 async def artifacts(kind: str | None = None, entity_id: str | None = None, limit: int = Query(200, ge=1, le=1000)):
-    where = ["1=1"]
-    params: dict = {"limit": limit}
+    where = ["($include_simulated OR coalesce(a.simulated,false)=false)"]
+    params: dict = {"limit": limit, "include_simulated": load_workspace().include_simulated}
     if kind:
         where.append("a.kind = $kind")
         params["kind"] = kind
     if entity_id:
-        where.append("EXISTS { MATCH (a)-[:ABOUT]->(:Entity {id:$eid}) }")
+        where.append(
+            "EXISTS { MATCH (a)-[scope:ABOUT]->(subject:Entity {id:$eid}) "
+            "WHERE $include_simulated OR (coalesce(scope.simulated,false)=false "
+            "AND coalesce(subject.simulated,false)=false) }"
+        )
         params["eid"] = entity_id
     return await db.read(
         f"""
         MATCH (a:Artifact) WHERE {' AND '.join(where)}
-        OPTIONAL MATCH (a)-[:ABOUT]->(e:Entity)
-        OPTIONAL MATCH (a)-[:EVIDENCES]->(c:Claim)
+        OPTIONAL MATCH (a)-[ab:ABOUT]->(e:Entity)
+          WHERE $include_simulated OR (
+            coalesce(ab.simulated,false)=false AND coalesce(e.simulated,false)=false
+          )
+        OPTIONAL MATCH (a)-[ev:EVIDENCES]->(c:Claim)
+          WHERE $include_simulated OR (
+            coalesce(ev.simulated,false)=false AND coalesce(c.simulated,false)=false
+          )
         RETURN a.id AS id, a.kind AS kind, a.title AS title, a.url AS url, a.source AS source, a.source_id AS source_id,
                a.source_identifier AS source_identifier,
                a.catalog_ids AS catalog_ids, a.published_at AS published_at, a.retrieved_at AS retrieved_at,
@@ -223,12 +310,19 @@ async def artifact_detail(artifact_id: str):
     rows = await db.read(
         """
         MATCH (a:Artifact {id:$id})
-        OPTIONAL MATCH (a)-[:ABOUT]->(e:Entity)
-        OPTIONAL MATCH (a)-[:EVIDENCES]->(c:Claim)
+        WHERE $include_simulated OR coalesce(a.simulated,false)=false
+        OPTIONAL MATCH (a)-[ab:ABOUT]->(e:Entity)
+          WHERE $include_simulated OR (
+            coalesce(ab.simulated,false)=false AND coalesce(e.simulated,false)=false
+          )
+        OPTIONAL MATCH (a)-[ev:EVIDENCES]->(c:Claim)
+          WHERE $include_simulated OR (
+            coalesce(ev.simulated,false)=false AND coalesce(c.simulated,false)=false
+          )
         RETURN """ + _PUBLIC_ARTIFACT_PROJECTION + """ AS artifact, collect(DISTINCT e{.id,.name}) AS about,
                collect(DISTINCT c{.id,.predicate,.status,.confidence}) AS claims
         """,
-        {"id": artifact_id},
+        {"id": artifact_id, "include_simulated": load_workspace().include_simulated},
     )
     if not rows:
         raise HTTPException(404, "no such artifact")
@@ -239,8 +333,10 @@ async def artifact_detail(artifact_id: str):
 
 async def _artifact_props(artifact_id: str) -> dict:
     rows = await db.read(
-        f"MATCH (a:Artifact {{id:$id}}) RETURN {_PUBLIC_ARTIFACT_PROJECTION} AS artifact",
-        {"id": artifact_id},
+        f"MATCH (a:Artifact {{id:$id}}) "
+        f"WHERE $include_simulated OR coalesce(a.simulated,false)=false "
+        f"RETURN {_PUBLIC_ARTIFACT_PROJECTION} AS artifact",
+        {"id": artifact_id, "include_simulated": load_workspace().include_simulated},
     )
     if not rows or not rows[0].get("artifact"):
         raise HTTPException(404, "no such artifact")
@@ -281,26 +377,61 @@ async def artifact_file(artifact_id: str):
 
 @router.get("/locations")
 async def locations():
+    include_simulated = load_workspace().include_simulated
     return await db.read(
         """
         MATCH (l:Location)
+        WHERE $include_simulated OR coalesce(l.simulated,false)=false
         OPTIONAL MATCH (e:Entity)-[r:INCORPORATED_IN|OPERATES_IN|MANUFACTURES_IN|PARENT_SEATED_IN]->(l)
+          WHERE $include_simulated OR (
+            coalesce(e.simulated,false)=false AND coalesce(r.simulated,false)=false
+          )
         RETURN l.id AS id, l.code AS code, l.name AS name, l.kind AS kind,
                size([x IN collect(type(r)) WHERE x='INCORPORATED_IN']) AS incorporated,
                size([x IN collect(type(r)) WHERE x='MANUFACTURES_IN']) AS manufactures,
                size([x IN collect(type(r)) WHERE x='PARENT_SEATED_IN']) AS parent_seats
         ORDER BY incorporated + manufactures + parent_seats DESC
-        """
+        """,
+        {"include_simulated": include_simulated},
     )
 
 
 @router.get("/entities/{entity_id}/report")
-async def report(entity_id: str, root_id: str | None = None, user: str = Depends(user_id)):
+async def report(entity_id: str, root_id: str | None = None, include_simulated: bool | None = None,
+                 refresh: bool = True, user: str = Depends(user_id)):
     """root_id — the focused program, when there is one — is what tier_from_root counts to."""
-    rep = await build_report(entity_id, root_id)
+    include_simulated = load_workspace().include_simulated and include_simulated is not False
+    rep = await build_report(entity_id, root_id, include_simulated=include_simulated)
     if not rep:
         raise HTTPException(404, "no such entity")
     rep["analyst_decisions"] = await decisions.history(entity_id, program_id=root_id)
+    if refresh and rep.get("identity", {}).get("kind") == "organization":
+        known_jobs = set(worker.jobs)
+        try:
+            job = await worker.enqueue(
+                entity_id, user=user, requested_by="report"
+            )
+            rep["refresh"] = {
+                "status": "deduplicated" if job.id in known_jobs else "queued",
+                "job_id": job.id,
+                "job_status": job.status,
+                "requested_at": job.created_at,
+                "window_s": max(0.0, settings.enrichment_refresh_dedupe_window_s),
+                "results": getattr(job, "results", {}),
+            }
+        except Exception:
+            rep["refresh"] = {
+                "status": "unavailable",
+                "reason": "refresh could not be queued",
+                "action": "Retry enrichment from the entity inspector.",
+            }
+    else:
+        rep["refresh"] = {
+            "status": "not_requested" if rep.get("identity", {}).get("kind") == "organization"
+            else "not_applicable"
+        }
+    rep["source_mode"] = "live"
+    rep["refresh_status"] = rep["refresh"]
     return rep
 
 

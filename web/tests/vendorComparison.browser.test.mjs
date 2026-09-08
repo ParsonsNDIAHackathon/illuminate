@@ -85,7 +85,7 @@ before(async () => {
       const json = body => Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }));
       window.fetch = input => {
         const url = String(input);
-        if (url.includes('/api/workspace')) return json({ root_id: null, root_label: null, permission_mode: 'ask_always', model_strong: null, model_fast: null, openai_base_url: null, layers: {} });
+        if (url.includes('/api/workspace')) return json({ root_id: null, root_label: null, permission_mode: 'ask_always', model_strong: null, model_fast: null, openai_base_url: null, include_simulated: true, layers: {} });
         if (url.includes('/api/permissions')) return json({ pending: [], history: [] });
         if (url.includes('/api/jobs')) return json([]);
         if (url.includes('/api/claims')) return json([]);

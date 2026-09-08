@@ -1,13 +1,13 @@
 import { defineStore } from 'pinia'
-import { api } from '../api/client'
+import { api } from '../api/client.ts'
 
 // No consumer here: which program is in view belongs to the canvas (see the graph store's
 // focusId), not to the workspace, which holds every program at once.
-export interface Workspace { root_id: string | null; root_label: string | null; permission_mode: string; model_strong: string | null; model_fast: string | null; openai_base_url: string | null; layers: Record<string, boolean>; defaults?: any }
+export interface Workspace { root_id: string | null; root_label: string | null; permission_mode: string; model_strong: string | null; model_fast: string | null; openai_base_url: string | null; include_simulated: boolean; layers: Record<string, boolean>; defaults?: any }
 
 export const useWorkspace = defineStore('workspace', {
   state: () => ({
-    ws: { root_id: null, root_label: null, permission_mode: 'ask_always', model_strong: null, model_fast: null, openai_base_url: null, layers: { entities: true, people: true, countries: false, categories: false, artifacts: false, sources: false, claims: false } } as Workspace,
+    ws: { root_id: null, root_label: null, permission_mode: 'ask_always', model_strong: null, model_fast: null, openai_base_url: null, include_simulated: false, layers: { entities: true, people: true, countries: false, categories: false, artifacts: false, sources: false, claims: false } } as Workspace,
     theme: (localStorage.getItem('illuminate.theme') as 'light' | 'dark') || 'dark',
     depth: Number(localStorage.getItem('illuminate.depth') || 2),
     modelKey: false,
@@ -15,7 +15,16 @@ export const useWorkspace = defineStore('workspace', {
   }),
   actions: {
     async load() { this.ws = await api.get('/api/workspace'); this.loaded = true },
-    async save(patch: Partial<Workspace>) { const body = { ...this.ws, ...patch }; delete (body as any).defaults; this.ws = await api.put('/api/workspace', body) },
+    async save(patch: Partial<Workspace>) {
+      const body = { ...this.ws, ...patch }
+      delete (body as any).defaults
+      const saved = await api.put<Workspace>('/api/workspace', body)
+      if (saved.include_simulated !== this.ws.include_simulated) {
+        const { useGraph } = await import('./graph.ts')
+        useGraph().resetForSimulationPolicyChange()
+      }
+      this.ws = saved
+    },
     setLayer(k: string, v: boolean) { this.ws.layers = { ...this.ws.layers, [k]: v }; this.save({ layers: this.ws.layers }) },
     setTheme(t: 'light' | 'dark') { this.theme = t; localStorage.setItem('illuminate.theme', t) },
     setDepth(d: number) { this.depth = d; localStorage.setItem('illuminate.depth', String(d)) },

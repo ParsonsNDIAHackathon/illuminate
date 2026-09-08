@@ -298,6 +298,7 @@ watch(() => route.fullPath, () => applyRouteFocus())
 watch(() => presetCompletion.value?.key, () => { expandedResultIds.value = [] })
 // Depth only shapes a focused view; the whole graph is not walked from a root.
 watch(() => ws.depth, () => { if (graph.focusId) reload() })
+watch(() => ws.ws.include_simulated, () => reload())
 </script>
 <style scoped>
 .explorer { display: grid; grid-template-columns: minmax(0, 1fr) 380px; height: calc(100dvh - 48px); min-width: 0; }

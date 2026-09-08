@@ -76,6 +76,47 @@ async def test_delta_carries_one_hop_of_context(gate):
     assert await events.delta_for([]) == {"nodes": [], "edges": []}
 
 
+@pytest.mark.asyncio
+async def test_enrichment_delta_excludes_simulated_context_by_default(monkeypatch):
+    graph = {
+        "nodes": [
+            {"id": TEST_ID, "label": "Entity", "props": {"simulated": False}},
+            {"id": OTHER_ID, "label": "Entity", "props": {"simulated": True}},
+        ],
+        "edges": [{
+            "id": "rel_simulated", "source": TEST_ID, "target": OTHER_ID,
+            "type": "SUPPLIES", "props": {"simulated": True},
+        }],
+    }
+
+    async def read_graph(*_args, **_kwargs):
+        return [], graph, []
+
+    monkeypatch.setattr(events.db, "read_graph", read_graph)
+    monkeypatch.setattr(events, "subgraph_from_graph", lambda value: value)
+    monkeypatch.setattr(
+        events, "load_workspace",
+        lambda: type("Workspace", (), {"include_simulated": False})(),
+    )
+    seen = []
+
+    async def listener(event, payload):
+        seen.append((event, payload))
+
+    events.add_listener(listener)
+    try:
+        await events.announce(
+            [TEST_ID, OTHER_ID], reason="enrich:done", source="enrichment",
+        )
+    finally:
+        events.remove_listener(listener)
+
+    delta = next(payload for event, payload in seen if event == "graph_delta")
+    assert [node["id"] for node in delta["subgraph"]["nodes"]] == [TEST_ID]
+    assert delta["subgraph"]["edges"] == []
+    assert delta["focus"] == [TEST_ID]
+
+
 @pytest.fixture
 def client():
     from illuminate.main import app
