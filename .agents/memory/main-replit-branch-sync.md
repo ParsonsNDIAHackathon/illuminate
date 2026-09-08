@@ -51,3 +51,15 @@ while its delivery channel is available.
 Git subprocess. During secret-backed network operations, disable repository hooks
 through a private, empty, command-scoped hooks directory; do not persist that
 setting or alter normal local credential-helper behavior.
+
+GitHub may reject a PAT-backed push when the published tree introduces a workflow
+file and the token lacks workflow permission. Removing the workflow in a later
+commit can unblock publication without rewriting the commit that introduced it.
+
+**Why:** GitHub accepted the preserved history once the workflow was absent from
+the final published tree, even though the earlier workflow-adding commit remained
+an ancestor.
+
+**How to apply:** If Actions are not required, delete the workflow in a new commit
+and revalidate rather than dropping or rewriting existing commits. If the workflow
+must remain, repair the credential permission instead.
