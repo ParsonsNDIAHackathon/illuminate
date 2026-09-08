@@ -117,3 +117,20 @@ onMounted(async () => {
   await loadCatalog()
 })
 </script>
+<style scoped>
+:deep(td), :deep(code) { overflow-wrap: anywhere; }
+@media (max-width: 767px) {
+  :deep(.v-radio .v-label) { white-space: normal; line-height: 1.35; }
+  :deep(.v-radio) { align-items: flex-start; margin-bottom: 8px; }
+  .d-flex.ga-3 > .v-input { min-width: 100% !important; width: 100%; }
+}
+@media (max-width: 600px) {
+  :deep(.v-table table) { width: 100%; min-width: 0 !important; }
+  :deep(.v-table tbody), :deep(.v-table tr), :deep(.v-table th), :deep(.v-table td) { display: block; width: 100%; }
+  :deep(.v-table tr) { padding-block: 6px; border-bottom: thin solid rgba(var(--v-border-color), var(--v-border-opacity)); }
+  :deep(.v-table th) { width: auto !important; }
+  :deep(.v-table th), :deep(.v-table td) { min-width: 0; height: auto; border: 0; }
+  :deep(.v-table th) { padding-bottom: 2px !important; }
+  :deep(.v-table td) { padding-top: 2px !important; }
+}
+</style>

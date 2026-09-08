@@ -62,4 +62,10 @@ async function refuse() {
   try { await perms.refuse(req.value.id, 'refused in UI'); perms.resolve({ ...req.value, status: 'refused' }) } finally { busy.value = false }
 }
 </script>
-<style scoped>.mono :deep(textarea) { font-family: ui-monospace, monospace; font-size: 12px; }</style>
+<style scoped>
+.mono :deep(textarea) { font-family: ui-monospace, monospace; font-size: 12px; }
+@media (max-width: 767px) {
+  :deep(.v-card-actions .v-btn) { flex: 1 1 210px; }
+  :deep(.v-card-actions .v-spacer) { display: none; }
+}
+</style>

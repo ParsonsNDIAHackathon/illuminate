@@ -70,11 +70,13 @@ function render(t: string) {
 watch(() => chat.messages.map(m => m.text.length + (m.tools?.length || 0)).join(','), () => nextTick(() => { if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight }))
 </script>
 <style scoped>
-.rail { display: flex; flex-direction: column; height: 100%; }
-.rail-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid rgba(128,128,128,.2); }
+.rail { display: flex; flex-direction: column; width: 100%; min-width: 0; height: 100%; }
+.rail-head { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 8px 10px; border-bottom: 1px solid rgba(128,128,128,.2); }
 .title { font-weight: 600; font-size: 13px; }
-.messages { flex: 1; overflow-y: auto; padding: 10px; }
+.messages { flex: 1; min-width: 0; overflow: auto; padding: 10px; }
 .empty { opacity: .8; font-size: 13px; }
+.empty :deep(.v-chip) { max-width: calc(100% - 8px); height: auto; min-height: 32px; white-space: normal; }
+.empty :deep(.v-chip__content) { white-space: normal; }
 .msg { margin-bottom: 10px; display: flex; }
 .msg.user { justify-content: flex-end; }
 .bubble { border-radius: 10px; padding: 8px 10px; font-size: 13px; max-width: 100%; }
@@ -88,5 +90,12 @@ watch(() => chat.messages.map(m => m.text.length + (m.tools?.length || 0)).join(
 .error-text { color: #f87171; font-size: 12px; }
 .cy-details { margin-top: 6px; font-size: 12px; }
 .cy-details summary { cursor: pointer; opacity: .7; }
-.input { display: flex; gap: 6px; padding: 8px; border-top: 1px solid rgba(128,128,128,.2); align-items: flex-end; }
+.input { display: flex; gap: 6px; min-width: 0; padding: 8px; border-top: 1px solid rgba(128,128,128,.2); align-items: flex-end; }
+.input > .v-input { min-width: 0; }
+.text, .sum, .tool { overflow-wrap: anywhere; min-width: 0; }
+@media (max-width: 420px) {
+  .rail-head { flex-wrap: wrap; }
+  .rail-head .title { flex: 1 0 auto; }
+  .tool { align-items: flex-start; flex-wrap: wrap; }
+}
 </style>

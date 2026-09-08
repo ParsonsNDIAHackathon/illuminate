@@ -1,0 +1,100 @@
+:root {
+  --illuminate-app-bar-height: 48px;
+}
+
+html, body, #app {
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+  margin: 0;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+.v-application,
+.v-application__wrap,
+.v-main,
+.v-main__wrap,
+.v-container,
+.v-card,
+.v-list-item,
+.v-window,
+.v-window__container,
+.v-window-item {
+  min-width: 0;
+  max-width: 100%;
+}
+
+a, p, dd, td, th, code, pre, .v-list-item-title, .v-list-item-subtitle,
+.v-card-title, .v-card-subtitle, .v-alert__content {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+/* Dataset width belongs to the dataset, never to the document. */
+.v-data-table,
+.v-table {
+  max-width: 100%;
+}
+.v-data-table__wrapper,
+.v-table__wrapper {
+  overflow-x: auto !important;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.v-data-table table { min-width: 760px; }
+.v-table table { min-width: 640px; }
+
+.v-overlay__content {
+  max-width: calc(100vw - 24px) !important;
+  max-height: calc(100dvh - 24px) !important;
+}
+.v-dialog > .v-overlay__content > .v-card {
+  max-height: calc(100dvh - 24px);
+}
+.v-dialog .v-card-text { overflow-y: auto; }
+.v-dialog .v-card-actions {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+@media (max-width: 767px) {
+  .v-container { padding: 12px !important; }
+  .v-btn { min-height: 40px; }
+  .v-btn.v-btn--icon { min-width: 40px; }
+  .v-chip-group .v-slide-group__content { flex-wrap: nowrap; }
+  .v-tabs { max-width: 100%; }
+  .v-tabs .v-slide-group__content { min-width: max-content; }
+  .v-dialog .v-card-title {
+    white-space: normal;
+    flex-wrap: wrap;
+    line-height: 1.3;
+    padding: 14px;
+  }
+  .v-dialog .v-card-subtitle { white-space: normal; }
+  .v-dialog .v-card-text { padding: 14px; }
+  .v-dialog .v-card-actions { padding: 10px 14px 14px; }
+  .v-container > .d-flex.align-center.mb-1,
+  .v-container > .d-flex.align-center.mb-2 {
+    flex-wrap: wrap;
+  }
+  .v-container > .d-flex.align-center.mb-1 > .v-spacer,
+  .v-container > .d-flex.align-center.mb-2 > .v-spacer {
+    display: none;
+  }
+  .v-container > .d-flex.align-center.mb-1 > .v-field,
+  .v-container > .d-flex.align-center.mb-2 > .v-field {
+    max-width: none !important;
+    flex: 1 1 180px;
+  }
+}
+
+@media (max-width: 420px) {
+  .v-overlay__content {
+    max-width: calc(100vw - 12px) !important;
+    max-height: calc(100dvh - 12px) !important;
+  }
+  .v-dialog > .v-overlay__content > .v-card {
+    max-height: calc(100dvh - 12px);
+  }
+}

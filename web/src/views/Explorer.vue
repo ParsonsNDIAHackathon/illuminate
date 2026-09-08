@@ -1,7 +1,7 @@
 <template>
   <div class="explorer">
     <div class="canvas">
-      <GraphCanvas ref="canvas" @expand="expand" />
+      <GraphCanvas ref="canvas" :show-simulation-notice="false" @expand="expand" />
       <div class="toolbar">
         <LayerToggles @change="reload" />
         <v-select class="focus" :model-value="graph.focusId" :items="focusItems" item-title="name" item-value="id"
@@ -13,22 +13,28 @@
       <div v-if="!graph.nodes.size && !graph.loading" class="empty">
         <v-btn color="primary" @click="reload">Load graph</v-btn>
       </div>
-      <div class="search">
-        <v-text-field v-model="q" :loading="searching" placeholder="Search entities, people, UEI, CAGE…" hide-details clearable prepend-inner-icon="mdi-magnify" density="compact" variant="solo" flat @update:focused="open = $event" @keydown.esc="open = false" @keydown.enter="hits[0] && onPick(hits[0].id)" />
-        <!-- mousedown.prevent keeps the field focused so a click here doesn't blur-close the list first -->
-        <v-list v-if="open && hits.length" class="hits" density="compact" @mousedown.prevent>
-          <v-list-item v-for="h in hits" :key="h.id" :title="h.name" :subtitle="[h.label, h.uei && `UEI ${h.uei}`].filter(Boolean).join(' · ')" @click="onPick(h.id)" />
-        </v-list>
-      </div>
-      <div v-if="graph.focusIds.length" class="focus-title">
-        <span>REPORT TRACE</span>
-        <strong>{{ graph.reportFocusLabel || 'Selected risk indicator' }}</strong>
-        <small>Loaded mission context remains visible; unrelated elements are recessed.</small>
-        <small v-if="graph.focusUnavailableIds.length" class="focus-missing">{{ graph.focusUnavailableIds.length }} referenced element{{ graph.focusUnavailableIds.length === 1 ? '' : 's' }} unavailable in the loaded graph.</small>
-        <div class="focus-links">
-          <router-link :to="`/entities/${graph.focusVendorId}`">Vendor report</router-link>
-          <a v-if="route.query.evidence" :href="String(route.query.evidence)" target="_blank" rel="noopener">Matching evidence</a>
-          <span v-else>No matching evidence destination</span>
+      <div class="canvas-overlays">
+        <div class="search">
+          <v-text-field v-model="q" :loading="searching" placeholder="Search entities, people, UEI, CAGE…" hide-details clearable prepend-inner-icon="mdi-magnify" density="compact" variant="solo" flat @update:focused="open = $event" @keydown.esc="open = false" @keydown.enter="hits[0] && onPick(hits[0].id)" />
+          <!-- mousedown.prevent keeps the field focused so a click here doesn't blur-close the list first -->
+          <v-list v-if="open && hits.length" class="hits" density="compact" @mousedown.prevent>
+            <v-list-item v-for="h in hits" :key="h.id" :title="h.name" :subtitle="[h.label, h.uei && `UEI ${h.uei}`].filter(Boolean).join(' · ')" @click="onPick(h.id)" />
+          </v-list>
+        </div>
+        <div v-if="hasSimulation" class="simulation-notice">
+          <strong>SIMULATION DATA</strong>
+          <span>Scenario material for analysis — not an allegation or verified finding.</span>
+        </div>
+        <div v-if="graph.focusIds.length" class="focus-title">
+          <span>REPORT TRACE</span>
+          <strong>{{ graph.reportFocusLabel || 'Selected risk indicator' }}</strong>
+          <small>Loaded mission context remains visible; unrelated elements are recessed.</small>
+          <small v-if="graph.focusUnavailableIds.length" class="focus-missing">{{ graph.focusUnavailableIds.length }} referenced element{{ graph.focusUnavailableIds.length === 1 ? '' : 's' }} unavailable in the loaded graph.</small>
+          <div class="focus-links">
+            <router-link :to="`/entities/${graph.focusVendorId}`">Vendor report</router-link>
+            <a v-if="route.query.evidence" :href="String(route.query.evidence)" target="_blank" rel="noopener">Matching evidence</a>
+            <span v-else>No matching evidence destination</span>
+          </div>
         </div>
       </div>
       <div class="notes">
@@ -65,6 +71,7 @@ const q = ref(''); const hits = ref<any[]>([]); const searching = ref(false); co
 // The programs the canvas can be narrowed to. The store keeps this current from live
 // deltas, so a program added while this view is open shows up here without a reload.
 const focusItems = computed(() => [{ id: null, name: 'Everything' }, ...graph.programs])
+const hasSimulation = computed(() => graph.nodeList.some(n => n.props?.simulated) || graph.edgeList.some(e => e.props?.simulated))
 let t: any
 // A plain text field, not an autocomplete: the typed text — and the canvas filter it drives — must survive blur.
 watch(q, (v) => {
@@ -117,18 +124,21 @@ watch(() => route.fullPath, applyRouteFocus)
 watch(() => ws.depth, () => { if (graph.focusId) reload() })
 </script>
 <style scoped>
-.explorer { display: grid; grid-template-columns: 1fr 380px; height: calc(100vh - 48px); }
-.canvas { position: relative; }
-.side { display: grid; grid-template-rows: minmax(120px, 42%) 1fr; border-left: 1px solid rgba(128,128,128,.2); min-height: 0; }
-.inspector-pane { border-bottom: 1px solid rgba(128,128,128,.2); overflow: auto; min-height: 0; }
-.chat-pane { min-height: 0; }
+.explorer { display: grid; grid-template-columns: minmax(0, 1fr) 380px; height: calc(100dvh - 48px); min-width: 0; }
+.canvas { position: relative; min-width: 0; min-height: 0; }
+.side { display: grid; grid-template-rows: minmax(120px, 42%) 1fr; border-left: 1px solid rgba(128,128,128,.2); min-width: 0; min-height: 0; }
+.inspector-pane { border-bottom: 1px solid rgba(128,128,128,.2); overflow: auto; min-width: 0; min-height: 0; }
+.chat-pane { min-width: 0; min-height: 0; }
 .hint { padding: 12px; opacity: .6; font-size: 13px; }
 .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: .8; }
-.toolbar { position: absolute; top: 8px; left: 12px; z-index: 5; display: flex; align-items: center; gap: 8px; }
-.focus { width: 230px; }
-.search { position: absolute; top: 52px; left: 12px; width: 360px; z-index: 5; }
-.hits { position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; max-height: 320px; overflow: auto; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
-.focus-title { position: absolute; left: 12px; top: 104px; z-index: 4; max-width: 350px; display: grid; padding: 9px 12px; border-left: 4px solid #006b62; background: rgba(245,248,240,.94); color: #173b37; box-shadow: 0 2px 10px rgba(25,45,40,.12); }
+.toolbar { position: absolute; top: 8px; left: 12px; right: 54px; z-index: 5; display: flex; align-items: center; gap: 8px; min-width: 0; max-width: calc(100% - 66px); }
+.focus { flex: 0 1 230px; min-width: 150px; }
+.canvas-overlays { position: absolute; top: 52px; left: 12px; z-index: 7; display: grid; gap: 8px; width: 360px; }
+.search { position: relative; z-index: 1; width: 100%; }
+.hits { position: absolute; top: 100%; left: 0; right: 0; z-index: 2; margin-top: 4px; max-height: 320px; overflow: auto; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
+.simulation-notice { display: flex; align-items: center; gap: 10px; max-height: 96px; overflow: auto; padding: 8px 14px; border: 2px solid #9a6700; border-radius: 4px; background: #fff4cf; color: #563b00; box-shadow: 0 3px 12px rgba(60,45,0,.16); font-size: 12px; letter-spacing: .01em; }
+.simulation-notice strong { font-size: 11px; letter-spacing: .12em; white-space: nowrap; }
+.focus-title { display: grid; max-height: 180px; overflow: auto; padding: 9px 12px; border-left: 4px solid #006b62; background: rgba(245,248,240,.94); color: #173b37; box-shadow: 0 2px 10px rgba(25,45,40,.12); }
 .focus-title span { color: #006b62; font-size: 9px; font-weight: 800; letter-spacing: .14em; }
 .focus-title strong { font-size: 13px; line-height: 1.25; }
 .focus-title small { opacity: .68; font-size: 10px; margin-top: 2px; }
@@ -139,4 +149,16 @@ watch(() => ws.depth, () => { if (graph.focusId) reload() })
 .notes { position: absolute; right: 56px; bottom: 12px; max-width: 520px; font-size: 12px; text-align: right; }
 .notes summary { cursor: pointer; opacity: .6; }
 .warn { color: #f59e0b; }
+@media (max-width: 900px) {
+  .explorer { display: grid; grid-template-columns: 1fr; grid-template-rows: minmax(420px, 58dvh) minmax(480px, 72dvh); height: auto; min-height: calc(100dvh - 48px); }
+  .side { grid-template-rows: minmax(160px, 40%) minmax(280px, 1fr); border-left: 0; border-top: 1px solid rgba(128,128,128,.25); }
+  .toolbar { left: 8px; right: 50px; display: grid; max-width: calc(100% - 58px); }
+  .focus { width: 100%; min-width: 0; }
+  .canvas-overlays { top: 96px; left: 8px; width: calc(100% - 68px); }
+  .notes { display: none; }
+}
+@media (max-width: 420px) {
+  .explorer { grid-template-rows: minmax(390px, 56dvh) minmax(480px, 76dvh); }
+  .simulation-notice { align-items: flex-start; flex-direction: column; gap: 2px; padding: 6px 9px; font-size: 10px; }
+}
 </style>

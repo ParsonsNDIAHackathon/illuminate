@@ -124,4 +124,12 @@ dl { display: grid; grid-template-columns: 190px 1fr; gap: 3px 12px; margin: 0; 
 dt { opacity: .6; } dd { margin: 0; overflow-wrap: anywhere; }
 .warn { color: rgb(var(--v-theme-warning)); font-weight: 600; }
 .json { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.45; max-height: 420px; overflow: auto; padding: 10px 12px; border-radius: 6px; background: rgba(128, 128, 128, .12); white-space: pre; }
+@media (max-width: 767px) {
+  dl { grid-template-columns: 110px minmax(0, 1fr); gap: 4px 8px; }
+  .json { max-width: 100%; }
+}
+@media (max-width: 420px) {
+  dl { grid-template-columns: 1fr; }
+  dt { margin-top: 5px; }
+}
 </style>

@@ -21,4 +21,6 @@ function onChange(vals: string[]) {
   emit('change')
 }
 </script>
-<style scoped>.layers { flex: 0 0 auto; }</style>
+<style scoped>
+.layers { flex: 1 1 0; min-width: 0; max-width: 100%; overflow-x: auto; }
+</style>

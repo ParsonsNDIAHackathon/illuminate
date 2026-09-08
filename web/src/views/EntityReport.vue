@@ -231,8 +231,21 @@ dt { opacity: .6; } dd { margin: 0; }
 .gap-row .v-chip { margin-left: 3px; }
 .deep-links { display: flex; flex-wrap: wrap; }
 .mono { font-family: ui-monospace, monospace; }
-@media (max-width: 600px) {
+@media (max-width: 767px) {
+  .report > .d-flex:first-child { flex-wrap: wrap; }
+  .report > .d-flex:first-child h2 { flex: 1 1 calc(100% - 60px); overflow-wrap: anywhere; }
+  .report > .d-flex:first-child .v-spacer { display: none; }
   .factor-grid { grid-template-columns: 1fr; }
   .finding-actions { align-items: stretch; flex-direction: column; }
+  .finding-actions > div { margin-right: 0; }
+  .evidence-unavailable { max-width: none; }
+  dl { grid-template-columns: 94px minmax(0,1fr); }
+  :deep(.v-list-item__append) { flex-wrap: wrap; justify-content: flex-end; max-width: 46%; }
+  :deep(.v-list-item-title), :deep(.v-list-item-subtitle) {
+    display: block;
+    overflow: visible;
+    white-space: normal;
+    -webkit-line-clamp: unset;
+  }
 }
 </style>

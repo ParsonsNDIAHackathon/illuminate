@@ -1,7 +1,7 @@
 <template>
   <div class="canvas-wrap">
     <div ref="el" class="cy"></div>
-    <div v-if="hasSimulation" class="simulation-notice">
+    <div v-if="showSimulationNotice && hasSimulation" class="simulation-notice">
       <strong>SIMULATION DATA</strong>
       <span>Scenario material for analysis — not an allegation or verified finding.</span>
     </div>
@@ -31,6 +31,7 @@ cytoscape.use(cola)
 const el = ref<HTMLElement>()
 const graph = useGraph()
 const ws = useWorkspace()
+const { showSimulationNotice = true } = defineProps<{ showSimulationNotice?: boolean }>()
 const hasSimulation = computed(() => graph.nodeList.some(n => n.props?.simulated) || graph.edgeList.some(e => e.props?.simulated))
 let cy: Core | null = null
 let sameNameCollapsed: boolean | null = null
@@ -467,4 +468,8 @@ defineExpose({ fit, layout })
 .simulation-notice { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 10px; padding: 8px 14px; border: 2px solid #9a6700; border-radius: 4px; background: #fff4cf; color: #563b00; box-shadow: 0 3px 12px rgba(60,45,0,.16); font-size: 12px; letter-spacing: .01em; }
 .simulation-notice strong { font-size: 11px; letter-spacing: .12em; white-space: nowrap; }
 @media (max-width: 760px) { .simulation-notice { left: 10px; right: 54px; transform: none; align-items: flex-start; flex-direction: column; gap: 2px; } }
+@media (max-width: 520px) {
+  .simulation-notice { max-height: 72px; overflow: auto; padding: 6px 9px; font-size: 10px; }
+  .canvas-tools { right: 4px; top: 4px; }
+}
 </style>
