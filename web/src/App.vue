@@ -2,10 +2,16 @@
   <v-app :theme="ws.theme">
     <v-app-bar density="compact" flat border>
       <span class="brand">ILLUMINATE</span>
-      <!-- What the canvas is showing, not a workspace setting: it follows the focus picker. -->
-      <v-chip class="ml-3" size="small" variant="tonal" :prepend-icon="graph.focusId ? 'mdi-target' : 'mdi-graph-outline'" to="/"
-              :title="graph.focusId ? 'The canvas is narrowed to this program — pick Everything to see them all' : 'The canvas shows every program'">
-        {{ graph.focusId ? `Program: ${graph.focusLabel || graph.focusId}` : 'All programs' }}
+      <!-- What the canvas is showing, not a workspace setting: it follows the focus picker.
+           Unfocused is the default, so it goes unsaid and the space carries the simulation
+           notice instead — where it cannot sit on top of the graph. -->
+      <v-chip v-if="graph.focusId" class="ml-3" size="small" variant="tonal" prepend-icon="mdi-target" to="/"
+              title="The canvas is narrowed to this program — pick Everything to see them all">
+        Program: {{ graph.focusLabel || graph.focusId }}
+      </v-chip>
+      <v-chip v-if="graph.hasSimulated" class="ml-3 simulated-badge" size="small" variant="flat" prepend-icon="mdi-flask-outline"
+              title="Scenario material for analysis — not an allegation or verified finding. Simulated nodes, edges and evidence are badged SIM throughout.">
+        Simulated data
       </v-chip>
       <v-spacer />
       <v-select v-if="route.name === 'graph'" :model-value="ws.depth" @update:model-value="ws.setDepth" :items="[1,2,3,4,5,6]" label="Depth" hide-details style="max-width: 110px" class="mr-2" />
@@ -54,5 +60,6 @@ watch(() => jobs.jobs.map(j => j.status).join(), (a, b) => { if (a !== b) { cons
 </script>
 <style>
 .brand { font-family: 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .18em; font-weight: 700; margin-left: 12px; }
+.simulated-badge { background: #fff4cf; color: #563b00; border: 1px solid #9a6700; font-weight: 600; letter-spacing: .04em; }
 html, body { overscroll-behavior: none; }
 </style>
