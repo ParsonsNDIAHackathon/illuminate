@@ -26,7 +26,7 @@
         <v-alert type="info" variant="tonal" density="compact" class="mb-3">
           <div class="text-body-2">{{ doc?.note || 'This page serves no document.' }}</div>
           <div class="text-caption mt-1">{{ hostOf(href) }} will not display inside another page, so the record it was
-          captured from is shown here — open it in a new tab for the page itself.</div>
+            captured from is shown here — open it in a new tab for the page itself.</div>
         </v-alert>
         <div v-if="summaryLoading" class="py-6 text-center"><v-progress-circular indeterminate size="24" /></div>
         <ArtifactSummary v-else-if="summary" :summary="summary" />
