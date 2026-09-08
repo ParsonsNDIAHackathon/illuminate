@@ -13,6 +13,8 @@ web/dist/
 *.local
 api/data/
 data/
+!web/src/data/
+!web/src/data/vendorComparisonPreset.ts
 # neo4j volume
 .neo4j/
 # misc
