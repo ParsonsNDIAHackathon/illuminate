@@ -14,12 +14,16 @@ from ..cypher.templates import match_intent
 from ..graphio import merge_subgraphs
 from ..styles import derive_legend, validate_ops
 from ..tools.contract import openai_tools
-from ..tools.handlers import ToolContext, ToolResult, dispatch
+from ..tools.handlers import ToolContext, ToolResult, dispatch, safe_tool_data
 from .client import client_for, models
 from .prompts import constant_prefix, turn_context
 
 Emit = Callable[[dict], Awaitable[None]]
 MAX_TOOL_ROUNDS = 8
+SAFE_NO_RESULT = (
+    "I can only state supplier facts from current deterministic graph results. "
+    "Please ask me to search the graph or run a named analysis."
+)
 
 
 @dataclass
@@ -52,9 +56,12 @@ class TurnAccumulator:
     style_ops: list[dict] = field(default_factory=list)
     permissions: list[dict] = field(default_factory=list)
     tool_calls: list[dict] = field(default_factory=list)
+    guarded_answer: str | None = None
+    deterministic_notes: list[str] = field(default_factory=list)
 
     def absorb(self, name: str, args: dict, r: ToolResult) -> None:
         self.tool_calls.append({"name": name, "args": args, "ok": r.ok})
+        self.deterministic_notes.append(f"{name}: {_summarise(r)}")
         if r.cypher:
             self.cypher.append({"tool": name, "statement": r.cypher, "params": r.params or {}, "notes": r.notes})
         if r.subgraph:
@@ -63,12 +70,25 @@ class TurnAccumulator:
             self.style_ops.extend(r.style_ops)
         if r.permission:
             self.permissions.append(r.permission)
+        if name == "get_entity_report" and isinstance(r.data, dict):
+            summary = r.data.get("summary")
+            if isinstance(summary, dict) and summary.get("text"):
+                citations = summary.get("citations") or []
+                suffix = f"\n\nEvidence: {', '.join(citations)}" if citations else ""
+                self.guarded_answer = str(summary["text"]) + suffix
+
+    def safe_answer(self) -> str:
+        if self.guarded_answer:
+            return self.guarded_answer
+        if self.deterministic_notes:
+            return "Deterministic tool results — " + "; ".join(self.deterministic_notes) + "."
+        return SAFE_NO_RESULT
 
     def final(self, answer: str) -> dict:
         ops = validate_ops(self.style_ops) if self.style_ops else []
         return {
             "type": "answer",
-            "answer": answer,
+            "answer": self.guarded_answer or answer,
             "cypher": self.cypher,
             "subgraph": self.subgraph,
             "style_ops": [o.model_dump(exclude_none=True) for o in ops],
@@ -108,7 +128,6 @@ async def run_turn(conv: Conversation, text: str, ctx: ToolContext, emit: Emit, 
                     continue
                 if delta.content:
                     content += delta.content
-                    await emit({"type": "delta", "text": delta.content})
                 for tc in delta.tool_calls or []:
                     slot = tool_calls.setdefault(tc.index, {"id": tc.id or "", "name": "", "arguments": ""})
                     if tc.id:
@@ -118,22 +137,26 @@ async def run_turn(conv: Conversation, text: str, ctx: ToolContext, emit: Emit, 
                             slot["name"] += tc.function.name
                         if tc.function.arguments:
                             slot["arguments"] += tc.function.arguments
-        except Exception as e:
-            msg = f"Model call failed: {e}"
-            await emit({"type": "error", "message": msg})
-            conv.messages.append({"role": "assistant", "content": msg})
-            return acc.final(msg)
+        except Exception:
+            msg = "The model is unavailable. Deterministic graph results and evidence remain available; no scores or findings were changed."
+            await emit({"type": "model_unavailable", "message": msg})
+            final = acc.final(msg)
+            conv.messages.append({"role": "assistant", "content": final["answer"]})
+            await emit(final)
+            return final
 
         if not tool_calls:
-            conv.messages.append({"role": "assistant", "content": content})
-            final = acc.final(content)
+            final = acc.final(acc.safe_answer())
+            conv.messages.append({"role": "assistant", "content": final["answer"]})
+            if final["answer"]:
+                await emit({"type": "delta", "text": final["answer"]})
             await emit(final)
             return final
 
         calls = [tool_calls[i] for i in sorted(tool_calls)]
         conv.messages.append({
             "role": "assistant",
-            "content": content or None,
+            "content": None,
             "tool_calls": [{"id": c["id"] or f"call_{i}", "type": "function", "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}} for i, c in enumerate(calls)],
         })
         for i, c in enumerate(calls):
@@ -145,15 +168,15 @@ async def run_turn(conv: Conversation, text: str, ctx: ToolContext, emit: Emit, 
             result = await dispatch(ctx, c["name"], args)
             acc.absorb(c["name"], args, result)
             await emit({
-                "type": "tool_result", "name": c["name"], "ok": result.ok, "cypher": result.cypher, "params": result.params,
+                "type": "tool_result", "name": c["name"], "ok": result.ok, "cypher": result.cypher, "params": safe_tool_data(result.params),
                 "summary": _summarise(result), "permission": result.permission, "notes": result.notes,
                 "subgraph": result.subgraph, "style_ops": result.style_ops, "legend": result.legend,
             })
-            conv.messages.append({"role": "tool", "tool_call_id": c["id"] or f"call_{i}", "content": result.for_model()})
+            conv.messages.append({"role": "tool", "tool_call_id": c["id"] or f"call_{i}", "content": result.for_model(c["name"])})
 
     msg = "Stopped after too many tool rounds; refine the question."
-    conv.messages.append({"role": "assistant", "content": msg})
-    final = acc.final(msg)
+    final = acc.final(acc.safe_answer())
+    conv.messages.append({"role": "assistant", "content": final["answer"]})
     await emit(final)
     return final
 

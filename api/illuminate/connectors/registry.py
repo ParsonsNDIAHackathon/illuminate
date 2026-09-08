@@ -18,11 +18,11 @@ class OpenAIPseudoConnector(Connector):
     """Not a data source — listed so the settings screen shows the model key."""
     name = "openai"
     label = "OpenAI"
-    description = "Chat, extraction, Cypher generation (user-supplied key)"
+    description = "Optional guarded summaries and chat; deterministic findings remain authoritative"
     trust = "open"
     key_name = "openai"
     key_url = "https://platform.openai.com/api-keys"
-    key_note = "Your key; inference cost sits with your account. Without it the app degrades to graph browsing and templates."
+    key_note = "Your key; inference cost sits with your account. Prompts use approved projections, never restricted raw payloads. Without it deterministic reports and templates remain available."
 
     async def enrich(self, entity, user):
         return []

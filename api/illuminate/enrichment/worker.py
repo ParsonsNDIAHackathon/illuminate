@@ -111,10 +111,13 @@ class Worker:
                     "status": "not_run", "error": "job deadline reached before completion",
                     "action": "retry this enrichment job", "attempts": 0,
                 })
-            if job.summary_status == "not_requested":
+            if job.summary_status in {"not_requested", "running"}:
+                await self._clear_summary_selection(job)
                 job.summary_status = "timed_out"
         except Exception as e:
             job.results["_error"] = f"{type(e).__name__}: job failed; retry or inspect service readiness"
+            if job.summary_status in {"not_requested", "running"}:
+                await self._clear_summary_selection(job)
         self._set_status(job)
         job.finished_at = time.time()
         await self._emit("job_update", job.to_dict())
@@ -240,31 +243,48 @@ class Worker:
             job.status = "succeeded"
 
     async def _refresh_summary(self, job: Job) -> None:
+        job.summary_status = "running"
         try:
             from ..llm.client import has_key
             from ..llm.tasks import summarize_entity
-            from ..report import build_report
-            if not has_key(job.user):
-                job.summary_status = "unavailable"
-                return
+            from ..report import build_report, deterministic_summary, persist_summary
+            model_available = has_key(job.user)
             rep = await build_report(job.entity_id)
             if not rep:
                 job.summary_status = "empty"
                 return
+            if not model_available:
+                await persist_summary(
+                    job.entity_id,
+                    deterministic_summary(rep, "model_unavailable"),
+                )
+                job.summary_status = "unavailable"
+                return
             out = await asyncio.wait_for(summarize_entity(job.user, rep), timeout=settings.summary_timeout_s)
-            if out:
-                await db.write("MATCH (e:Entity {id:$id}) SET e.summary=$s, e.summary_model=$m, e.summary_at=$t",
-                               {"id": job.entity_id, "s": out["summary"], "m": out["model"], "t": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+            if out.get("generated_by") == "model-assisted":
+                await persist_summary(job.entity_id, out)
                 job.summary_updated = True
                 job.summary_status = "succeeded"
             else:
-                job.summary_status = "empty"
+                await persist_summary(job.entity_id, out)
+                job.summary_status = "fallback"
         except (asyncio.TimeoutError, TimeoutError):
+            await self._clear_summary_selection(job)
             job.summary_status = "timed_out"
             job.results["_summary_error"] = "model summary timed out; deterministic report remains available"
         except Exception as e:
+            await self._clear_summary_selection(job)
             job.summary_status = "failed"
             job.results["_summary_error"] = f"{type(e).__name__}: model summary unavailable; deterministic report remains available"
+
+    async def _clear_summary_selection(self, job: Job) -> None:
+        try:
+            from ..report import clear_persisted_summary
+            await clear_persisted_summary(job.entity_id)
+        except Exception:
+            job.results["_summary_cleanup_error"] = (
+                "stale model summary metadata could not be cleared; retry after database recovery"
+            )
 
     def list(self, limit: int = 50) -> list[dict]:
         return [j.to_dict() for j in sorted(self.jobs.values(), key=lambda j: j.created_at, reverse=True)[:limit]]

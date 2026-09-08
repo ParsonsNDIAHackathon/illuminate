@@ -164,11 +164,11 @@ export interface EntityRiskContract {
   confidence: number | null
   completeness: number | null
   freshness: string | number | null
-  categories: Array<RiskCategory | string>
+  categories: Array<EntityRiskCategoryContract | string>
   diligence_flags: Array<string | Record<string, unknown>>
 }
 
-export interface RiskCategory {
+export interface EntityRiskCategoryContract {
   id?: string
   category?: string
   name?: string

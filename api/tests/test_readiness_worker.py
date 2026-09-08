@@ -150,6 +150,151 @@ async def test_successful_retry_clears_active_failure(monkeypatch):
     assert result["recovered_after_attempts"] == 1
 
 
+@pytest.mark.parametrize(
+    ("model_output", "expected_status", "expected_fragment"),
+    [
+        ({"finding_ids": ["finding:risk:ownership"]}, "succeeded", "SET e.summary_finding_ids"),
+        ({"finding_ids": ["not-approved"]}, "fallback", "REMOVE e.summary_finding_ids"),
+    ],
+)
+async def test_summary_refresh_persists_only_validated_finding_selections(
+    monkeypatch, model_output, expected_status, expected_fragment
+):
+    from illuminate.llm import client, tasks
+    from illuminate import report
+
+    rep = {
+        "identity": {"id": "e", "name": "Entity", "simulated": False},
+        "risk": {
+            "categories": [{
+                "id": "ownership",
+                "severity": "high",
+                "freshness": "current",
+                "factors": [{
+                    "truth_status": "committed",
+                    "evidence_refs": ["clm_parent", "edge_parent"],
+                    "explanation": "Validated foreign parent evidence.",
+                }],
+            }],
+        },
+    }
+    writes = []
+
+    async def fake_build_report(entity_id):
+        return rep
+
+    async def fake_json_call(user, system, user_msg, *, strong=False):
+        return model_output
+
+    async def fake_write(statement, params):
+        writes.append((statement, params))
+
+    monkeypatch.setattr(client, "has_key", lambda user: True)
+    monkeypatch.setattr(report, "build_report", fake_build_report)
+    monkeypatch.setattr(tasks, "_json_call", fake_json_call)
+    monkeypatch.setattr(tasks, "models", lambda user: ("strong", "fast"))
+    monkeypatch.setattr("illuminate.enrichment.worker.db.write", fake_write)
+
+    job = Job("j-summary", "e", "Entity", [], user="local")
+    await Worker()._refresh_summary(job)
+
+    assert job.summary_status == expected_status
+    assert job.summary_updated is (expected_status == "succeeded")
+    assert len(writes) == 1
+    assert expected_fragment in writes[0][0]
+    if expected_status == "succeeded":
+        assert writes[0][1]["f"] == ["finding:risk:ownership"]
+
+
+async def test_summary_refresh_clears_stale_model_selection_without_key(monkeypatch):
+    from illuminate.llm import client
+    from illuminate import report
+
+    rep = {
+        "identity": {"id": "e", "name": "Entity", "simulated": False},
+        "risk": {"categories": []},
+    }
+    writes = []
+
+    async def fake_build_report(entity_id):
+        return rep
+
+    async def fake_write(statement, params):
+        writes.append((statement, params))
+
+    monkeypatch.setattr(client, "has_key", lambda user: False)
+    monkeypatch.setattr(report, "build_report", fake_build_report)
+    monkeypatch.setattr("illuminate.enrichment.worker.db.write", fake_write)
+
+    job = Job("j-no-model", "e", "Entity", [], user="local")
+    await Worker()._refresh_summary(job)
+
+    assert job.summary_status == "unavailable"
+    assert job.summary_updated is False
+    assert len(writes) == 1
+    assert "REMOVE e.summary_finding_ids" in writes[0][0]
+
+
+@pytest.mark.parametrize("failure", ["timeout", "exception"])
+async def test_summary_refresh_clears_stale_selection_on_failure(monkeypatch, failure):
+    from illuminate.llm import client, tasks
+    from illuminate import report
+    from illuminate.config import settings
+
+    writes = []
+
+    async def fake_build_report(entity_id):
+        return {
+            "identity": {"id": "e", "name": "Entity", "simulated": False},
+            "risk": {"categories": []},
+        }
+
+    async def failing_summary(user, rep):
+        if failure == "timeout":
+            await asyncio.sleep(0.05)
+        raise RuntimeError("provider details")
+
+    async def fake_write(statement, params):
+        writes.append((statement, params))
+
+    monkeypatch.setattr(client, "has_key", lambda user: True)
+    monkeypatch.setattr(report, "build_report", fake_build_report)
+    monkeypatch.setattr(tasks, "summarize_entity", failing_summary)
+    monkeypatch.setattr("illuminate.enrichment.worker.db.write", fake_write)
+    if failure == "timeout":
+        monkeypatch.setattr(settings, "summary_timeout_s", 0.001)
+
+    job = Job("j-failed-summary", "e", "Entity", [], user="local")
+    await Worker()._refresh_summary(job)
+
+    assert job.summary_status == ("timed_out" if failure == "timeout" else "failed")
+    assert any("REMOVE e.summary_finding_ids" in statement for statement, _ in writes)
+    assert "provider details" not in str(job.results)
+
+
+async def test_outer_job_deadline_clears_in_flight_summary_selection(monkeypatch):
+    from illuminate.config import settings
+
+    writes = []
+
+    async def slow_execute(self, job):
+        job.summary_status = "running"
+        await asyncio.sleep(0.05)
+
+    async def fake_write(statement, params):
+        writes.append((statement, params))
+
+    monkeypatch.setattr(Worker, "_execute", slow_execute)
+    monkeypatch.setattr("illuminate.enrichment.worker.db.write", fake_write)
+    monkeypatch.setattr(settings, "enrichment_job_timeout_s", 0.001)
+
+    job = Job("j-deadline-summary", "e", "Entity", [], user="local")
+    await Worker().run(job)
+
+    assert job.summary_status == "timed_out"
+    assert any("REMOVE e.summary_finding_ids" in statement for statement, _ in writes)
+
+
 async def test_recovered_retry_then_deadline_preserves_partial_result(monkeypatch):
     from illuminate.config import settings
 

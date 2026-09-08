@@ -5,12 +5,17 @@ imputed to zero."""
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from typing import Any
 
 from . import db
 
 HOME = "US"
 
 SEVERITY_WEIGHT = {"high": 3.0, "medium": 2.0, "low": 1.0, "clear": 0.0}
+IMMUTABLE_AI_FIELDS = (
+    "score", "band", "disposition", "confidence", "completeness", "freshness",
+    "categories", "truth_status", "simulated",
+)
 
 RISK_CONTRACT_VERSION = "uc11.vendor-risk.v1"
 RISK_CATEGORIES = {
@@ -554,7 +559,7 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
     risk.update(evaluate_risk_contract(core, supply, scr))
     e = core["e"]
     sources = sorted({s for s in [e.get("source")] + [a.get("source") for a in arts] + [p.get("source") for p in ppl["current"] + ppl["former"]] if s})
-    return {
+    report = {
         "entity": e,
         "identity": {
             "id": e.get("id"), "name": e.get("name"), "uei": e.get("uei"), "cage": e.get("cage"), "lei": e.get("lei"),
@@ -576,7 +581,180 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
         "risk": risk,
         "artifacts": arts,
         "news": nws,
-        "summary": {"text": e.get("summary"), "generated_at": e.get("summary_at"), "model": e.get("summary_model"), "source_count": len(arts)},
         "sources": sources,
         "generated_at": date.today().isoformat(),
     }
+    fallback = deterministic_summary(report)
+    persisted = validate_model_summary(
+        {"finding_ids": e.get("summary_finding_ids")},
+        report,
+        e.get("summary_model") or "model",
+    )
+    report["summary"] = {
+        **(persisted or fallback),
+        "generated_at": e.get("summary_at"),
+        "source_count": len(arts),
+    }
+    return report
+
+
+def approved_summary_findings(report: dict) -> list[dict]:
+    """Project only truth-validated risk-contract factors for summarization."""
+    findings: list[dict] = []
+    for index, category in enumerate(report.get("risk", {}).get("categories") or []):
+        family = category.get("id") or str(index + 1)
+        factors = [
+            factor for factor in category.get("factors") or []
+            if factor.get("truth_status") == "committed"
+        ]
+        evidence_ids = sorted({
+            str(ref)
+            for factor in factors
+            for ref in factor.get("evidence_refs") or []
+            if ref
+        })
+        severity = category.get("severity") if evidence_ids else None
+        finding_id = f"finding:risk:{family}"
+        label = (
+            f"{family.replace('_', ' ')} risk is {severity}"
+            if severity else f"{family.replace('_', ' ')} evidence is missing"
+        )
+        findings.append({
+            "id": finding_id,
+            "family": family,
+            "label": label,
+            "severity": severity,
+            "detail": "; ".join(
+                str(factor["explanation"])
+                for factor in factors
+                if factor.get("explanation")
+            ) or None,
+            "no_data": severity is None,
+            "evidence_ids": evidence_ids,
+            "freshness": category.get("freshness"),
+        })
+    return findings
+
+
+def approved_risk_projection(report: dict) -> dict:
+    """Return only the validated risk contract for model and MCP transports."""
+    risk = report.get("risk") or {}
+    categories = []
+    for category in risk.get("categories") or []:
+        categories.append({
+            key: category.get(key)
+            for key in ("id", "weight", "severity", "contribution", "confidence", "freshness")
+        } | {
+            "factors": [{
+                key: factor.get(key)
+                for key in ("rule_id", "severity", "evidence_refs", "truth_status", "provenance", "explanation")
+            } for factor in category.get("factors") or [] if factor.get("truth_status") == "committed"],
+        })
+    return {
+        key: risk.get(key)
+        for key in (
+            "contract_version", "score", "band", "disposition", "confidence",
+            "completeness", "freshness",
+        )
+    } | {
+        "categories": categories,
+        "diligence_flags": [{
+            key: flag.get(key)
+            for key in ("category", "code", "message", "excluded_truth_statuses")
+            if key in flag
+        } for flag in risk.get("diligence_flags") or []],
+    }
+
+
+async def persist_summary(entity_id: str, summary: dict) -> bool:
+    """Persist only validated model selections; clear stale selections on fallback."""
+    if summary.get("generated_by") == "model-assisted":
+        await db.write(
+            "MATCH (e:Entity {id:$id}) "
+            "SET e.summary_finding_ids=$f, e.summary_model=$m, e.summary_at=$t "
+            "REMOVE e.summary, e.summary_citations",
+            {
+                "id": entity_id,
+                "f": summary["selected_finding_ids"],
+                "m": summary["model"],
+                "t": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+        )
+        return True
+    await clear_persisted_summary(entity_id)
+    return False
+
+
+async def clear_persisted_summary(entity_id: str) -> None:
+    """Remove model selection metadata so reports render deterministic fallback."""
+    await db.write(
+        "MATCH (e:Entity {id:$id}) "
+        "REMOVE e.summary_finding_ids, e.summary_model, e.summary_at, e.summary, e.summary_citations",
+        {"id": entity_id},
+    )
+
+
+def _render_summary(report: dict, selected_ids: list[str], generated_by: str, model: str | None, reason: str | None) -> dict:
+    """Narrative that remains available without a model and preserves uncertainty."""
+    identity = report.get("identity") or {}
+    name = identity.get("name") or identity.get("id") or "This entity"
+    risk = report.get("risk") or {}
+    findings = approved_summary_findings(report)
+    supported = [f for f in findings if not f["no_data"]]
+    missing = [f for f in findings if f["no_data"]]
+    selected = [f for finding_id in selected_ids for f in findings if f["id"] == finding_id]
+    notable = [f for f in selected if not f["no_data"] and f.get("severity") in {"high", "medium", "low"}]
+    all_notable = [f for f in supported if f.get("severity") in {"high", "medium", "low"}]
+    sentences = [f"{name} has {len(supported)} of {len(findings)} requested risk signal families with deterministic data."]
+    if identity.get("simulated"):
+        sentences.append("This is a simulated scenario entity, not an observed supplier fact.")
+    if notable:
+        lead = notable[0]
+        sentences.append(f"A prioritized review condition is {lead['label']}.")
+    if all_notable:
+        counts = {severity: sum(1 for f in all_notable if f.get("severity") == severity) for severity in ("high", "medium", "low")}
+        sentences.append(
+            "Deterministic review conditions include "
+            + ", ".join(f"{count} {severity}" for severity, count in counts.items() if count)
+            + "."
+        )
+    elif supported:
+        sentences.append("Available deterministic screens do not identify a non-clear review condition.")
+    if missing:
+        family_word = "family" if len(missing) == 1 else "families"
+        sentences.append(f"Evidence is missing for {len(missing)} signal {family_word}; those gaps are not treated as clear results.")
+    sentences.append("Scores, simulation status, and dispositions remain deterministic and require human review.")
+    cited_findings = selected or findings
+    citations = sorted({eid for f in cited_findings for eid in f["evidence_ids"]})
+    return {
+        "text": " ".join(sentences),
+        "citations": citations,
+        "generated_by": generated_by,
+        "model": model,
+        "fallback_reason": reason,
+        "immutable_fields": list(IMMUTABLE_AI_FIELDS),
+        "selected_finding_ids": [f["id"] for f in selected],
+    }
+
+def validate_model_summary(output: Any, report: dict, model: str) -> dict | None:
+    """Accept only model-selected approved finding IDs; render prose locally."""
+    if not isinstance(output, dict) or set(output) != {"finding_ids"}:
+        return None
+    selected_ids = output.get("finding_ids")
+    if not isinstance(selected_ids, list) or not 1 <= len(selected_ids) <= 3:
+        return None
+    if not all(isinstance(x, str) for x in selected_ids) or len(set(selected_ids)) != len(selected_ids):
+        return None
+    allowed = {
+        f["id"]
+        for f in approved_summary_findings(report)
+        if not f["no_data"] and f.get("severity") in {"high", "medium", "low"}
+    }
+    if any(finding_id not in allowed for finding_id in selected_ids):
+        return None
+    return _render_summary(report, selected_ids, "model-assisted", model, None)
+
+def deterministic_summary(report: dict, reason: str | None = None) -> dict:
+    findings = approved_summary_findings(report)
+    notable_ids = [f["id"] for f in findings if not f["no_data"] and f.get("severity") in {"high", "medium", "low"}]
+    return _render_summary(report, notable_ids[:3], "deterministic", None, reason)

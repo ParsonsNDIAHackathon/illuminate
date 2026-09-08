@@ -51,6 +51,7 @@ export const useChat = defineStore('chat', {
           break
         }
         case 'error': { const m = this.current(); if (m) { m.error = ev.message; m.streaming = false } this.busy = false; break }
+        case 'model_unavailable': { const m = this.current(); if (m) m.error = ev.message; break }
         case 'permission_request': usePermissions().push(ev.payload); break
         case 'permission_resolved': case 'permission_failed': usePermissions().resolve(ev.payload); break
         case 'job_update': useJobs().update(ev.payload); break

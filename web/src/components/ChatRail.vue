@@ -3,7 +3,7 @@
     <div class="rail-head">
       <span class="title">Ask the graph</span>
       <v-chip size="x-small" :color="chat.connected ? 'success' : 'error'" variant="tonal">{{ chat.connected ? 'live' : 'offline' }}</v-chip>
-      <v-chip v-if="!chat.modelKey" size="x-small" color="warning" variant="tonal" title="No OpenAI key — templates only">templates only</v-chip>
+       <v-chip v-if="!chat.modelKey" size="x-small" color="warning" variant="tonal" title="Model unavailable — deterministic reports and templates remain available">deterministic mode</v-chip>
       <v-spacer />
       <v-btn icon="mdi-compare-horizontal" variant="text" size="x-small" title="Compare vendors" to="/compare/vendors" />
       <v-btn icon="mdi-refresh" variant="text" size="x-small" title="New conversation" @click="chat.reset()" />

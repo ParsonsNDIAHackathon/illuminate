@@ -86,8 +86,11 @@ async def ws_chat(ws: WebSocket):
 async def _safe_turn(conv, text, ctx, emit, canvas_ids):
     try:
         await run_turn(conv, text, ctx, emit, canvas_ids)
-    except Exception as e:
+    except Exception:
         try:
-            await emit({"type": "error", "message": f"{type(e).__name__}: {e}"})
+            await emit({
+                "type": "error",
+                "message": "Chat turn failed safely. Deterministic graph tools remain available.",
+            })
         except Exception:
             pass

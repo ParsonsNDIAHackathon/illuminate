@@ -1,6 +1,6 @@
 from datetime import date
 
-from illuminate.report import RISK_CATEGORIES, evaluate_risk_contract
+from illuminate.report import RISK_CATEGORIES, approved_summary_findings, evaluate_risk_contract
 
 
 AS_OF = date(2026, 9, 8)
@@ -252,3 +252,50 @@ def test_real_screen_claims_on_simulated_subject_are_excluded():
         for flag in result["diligence_flags"]
         for evidence in flag.get("excluded_evidence", [])
     )
+
+
+def test_summary_projection_excludes_rejected_backing_claims():
+    rejected_core = core(foreign=True)
+    rejected_core["parent_seat_evidence"][0].update({
+        "claim_id": "clm_parent",
+        "claim_status": "rejected",
+    })
+    risk = evaluate_risk_contract(
+        rejected_core,
+        {"supplies": [], "risk_evidence": []},
+        [],
+        as_of=AS_OF,
+    )
+
+    findings = approved_summary_findings({
+        "identity": {"id": "ent_fixture", "name": "Fixture", "simulated": False},
+        "risk": risk,
+    })
+    ownership = next(f for f in findings if f["family"] == "ownership")
+
+    assert ownership["no_data"] is True
+    assert ownership["severity"] is None
+    assert ownership["evidence_ids"] == []
+
+
+def test_summary_projection_excludes_simulated_evidence_but_keeps_real_refs():
+    simulated = screen("cyber", "high", simulated=True)
+    committed = screen("legal", "medium")
+    risk = evaluate_risk_contract(
+        {"e": {"id": "ent_fixture", "simulated": False}, "parent_seat": None, "parent_seat_evidence": []},
+        {"supplies": [], "risk_evidence": []},
+        [simulated, committed],
+        as_of=AS_OF,
+    )
+
+    findings = approved_summary_findings({
+        "identity": {"id": "ent_fixture", "name": "Fixture", "simulated": False},
+        "risk": risk,
+    })
+    cyber = next(f for f in findings if f["family"] == "cyber")
+    legal = next(f for f in findings if f["family"] == "legal")
+
+    assert cyber["no_data"] is True
+    assert cyber["evidence_ids"] == []
+    assert legal["severity"] == "medium"
+    assert legal["evidence_ids"] == ["art_legal", "clm_legal"]

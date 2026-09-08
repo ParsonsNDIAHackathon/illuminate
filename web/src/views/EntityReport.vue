@@ -21,9 +21,9 @@
         <v-row>
           <v-col cols="12" md="8">
             <v-card variant="outlined" class="mb-3"><v-card-text>
-              <div class="d-flex align-center ga-2 mb-1"><span class="section">Summary</span><v-chip size="x-small" variant="tonal">{{ rep.summary.text ? `generated · ${rep.summary.model || 'model'} · ${rep.summary.source_count} sources` : 'not generated' }}</v-chip><v-spacer /><v-btn size="x-small" variant="text" @click="regen" :loading="regen_busy">Regenerate</v-btn></div>
+              <div class="d-flex align-center ga-2 mb-1"><span class="section">Summary</span><v-chip size="x-small" variant="tonal">{{ `${rep.summary.generated_by} · ${rep.summary.source_count} sources` }}</v-chip><v-spacer /><v-btn size="x-small" variant="text" @click="regen" :loading="regen_busy">Regenerate</v-btn></div>
               <p class="text-body-2" v-if="rep.summary.text">{{ rep.summary.text }}</p>
-              <p class="text-body-2" v-else style="opacity:.6">No model-written summary yet. Requires an OpenAI key; the report below stands on its own.</p>
+              <p class="text-caption mt-1" v-if="rep.summary.citations?.length">Evidence: {{ rep.summary.citations.join(', ') }}</p>
             </v-card-text></v-card>
             <v-card variant="outlined" class="mb-3" v-if="rep.entity.ticker || rep.entity.last_price"><v-card-text>
               <span class="section">Market — {{ rep.entity.ticker }}</span>

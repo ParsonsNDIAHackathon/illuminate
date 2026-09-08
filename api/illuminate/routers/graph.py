@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from .. import db
 from ..content import document, summarize
 from ..connectors.http import HttpError, fetch_document
 from ..raw import find_raw
-from ..report import build_report
+from ..report import build_report, deterministic_summary, persist_summary
 from ..tools.handlers import ToolContext, expand_subgraph, search_entities
 from .deps import user_id
 
@@ -206,17 +208,19 @@ async def report(entity_id: str, user: str = Depends(user_id)):
 
 @router.post("/entities/{entity_id}/summary")
 async def regenerate_summary(entity_id: str, user: str = Depends(user_id)):
-    from ..llm.client import has_key
+    from ..config import settings
     from ..llm.tasks import summarize_entity
-    import time
-    if not has_key(user):
-        raise HTTPException(400, "no OpenAI key configured")
     rep = await build_report(entity_id)
     if not rep:
         raise HTTPException(404, "no such entity")
-    out = await summarize_entity(user, rep)
-    if not out:
-        raise HTTPException(502, "model did not return a summary")
-    await db.write("MATCH (e:Entity {id:$id}) SET e.summary=$s, e.summary_model=$m, e.summary_at=$t",
-                   {"id": entity_id, "s": out["summary"], "m": out["model"], "t": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
-    return {"summary": out["summary"], "model": out["model"]}
+    try:
+        out = await asyncio.wait_for(
+            summarize_entity(user, rep),
+            timeout=settings.summary_timeout_s,
+        )
+    except (asyncio.TimeoutError, TimeoutError):
+        out = deterministic_summary(rep, "model_timeout")
+    except Exception:
+        out = deterministic_summary(rep, "model_unavailable_or_invalid")
+    await persist_summary(entity_id, out)
+    return out
