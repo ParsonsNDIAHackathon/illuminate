@@ -68,6 +68,12 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in your local environment}
       ILLUMINATE_DATA_DIR: /data
       ILLUMINATE_CORS_ORIGINS: http://localhost:5173,http://localhost:8080
+      ILLUMINATE_FETCH_CACHE_URL: ${ILLUMINATE_FETCH_CACHE_URL:?Set the shared fetch-cache service URL}
+      ILLUMINATE_FETCH_CACHE_NAMESPACE: ${ILLUMINATE_FETCH_CACHE_NAMESPACE:-illuminate-v1}
+      ILLUMINATE_FETCH_CACHE_TOKEN: ${ILLUMINATE_FETCH_CACHE_TOKEN:-${SESSION_SECRET}}
+      ILLUMINATE_FETCH_CACHE_REQUIRED: "true"
+      ILLUMINATE_FETCH_CACHE_AUTHORITY_ENABLED: ${ILLUMINATE_FETCH_CACHE_AUTHORITY_ENABLED:-false}
+      DATABASE_URL: ${DATABASE_URL:-}
     volumes:
       # Same directory the host-side API uses, so keys and settings are shared and backed up.
       - ./api/data:/data

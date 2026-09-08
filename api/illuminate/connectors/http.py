@@ -4,15 +4,19 @@ seed fixture store so the demo graph can be rebuilt offline."""
 from __future__ import annotations
 
 import asyncio
+import base64
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import hmac
 import hashlib
 import ipaddress
 import json
 import socket
 import time
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from typing import Any, Awaitable, Callable, Iterator, Literal
 
 import httpx
 
@@ -23,24 +27,32 @@ _delays = {"efts.sec.gov": 0.15, "data.sec.gov": 0.15, "www.sec.gov": 0.15, "api
 _cache_dir: Path | None = None
 _read_only_cache = False
 _fixture_store = False
+_recording_fixtures = False
 
 RetrievalMode = Literal["operational_live", "offline_fixture"]
 _retrieval_mode: ContextVar[RetrievalMode] = ContextVar("retrieval_mode", default="operational_live")
 _retrieval_trace: ContextVar[list[dict] | None] = ContextVar("retrieval_trace", default=None)
-from dataclasses import dataclass
-from datetime import datetime, timezone
 
 
-def set_cache_dir(p: Path | None, read_only: bool = False, *, fixture_store: bool = False) -> None:
+def set_cache_dir(
+    p: Path | None,
+    read_only: bool = False,
+    *,
+    fixture_store: bool = False,
+    recording: bool = False,
+) -> None:
     """Configure the process cache.
 
     ``fixture_store`` is deliberately independent of ``read_only``: an online
     fixture regeneration must not make committed fixtures an operational cache.
     """
-    global _cache_dir, _read_only_cache, _fixture_store
+    if recording and (read_only or not fixture_store):
+        raise ValueError("fixture recording requires a writable fixture store")
+    global _cache_dir, _read_only_cache, _fixture_store, _recording_fixtures
     _cache_dir = p
     _read_only_cache = read_only
     _fixture_store = fixture_store
+    _recording_fixtures = recording
     _retrieval_mode.set("offline_fixture" if read_only else "operational_live")
     if p:
         p.mkdir(parents=True, exist_ok=True)
@@ -89,7 +101,8 @@ def _key(method: str, url: str, body: Any) -> str:
     h = hashlib.sha1(f"{method} {scrub(url)} {json.dumps(body, sort_keys=True) if body is not None else ''}".encode()).hexdigest()
     return h
 
-
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 async def _throttle(host: str) -> None:
     """Per-host politeness delay; SEC and GDELT rate-limit hard."""
     delay = _delays.get(host, 0.0)
@@ -190,8 +203,9 @@ async def probe_source(url: str, *, params: dict | None = None, headers: dict | 
 
 
 async def fetch_json(method: str, url: str, *, params: dict | None = None, json_body: Any = None, headers: dict | None = None,
-                     ttl: float = 7 * 86400, timeout: float = 30.0) -> Any:
-    """GET/POST returning parsed JSON, with cache. ttl<=0 disables caching."""
+                     ttl: float = 7 * 86400, timeout: float = 30.0,
+                     source: str | None = None, contract: str | None = None) -> Any:
+    """GET/POST JSON. A positive ttl opts into immutable shared fetch-once."""
     req = httpx.Request(method, url, params=params)
     full = str(req.url)
     key = _key(method, full, json_body)
@@ -205,7 +219,14 @@ async def fetch_json(method: str, url: str, *, params: dict | None = None, json_
             if _offline():
                 _record("offline_fixture", full, age_s=age)
                 return doc["body"]
-            if age < ttl:
+            if _recording_fixtures:
+                _record("cached", full, age_s=age)
+                return doc["body"]
+            if (
+                not settings.illuminate_fetch_cache_url
+                and not settings.illuminate_fetch_cache_required
+                and age < ttl
+            ):
                 _record("cached", full, age_s=age)
                 return doc["body"]
         except Exception:
@@ -213,71 +234,134 @@ async def fetch_json(method: str, url: str, *, params: dict | None = None, json_
     if _offline():
         _record("fixture_miss", full)
         raise HttpError(0, full, "not in fixture cache (offline mode)")
-    await _throttle(req.url.host or "")
     hdrs = {"User-Agent": settings.illuminate_user_agent, "Accept": "application/json", **(headers or {})}
-    try:
+    identity, identity_doc = canonical_request_identity(
+        source or req.url.host or "unknown", method, full, json_body, "json",
+        headers=hdrs, contract=contract,
+    )
+
+    async def produce() -> dict[str, Any]:
+        await _throttle(req.url.host or "")
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             r = await client.request(method, full, json=json_body, headers=hdrs)
         if r.status_code >= 400:
-            raise HttpError(r.status_code, full, r.text)
+            raise HttpError(r.status_code, full)
+        if len(r.content) > MAX_SHARED_PAYLOAD_BYTES:
+            raise HttpError(0, full)
         try:
             body = r.json()
         except Exception:
-            raise HttpError(r.status_code, full, "non-JSON response")
+            raise HttpError(r.status_code, full) from None
+        return {
+            "payload": _canonical_json(body).encode(),
+            "final_url": scrub(str(r.url)),
+            "content_type": (r.headers.get("content-type") or "application/json").lower(),
+            "truncated": False,
+        }
+
+    try:
+        if ttl <= 0:
+            produced = await produce()
+            record, hit = {**produced, "first_retrieved_at": time.time()}, False
+        else:
+            record, hit = await _shared_fetch(identity, identity_doc, produce)
+        body = json.loads(record["payload"])
     except Exception:
         age = _fallback_age(stale_doc.get("_ts", 0)) if stale_doc else None
-        if age is not None:
+        if (
+            age is not None
+            and not settings.illuminate_fetch_cache_url
+            and not settings.illuminate_fetch_cache_required
+        ):
             _record("stale_fallback", full, age_s=age)
             return stale_doc["body"]
         _record("error", full)
         raise
-    if ttl > 0:
+    retrieved_at = float(record.get("first_retrieved_at") or time.time())
+    if ttl > 0 and (not settings.illuminate_fetch_cache_url or _recording_fixtures):
         try:
-            path.write_text(json.dumps({"_ts": time.time(), "url": scrub(full), "body": body}))
+            path.write_text(json.dumps({"_ts": retrieved_at, "url": scrub(full), "body": body}))
         except Exception:
             pass
-    _record("live", full, age_s=0)
+    _record("cached" if hit else "live", record.get("final_url") or full,
+            age_s=max(0.0, time.time() - retrieved_at))
     return body
 
 
-async def fetch_text(url: str, *, ttl: float = 86400, timeout: float = 60.0, headers: dict | None = None) -> str:
+async def fetch_text(url: str, *, ttl: float = 86400, timeout: float = 60.0, headers: dict | None = None,
+                     source: str | None = None, contract: str | None = None) -> str:
     key = _key("GET", url, None)
     path = cache_dir() / f"{key}.txt"
     cached = path.exists() and _can_read_cache()
     age = max(0.0, time.time() - path.stat().st_mtime) if cached else None
-    if ttl > 0 and cached and (_offline() or (age is not None and age < ttl)):
+    if ttl > 0 and cached and (_offline() or _recording_fixtures or (
+        not settings.illuminate_fetch_cache_url
+        and not settings.illuminate_fetch_cache_required
+        and age is not None and age < ttl
+    )):
         _record("offline_fixture" if _offline() else "cached", url, age_s=age)
         return path.read_text()
     if _offline():
         _record("fixture_miss", url)
         raise HttpError(0, url, "not in fixture cache (offline mode)")
     hdrs = {"User-Agent": settings.illuminate_user_agent, **(headers or {})}
-    try:
+    req = httpx.Request("GET", url)
+    identity, identity_doc = canonical_request_identity(
+        source or req.url.host or "unknown", "GET", str(req.url), None, "text",
+        headers=hdrs, contract=contract,
+    )
+
+    async def produce() -> dict[str, Any]:
+        await _throttle(req.url.host or "")
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            r = await client.get(url, headers=hdrs)
-        if r.status_code >= 400:
-            raise HttpError(r.status_code, url, r.text)
+            response = await client.get(url, headers=hdrs)
+        if response.status_code >= 400:
+            raise HttpError(response.status_code, url)
+        if len(response.content) > MAX_SHARED_PAYLOAD_BYTES:
+            raise HttpError(0, url)
+        return {
+            "payload": response.content,
+            "final_url": scrub(str(response.url)),
+            "content_type": (response.headers.get("content-type") or "text/plain").lower(),
+            "truncated": False,
+        }
+
+    try:
+        if ttl <= 0:
+            produced = await produce()
+            record, hit = {**produced, "first_retrieved_at": time.time()}, False
+        else:
+            record, hit = await _shared_fetch(identity, identity_doc, produce)
+        text = record["payload"].decode("utf-8")
     except Exception:
         fallback_age = _fallback_age(path.stat().st_mtime) if cached else None
-        if fallback_age is not None:
+        if (
+            fallback_age is not None
+            and not settings.illuminate_fetch_cache_url
+            and not settings.illuminate_fetch_cache_required
+        ):
             _record("stale_fallback", url, age_s=fallback_age)
             return path.read_text()
         _record("error", url)
         raise
-    if ttl > 0:
-        path.write_text(r.text)
-    _record("live", url, age_s=0)
-    return r.text
+    if ttl > 0 and (not settings.illuminate_fetch_cache_url or _recording_fixtures):
+        path.write_text(text)
+    retrieved_at = float(record.get("first_retrieved_at") or time.time())
+    _record("cached" if hit else "live", record.get("final_url") or url,
+            age_s=max(0.0, time.time() - retrieved_at))
+    return text
 
 
 # Documents are archival — a filing or an article does not change once published — so they
 # are cached far longer than API responses, as bytes plus a sidecar holding the content type.
 DOC_TTL = 30 * 86400
 MAX_DOC_BYTES = 8 * 1024 * 1024
+MAX_SHARED_PAYLOAD_BYTES = 64 * 1024 * 1024
 
 
 async def fetch_document(url: str, *, ttl: float = DOC_TTL, timeout: float = 60.0,
-                         max_bytes: int = MAX_DOC_BYTES) -> dict:
+                         max_bytes: int = MAX_DOC_BYTES, headers: dict | None = None,
+                         source: str | None = None, contract: str | None = None) -> dict:
     """GET any document. Returns {url, content_type, body: bytes, retrieved_at, truncated}.
 
     Unlike fetch_json/fetch_text this makes no assumption about the payload: the caller
@@ -285,7 +369,7 @@ async def fetch_document(url: str, *, ttl: float = DOC_TTL, timeout: float = 60.
     large binary cannot exhaust memory. Every cache read, request, and redirect
     first passes the public-network destination policy.
     """
-    max_bytes = max(1, min(int(max_bytes), MAX_DOC_BYTES))
+    max_bytes = max(1, min(int(max_bytes), MAX_SHARED_PAYLOAD_BYTES))
     key = _key("GET", url, None)
     blob = cache_dir() / f"{key}.doc"
     meta = cache_dir() / f"{key}.doc.json"
@@ -295,7 +379,11 @@ async def fetch_document(url: str, *, ttl: float = DOC_TTL, timeout: float = 60.
             m = json.loads(meta.read_text())
             cached_meta = m
             age = max(0.0, time.time() - m.get("_ts", 0))
-            if _offline() or age < ttl:
+            if _offline() or _recording_fixtures or (
+                not settings.illuminate_fetch_cache_url
+                and not settings.illuminate_fetch_cache_required
+                and age < ttl
+            ):
                 cached_url = m.get("url") or url
                 await ensure_public_http_url(cached_url)
                 _record("offline_fixture" if _offline() else "cached", cached_url, age_s=age)
@@ -314,15 +402,20 @@ async def fetch_document(url: str, *, ttl: float = DOC_TTL, timeout: float = 60.
         _record("fixture_miss", url)
         raise HttpError(0, url, "not in fixture cache (offline mode)")
     parsed = await ensure_public_http_url(url)
-    await _throttle(parsed.host or "")
-    hdrs = {"User-Agent": settings.illuminate_user_agent, "Accept": "*/*"}
-    chunks: list[bytes] = []
-    size = 0
-    truncated = False
-    current = str(parsed)
-    x_frame_options = None
-    content_security_policy = None
-    try:
+    hdrs = {"User-Agent": settings.illuminate_user_agent, "Accept": "*/*", **(headers or {})}
+    identity, identity_doc = canonical_request_identity(
+        source or parsed.host or "unknown", "GET", str(parsed), {"max_bytes": max_bytes},
+        f"document:{max_bytes}", headers=hdrs, contract=contract,
+    )
+
+    async def produce() -> dict[str, Any]:
+        await _throttle(parsed.host or "")
+        chunks: list[bytes] = []
+        size = 0
+        truncated = False
+        current = str(parsed)
+        x_frame_options = None
+        content_security_policy = None
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
             for redirects in range(4):
                 await ensure_public_http_url(current)
@@ -345,9 +438,29 @@ async def fetch_document(url: str, *, ttl: float = DOC_TTL, timeout: float = 60.
                             truncated = True
                             break
                     break
+        payload = b"".join(chunks)[:max_bytes]
+        return {
+            "payload": payload,
+            "final_url": scrub(final),
+            "content_type": ctype,
+            "truncated": truncated,
+            "x_frame_options": x_frame_options,
+            "content_security_policy": content_security_policy,
+        }
+
+    try:
+        if ttl <= 0:
+            produced = await produce()
+            record, hit = {**produced, "first_retrieved_at": time.time()}, False
+        else:
+            record, hit = await _shared_fetch(identity, identity_doc, produce)
     except Exception:
         age = _fallback_age(cached_meta.get("_ts", 0)) if cached_meta else None
-        if age is not None:
+        if (
+            age is not None
+            and not settings.illuminate_fetch_cache_url
+            and not settings.illuminate_fetch_cache_required
+        ):
             cached_url = cached_meta.get("url") or url
             await ensure_public_http_url(cached_url)
             _record("stale_fallback", cached_url, age_s=age)
@@ -359,25 +472,29 @@ async def fetch_document(url: str, *, ttl: float = DOC_TTL, timeout: float = 60.
                 "truncated": cached_meta.get("truncated", False),
                 "stale": True,
             }
-        _record("error", current)
+        _record("error", url)
         raise
-    body = b"".join(chunks)[:max_bytes]
-    now = time.time()
-    if ttl > 0:
+    body = record["payload"]
+    retrieved_at = float(record.get("first_retrieved_at") or time.time())
+    if ttl > 0 and (not settings.illuminate_fetch_cache_url or _recording_fixtures):
         try:
             blob.write_bytes(body)
-            meta.write_text(json.dumps({"_ts": now, "url": scrub(final), "content_type": ctype, "truncated": truncated}))
+            meta.write_text(json.dumps({
+                "_ts": retrieved_at, "url": record["final_url"],
+                "content_type": record["content_type"], "truncated": record["truncated"],
+            }))
         except Exception:
             pass
-    _record("live", final, age_s=0)
+    _record("cached" if hit else "live", record["final_url"],
+            age_s=max(0.0, time.time() - retrieved_at))
     return {
-        "url": scrub(final),
-        "content_type": ctype,
+        "url": record["final_url"],
+        "content_type": record["content_type"],
         "body": body,
-        "retrieved_at": now,
-        "truncated": truncated,
-        "x_frame_options": x_frame_options,
-        "content_security_policy": content_security_policy,
+        "retrieved_at": retrieved_at,
+        "truncated": record["truncated"],
+        "x_frame_options": record.get("x_frame_options"),
+        "content_security_policy": record.get("content_security_policy"),
     }
 
 def current_retrieval_mode() -> RetrievalMode:
@@ -400,7 +517,7 @@ def record_retrieval(status: str, url: str, *, age_s: float | None = None) -> No
 
 def _can_read_cache() -> bool:
     mode = _retrieval_mode.get()
-    return mode == "offline_fixture" or not _fixture_store
+    return mode == "offline_fixture" or not _fixture_store or _recording_fixtures
 
 def _offline() -> bool:
     return _retrieval_mode.get() == "offline_fixture"
@@ -411,3 +528,235 @@ def _fallback_age(timestamp: float) -> float | None:
     except (TypeError, ValueError):
         return None
     return age if age <= settings.connector_cache_fallback_max_age_s else None
+
+def _credential_scope(url: str, headers: dict | None, body_secrets: list[str]) -> str | None:
+    """Return an opaque project-keyed scope without retaining credential bytes."""
+    secrets_found: list[str] = list(body_secrets)
+    try:
+        for key, value in httpx.URL(url).params.multi_items():
+            if key.lower() in _SECRET_PARAMS:
+                secrets_found.append(str(value))
+    except (TypeError, ValueError):
+        pass
+    for key, value in (headers or {}).items():
+        if key.lower() in _SECRET_PARAMS or key.lower() in {"proxy-authorization", "x-api-key"}:
+            secrets_found.append(str(value))
+    if not secrets_found:
+        return None
+    scope_key = (
+        settings.illuminate_fetch_cache_scope_key
+        or settings.illuminate_fetch_cache_token
+        or settings.session_secret
+    )
+    project_key = scope_key.get_secret_value().encode()
+    material = "\0".join(sorted(secrets_found)).encode()
+    return hmac.new(project_key, material, hashlib.sha256).hexdigest()
+
+def _validate_shared_record(
+    record: dict, identity: str, identity_doc: dict[str, Any], namespace: str,
+) -> bytes:
+    expected_request = _canonical_json(identity_doc)
+    if (
+        record.get("identity") != identity
+        or record.get("namespace") != namespace
+        or record.get("source") != identity_doc["source"]
+        or record.get("request") != expected_request
+        or not isinstance(record.get("first_retrieved_at"), (int, float))
+        or record["first_retrieved_at"] <= 0
+        or record["first_retrieved_at"] > time.time() + 60
+        or not isinstance(record.get("final_url"), str)
+        or scrub(record["final_url"]) != record["final_url"]
+        or not isinstance(record.get("content_type"), str)
+        or not isinstance(record.get("truncated"), bool)
+    ):
+        raise HttpError(0, "shared-cache://record")
+    try:
+        payload = base64.b64decode(record["payload_b64"], validate=True)
+    except Exception:
+        raise HttpError(0, "shared-cache://record") from None
+    if hashlib.sha256(payload).hexdigest() != record.get("content_hash"):
+        raise HttpError(0, "shared-cache://record")
+    if len(payload) > MAX_SHARED_PAYLOAD_BYTES:
+        raise HttpError(0, "shared-cache://record")
+    return payload
+
+def _split_body_credentials(value: Any) -> tuple[Any, list[str]]:
+    if isinstance(value, dict):
+        clean: dict[str, Any] = {}
+        found: list[str] = []
+        for key, item in value.items():
+            if str(key).lower() in _SECRET_PARAMS:
+                found.append(_canonical_json(item))
+                continue
+            clean_item, nested = _split_body_credentials(item)
+            clean[str(key)] = clean_item
+            found.extend(nested)
+        return clean, found
+    if isinstance(value, list):
+        clean_list = []
+        found = []
+        for item in value:
+            clean_item, nested = _split_body_credentials(item)
+            clean_list.append(clean_item)
+            found.extend(nested)
+        return clean_list, found
+    return value, []
+
+async def _shared_fetch(
+    identity: str,
+    identity_doc: dict[str, Any],
+    producer: Callable[[], Awaitable[dict[str, Any]]],
+) -> tuple[dict[str, Any], bool]:
+    """Return (record, cache_hit), coordinating with the shared authority."""
+    base = settings.illuminate_fetch_cache_url
+    if not base:
+        if settings.illuminate_fetch_cache_required:
+            raise HttpError(0, "shared-cache://not-configured")
+        produced = await producer()
+        payload = produced.pop("payload")
+        return {
+            **produced, "identity": identity, "payload": payload,
+            "content_hash": hashlib.sha256(payload).hexdigest(),
+        }, False
+    namespace = settings.illuminate_fetch_cache_namespace
+    deadline = time.monotonic() + settings.illuminate_fetch_cache_wait_s
+    headers = _cache_headers()
+    endpoint = base.rstrip("/") + "/api/fetch-cache"
+    try:
+        async with httpx.AsyncClient(
+            timeout=min(10.0, settings.illuminate_fetch_cache_wait_s),
+        ) as client:
+            while time.monotonic() < deadline:
+                response = await client.post(
+                    endpoint + "/claim", headers=headers,
+                    json={"namespace": namespace, "identity": identity,
+                          "lease_s": settings.illuminate_fetch_cache_lease_s},
+                )
+                response.raise_for_status()
+                result = response.json()
+                if result["state"] == "complete":
+                    record = result["record"]
+                    record["payload"] = _validate_shared_record(
+                        record, identity, identity_doc, namespace,
+                    )
+                    return record, True
+                if result["state"] == "waiting":
+                    await asyncio.sleep(min(0.25, max(0.05, result["lease_until"] - time.time())))
+                    continue
+                owner = result["owner"]
+                fence = result["fence"]
+                lease_lost = asyncio.Event()
+
+                async def renew_lease() -> None:
+                    try:
+                        interval = max(0.5, settings.illuminate_fetch_cache_lease_s / 3)
+                        while True:
+                            await asyncio.sleep(interval)
+                            renewed = await client.post(
+                                endpoint + "/renew", headers=headers,
+                                json={"namespace": namespace, "identity": identity,
+                                      "owner": owner, "fence": fence,
+                                      "lease_s": settings.illuminate_fetch_cache_lease_s},
+                            )
+                            if renewed.status_code >= 400:
+                                lease_lost.set()
+                                return
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        lease_lost.set()
+
+                renewal = asyncio.create_task(renew_lease())
+                try:
+                    produced = await producer()
+                    payload = produced.pop("payload")
+                    if len(payload) > MAX_SHARED_PAYLOAD_BYTES:
+                        raise HttpError(0, "shared-cache://payload-too-large")
+                    if lease_lost.is_set():
+                        raise HttpError(0, "shared-cache://lease-lost")
+                    record = {
+                        **produced,
+                        "source": identity_doc["source"],
+                        "request": _canonical_json(identity_doc),
+                        "content_hash": hashlib.sha256(payload).hexdigest(),
+                        "payload_b64": base64.b64encode(payload).decode(),
+                    }
+                    published = await client.post(
+                        endpoint + "/publish", headers=headers,
+                        json={"namespace": namespace, "identity": identity,
+                              "owner": owner, "fence": fence, "record": record},
+                    )
+                    published.raise_for_status()
+                    authoritative = published.json()
+                    authoritative["payload"] = _validate_shared_record(
+                        authoritative, identity, identity_doc, namespace,
+                    )
+                    return authoritative, False
+                except Exception:
+                    try:
+                        await client.post(
+                            endpoint + "/release", headers=headers,
+                            json={"namespace": namespace, "identity": identity, "owner": owner,
+                                  "fence": fence,
+                                  "retry_after_s": settings.illuminate_fetch_cache_failure_cooldown_s},
+                        )
+                    finally:
+                        raise
+                finally:
+                    renewal.cancel()
+                    try:
+                        await renewal
+                    except asyncio.CancelledError:
+                        pass
+    except HttpError:
+        raise
+    except Exception:
+        # A configured cache is authoritative. Bypassing it here would create
+        # an uncontrolled cross-process burst and violate fetch-once semantics.
+        raise HttpError(0, "shared-cache://unavailable") from None
+    raise HttpError(0, "shared-cache://wait-timeout")
+
+def canonical_request_identity(
+    source: str,
+    method: str,
+    url: str,
+    body: Any,
+    representation: str,
+    *,
+    headers: dict | None = None,
+    contract: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Build a stable, credential-free request identity and reviewable metadata."""
+    clean_url = scrub(url)
+    try:
+        parsed = httpx.URL(clean_url)
+        params = sorted(parsed.params.multi_items())
+        normalized = parsed.copy_with(
+            scheme=parsed.scheme.lower(),
+            host=parsed.host.lower() if parsed.host else None,
+            port=None if (parsed.scheme == "https" and parsed.port == 443) or (parsed.scheme == "http" and parsed.port == 80) else parsed.port,
+            query=None,
+            fragment=None,
+        )
+        clean_url = str(normalized.copy_merge_params(params)) if params else str(normalized)
+    except (TypeError, ValueError):
+        clean_url = "[invalid-url]"
+    clean_body, body_secrets = _split_body_credentials(body)
+    scope = _credential_scope(url, headers, body_secrets)
+    document = {
+        "source": source.strip().lower(),
+        "method": method.upper(),
+        "url": clean_url,
+        "body": clean_body,
+        "representation": representation,
+        "contract": contract or settings.illuminate_fetch_cache_contract,
+        "credential_scope": scope,
+    }
+    return hashlib.sha256(_canonical_json(document).encode()).hexdigest(), document
+
+def _cache_headers() -> dict[str, str]:
+    token = settings.illuminate_fetch_cache_token or settings.session_secret
+    return (
+        {"Authorization": f"Bearer {token.get_secret_value()}"}
+        if token and token.get_secret_value() else {}
+    )

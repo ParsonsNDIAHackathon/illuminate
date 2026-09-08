@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, db, events
+from . import __version__, db, events, fetch_cache as fetch_cache_service, fetch_cache_db
 from .config import settings
 from .enrichment.worker import worker
 from .readiness import build_readiness, invalidate_cache
@@ -18,7 +18,7 @@ from .routers import settings as settings_router
 from .schema import ensure_schema
 from .tools.permissions import gate
 from .mcp_server import AuthenticatedMCP, build_server
-from .routers import catalog, chat, claims, connectors, enrichment, exports, graph, permissions, programs, query
+from .routers import catalog, chat, claims, connectors, enrichment, exports, fetch_cache, graph, permissions, programs, query
 
 
 class _MCPMount:
@@ -46,6 +46,10 @@ async def lifespan(app: FastAPI):
         await ensure_schema()
     except Exception as e:  # Neo4j may still be starting; endpoints will report via /api/health
         print(f"[illuminate] schema init deferred: {e}")
+    if settings.illuminate_fetch_cache_authority_enabled:
+        # A required authority must never report a healthy application while its
+        # atomic cache schema is absent or its durable store is unreachable.
+        await fetch_cache_service.ensure_schema()
     gate.add_listener(chat.manager.broadcast)
     worker.add_listener(chat.manager.broadcast)
     events.add_listener(chat.manager.broadcast)
@@ -60,6 +64,7 @@ async def lifespan(app: FastAPI):
     _mcp_mount.app = None
     await worker.stop()
     await db.close_driver()
+    await fetch_cache_db.close_driver()
 
 
 app = FastAPI(title="Illuminate", version=__version__, lifespan=lifespan)
@@ -88,7 +93,7 @@ async def health(refresh: bool = False, user: str = Depends(user_id)):
     return await build_readiness(user, refresh=refresh)
 
 
-for r in (graph.router, programs.router, query.router, permissions.router, claims.router, enrichment.router, connectors.router, exports.router, catalog.router, settings_router.router, chat.router):
+for r in (graph.router, programs.router, query.router, permissions.router, claims.router, enrichment.router, connectors.router, exports.router, fetch_cache.router, catalog.router, settings_router.router, chat.router):
     app.include_router(r)
 
 @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)

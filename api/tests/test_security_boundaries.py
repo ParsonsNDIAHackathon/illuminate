@@ -57,6 +57,8 @@ async def test_document_fetch_rejects_non_public_destinations(url):
 
 
 async def _content_endpoint(monkeypatch, url: str):
+    monkeypatch.setattr(http.settings, "illuminate_fetch_cache_required", False)
+
     async def fake_read(*args, **kwargs):
         return [{"artifact": {"id": "art_security", "url": url, "kind": "document"}}]
 
@@ -139,6 +141,7 @@ async def test_content_endpoint_blocks_public_to_private_redirect(monkeypatch):
     "not a valid URL",
 ])
 async def test_document_cache_rejects_and_evicts_unsafe_final_url(monkeypatch, tmp_path, cached_url):
+    monkeypatch.setattr(http.settings, "illuminate_fetch_cache_required", False)
     public_url = "http://public-cache.security-test/document"
     key = http._key("GET", public_url, None)
     blob = tmp_path / f"{key}.doc"

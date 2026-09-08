@@ -4,6 +4,7 @@ import time
 import httpx
 
 from illuminate.connectors import http
+from illuminate.config import settings
 from illuminate.enrichment.sources import select_connectors
 from illuminate.enrichment.worker import Job, Worker
 from illuminate.enrichment import claims
@@ -28,6 +29,7 @@ class _Client:
 
 
 async def test_operational_live_never_reads_fixture_store(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "illuminate_fetch_cache_required", False)
     url = "https://example.test/value"
     http.set_cache_dir(tmp_path, read_only=True, fixture_store=True)
     path = tmp_path / f"{http._key('GET', url, None)}.json"
@@ -55,7 +57,94 @@ async def test_offline_fixture_is_explicit_and_reported(tmp_path):
     assert trace[-1]["source_status"] == "offline_fixture"
 
 
+async def test_explicit_recording_exports_shared_json_hit_to_fixture_store(
+    tmp_path, monkeypatch,
+):
+    url = "https://example.test/value"
+    payload = b'{"origin":"shared"}'
+
+    async def shared_fetch(_identity, _document, _producer):
+        return {
+            "payload": payload,
+            "first_retrieved_at": 1_700_000_000.0,
+            "final_url": url,
+            "content_type": "application/json",
+            "truncated": False,
+        }, True
+
+    monkeypatch.setattr(settings, "illuminate_fetch_cache_url", "https://cache.test")
+    monkeypatch.setattr(http, "_shared_fetch", shared_fetch)
+    http.set_cache_dir(
+        tmp_path, read_only=False, fixture_store=True, recording=True,
+    )
+    try:
+        result = await http.fetch_json("GET", url)
+        path = tmp_path / f"{http._key('GET', url, None)}.json"
+        fixture = json.loads(path.read_text())
+    finally:
+        http.set_cache_dir(None)
+
+    assert result == {"origin": "shared"}
+    assert fixture == {
+        "_ts": 1_700_000_000.0,
+        "url": url,
+        "body": {"origin": "shared"},
+    }
+
+
+async def test_explicit_recording_reuses_existing_fixtures_without_shared_calls(
+    tmp_path, monkeypatch,
+):
+    json_url = "https://example.test/value"
+    text_url = "https://example.test/page"
+    document_url = "https://93.184.216.34/document"
+    json_path = tmp_path / f"{http._key('GET', json_url, None)}.json"
+    text_path = tmp_path / f"{http._key('GET', text_url, None)}.txt"
+    document_path = tmp_path / f"{http._key('GET', document_url, None)}.doc"
+    document_meta = tmp_path / f"{http._key('GET', document_url, None)}.doc.json"
+    json_fixture = json.dumps({
+        "_ts": 1,
+        "url": json_url,
+        "body": {"origin": "existing"},
+    })
+    document_fixture = b"existing document"
+    document_metadata = json.dumps({
+        "_ts": 1,
+        "url": document_url,
+        "content_type": "application/octet-stream",
+        "truncated": False,
+    })
+    json_path.write_text(json_fixture)
+    text_path.write_text("existing text")
+    document_path.write_bytes(document_fixture)
+    document_meta.write_text(document_metadata)
+
+    async def unexpected_shared_call(*_args, **_kwargs):
+        raise AssertionError("existing recording fixture must not contact shared cache")
+
+    monkeypatch.setattr(settings, "illuminate_fetch_cache_url", "https://cache.test")
+    monkeypatch.setattr(http, "_shared_fetch", unexpected_shared_call)
+    http.set_cache_dir(
+        tmp_path, read_only=False, fixture_store=True, recording=True,
+    )
+    try:
+        json_result = await http.fetch_json("GET", json_url)
+        text_result = await http.fetch_text(text_url)
+        document_result = await http.fetch_document(document_url)
+    finally:
+        http.set_cache_dir(None)
+
+    assert json_result == {"origin": "existing"}
+    assert text_result == "existing text"
+    assert document_result["body"] == document_fixture
+    assert json_path.read_text() == json_fixture
+    assert text_path.read_text() == "existing text"
+    assert document_path.read_bytes() == document_fixture
+    assert document_meta.read_text() == document_metadata
+
+
 async def test_bounded_stale_fallback_is_visible(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "illuminate_fetch_cache_required", False)
     url = "https://example.test/value"
     http.set_cache_dir(tmp_path)
     path = tmp_path / f"{http._key('GET', url, None)}.json"

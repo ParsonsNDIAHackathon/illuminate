@@ -103,6 +103,32 @@ values before `make up`; the username is `neo4j`. `make down` stops everything a
 the data. `make dev` runs Neo4j in Docker with the API and web on the host with hot reload
 (web on http://localhost:5173).
 
+
+### Docker operations
+
+- **Configuration:** Compose injects the same `NEO4J_*`, `SESSION_SECRET`,
+  `ILLUMINATE_DATA_DIR`, and CORS settings used by the host launchers. Keep secrets in
+  the environment or an uncommitted `.env`; never add them to an image or the repository.
+- **Fetch-once retrieval cache:** each operational deployment can point
+  `ILLUMINATE_FETCH_CACHE_URL` at its own authority. All processes in that deployment
+  reuse immutable records in its managed PostgreSQL database, outside the analytical
+  graph. The authority sets `ILLUMINATE_FETCH_CACHE_AUTHORITY_ENABLED=true`. Change
+  `ILLUMINATE_FETCH_CACHE_CONTRACT` deliberately when changed upstream data or a new
+  response contract requires a new immutable identity.
+  Apply `api/migrations/001_fetch_cache.sql` before enabling the authority.
+- **Persistence:** the graph lives in the `neo4j-data` volume. Workspace settings,
+  encrypted connector keys, and caches live in `api/data/`. Both survive `make down`.
+  `docker compose down -v` deliberately deletes the graph volume and is not a routine
+  shutdown command.
+- **Seed and schema:** the API applies idempotent schema setup on startup. `make seed`
+  resets and stamps the deterministic offline mission fixture; it is destructive to the
+  current graph.
+- **Shutdown:** `make down` asks all containers to stop and preserves state. Use
+  `docker compose logs api neo4j web` when a service fails or becomes unhealthy.
+- **Recovery:** if a retained graph rejects the configured password, restore the original
+  password or restore a known backup; changing only the environment cannot change an
+  existing Neo4j store password. See **Restart from a backup** below.
+
 ## Back up
 
 ```bash
@@ -166,6 +192,11 @@ timeout terminates startup rather than exposing a partially healthy deployment.
   deadline.
 - Connector credentials remain optional and must be configured through Replit
   Secrets or the app's connector settings; do not commit them.
+- Production enables `ILLUMINATE_FETCH_CACHE_AUTHORITY_ENABLED` and coordinates its
+  own connector workers over loopback. `ILLUMINATE_FETCH_CACHE_TOKEN` defaults to the
+  required `SESSION_SECRET`; the managed PostgreSQL records survive process and
+  deployment replacement. Development and task environments remain fixture-driven
+  unless they are separately configured with their own authority.
 
 The VM filesystem should not be treated as a durable backup. A rebuild or a new
 deployment can replace local Neo4j and application state, and the deterministic

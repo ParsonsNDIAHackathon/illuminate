@@ -539,6 +539,9 @@ def test_production_entrypoint_uses_live_recovery_not_fixtures():
     assert "illuminate.seed.seed --bootstrap --skip-enrich" in script
     assert "--offline --scenario" not in script
     assert 'h.get("operational_refresh_required", True)' in script
+    assert "http://127.0.0.1:${PORT}" in script
+    assert "ILLUMINATE_FETCH_CACHE_REQUIRED=true" in script
+    assert "Verifying managed fetch-cache schema" in script
 
 
 def test_development_entrypoint_recovers_and_verifies_retained_credentials():

@@ -13,19 +13,26 @@ import io
 import json
 import time
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
-
-import httpx
 
 from ..config import settings
 from ..ids import name_match_score, normalize_name
 from .base import ArtifactRef, Connector, Fact, NodeRef
-from .http import cache_dir, current_retrieval_mode, record_retrieval
+from .http import (
+    MAX_SHARED_PAYLOAD_BYTES,
+    cache_dir,
+    current_retrieval_mode,
+    fetch_document,
+    fetch_json,
+    record_retrieval,
+)
 
 LIST_URL = "https://sam.gov/api/prod/fileextractservices/v1/api/listfiles?domain=Exclusions/Public%20V2&privacy=Public"
 DL_URL = "https://sam.gov/api/prod/fileextractservices/v1/api/download/Exclusions/Public%20V2/{name}?privacy=Public"
 INDEX_NAME = "sam_exclusions_index.json.gz"
 MAX_AGE_S = 36 * 3600
+EXTRACT_MAX_BYTES = MAX_SHARED_PAYLOAD_BYTES
 NAME_MATCH = 94
 
 _index: dict | None = None
@@ -40,10 +47,18 @@ def _index_paths() -> list[Path]:
 
 
 async def _latest_extract_name() -> str | None:
-    async with httpx.AsyncClient(timeout=60, follow_redirects=True, headers={"User-Agent": settings.illuminate_user_agent}) as c:
-        r = await c.get(LIST_URL)
-        r.raise_for_status()
-        items = (r.json().get("_embedded") or {}).get("customS3ObjectSummaryList") or []
+    # The listing changes over time, so its UTC date is an explicit immutable
+    # identity dimension rather than a TTL that overwrites a successful record.
+    day = datetime.now(timezone.utc).date().isoformat()
+    listing = await fetch_json(
+        "GET",
+        LIST_URL,
+        ttl=MAX_AGE_S,
+        timeout=60,
+        source="sam-exclusions",
+        contract=f"sam-exclusions-public-v2-listing-{day}",
+    )
+    items = (listing.get("_embedded") or {}).get("customS3ObjectSummaryList") or []
     names = sorted((i.get("displayKey") for i in items if i.get("displayKey", "").endswith(".ZIP")), reverse=True)
     return names[0] if names else None
 
@@ -78,10 +93,19 @@ async def refresh_index(force: bool = False) -> dict:
     name = await _latest_extract_name()
     if not name:
         raise RuntimeError("SAM extract listing returned no files")
-    async with httpx.AsyncClient(timeout=300, follow_redirects=True, headers={"User-Agent": settings.illuminate_user_agent}) as c:
-        r = await c.get(DL_URL.format(name=name))
-        r.raise_for_status()
-        blob = r.content
+    document = await fetch_document(
+        DL_URL.format(name=name),
+        ttl=3650 * 86400,
+        timeout=300,
+        max_bytes=EXTRACT_MAX_BYTES,
+        source="sam-exclusions",
+        contract="sam-exclusions-public-v2-zip-v1",
+    )
+    if document["truncated"]:
+        raise RuntimeError(
+            f"SAM exclusions extract exceeds the {EXTRACT_MAX_BYTES}-byte shared-cache bound"
+        )
+    blob = document["body"]
     rows: list[dict] = []
     with zipfile.ZipFile(io.BytesIO(blob)) as z:
         member = next(n for n in z.namelist() if n.upper().endswith(".CSV"))

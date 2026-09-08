@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import __version__, db
+from . import __version__, db, fetch_cache
 from .config import settings
 from .connectors import REGISTRY
 from .connectors.registry import capability_kind
@@ -196,6 +196,16 @@ async def build_readiness(user: str = "local", *, refresh: bool = False) -> dict
                  "fixture_files": sum(1 for p in _FIXTURES.iterdir() if p.is_file()) if _FIXTURES.exists() else 0,
                  "action": None if seed_complete else "run illuminate-seed --offline to build and stamp the deterministic dataset"},
     }
+    cache_ready = (
+        not settings.illuminate_fetch_cache_authority_enabled
+        or fetch_cache.schema_ready()
+    )
+    if settings.illuminate_fetch_cache_authority_enabled:
+        required["fetch_cache"] = {
+            "status": "ready" if cache_ready else "unavailable",
+            "namespace": settings.illuminate_fetch_cache_namespace,
+            "immutable": True,
+        }
     primary_ready = bool(database.get("reachable") and seed_complete)
     if not database.get("reachable"):
         status = "unavailable"
@@ -203,7 +213,7 @@ async def build_readiness(user: str = "local", *, refresh: bool = False) -> dict
         status = "degraded"
     else:
         status = "ready"
-    startup_ready = bool(database.get("reachable"))
+    startup_ready = bool(database.get("reachable") and cache_ready)
     result = {"ok": startup_ready, "version": __version__, "status": status,
               "primary_workflow_ready": primary_ready, "neo4j": startup_ready, "required": required,
               "operational_live_ready": operational_live_ready,

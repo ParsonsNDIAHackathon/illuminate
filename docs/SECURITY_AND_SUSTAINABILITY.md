@@ -45,9 +45,12 @@ rather than silently fabricated.
 
 - Identity is a single-workspace user label, not production authentication or
   tenant isolation. Deploy only behind a trusted access boundary.
-- Connector caches contain upstream public payloads on local storage. They are
-  not a publication surface; production use needs retention, access-control,
-  and encryption policy.
+- Operational connector retrievals use an environment-scoped immutable cache service
+  when configured; local files are reserved for explicit offline fixtures.
+  Deploy its API behind a trusted boundary and apply storage encryption and
+  retention policy. The authority stores raw payloads in managed PostgreSQL so
+  they remain unreachable from analytical Cypher. Credential material is excluded
+  from records and metadata.
 - Source independence is connector-name based. Production assurance should use
   curated provider identities and transactional claim state transitions.
 - Container images use floating upstream tags. Production delivery should pin

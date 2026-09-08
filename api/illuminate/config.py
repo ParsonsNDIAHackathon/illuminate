@@ -45,6 +45,20 @@ class Settings(BaseSettings):
     # A failed live retrieval may use an ordinary runtime cache entry only within
     # this bound. Committed seed fixtures are a separate, explicit mode.
     connector_cache_fallback_max_age_s: float = 30 * 86400
+    # A configured environment coordinates all of its workers through one
+    # durable authority. Production uses the local authority over loopback.
+    illuminate_fetch_cache_url: str | None = None
+    illuminate_fetch_cache_namespace: str = "illuminate-v1"
+    illuminate_fetch_cache_contract: str = "connector-http-v1"
+    illuminate_fetch_cache_wait_s: float = 60.0
+    illuminate_fetch_cache_lease_s: float = 45.0
+    illuminate_fetch_cache_failure_cooldown_s: float = 10.0
+    illuminate_fetch_cache_token: SecretStr | None = None
+    illuminate_fetch_cache_scope_key: SecretStr | None = None
+    illuminate_fetch_cache_required: bool = False
+    # A self-coordinating deployment enables this. It uses the managed
+    # PostgreSQL database, isolated from the analytical Cypher surface.
+    illuminate_fetch_cache_authority_enabled: bool = False
 
     # Default model tiers (D8). Overridable per user in workspace settings.
     model_strong: str = "gpt-5"

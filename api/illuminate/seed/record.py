@@ -47,7 +47,11 @@ async def record(connector_name: str, names: list[str]) -> None:
     conn = get_connector(connector_name)
     if not conn:
         sys.exit(f"no connector {connector_name!r}")
-    http.set_cache_dir(FIXTURES, read_only=False)
+    # Recording is an explicit export mode: shared immutable hits are copied
+    # into committed fixtures, but operational retrieval never reads them.
+    http.set_cache_dir(
+        FIXTURES, read_only=False, fixture_store=True, recording=True,
+    )
     # Cached responses stay valid regardless of age: this adds fixtures, it does not refresh them.
     http.fetch_json = functools.partial(http.fetch_json, ttl=10 * 365 * 86400)  # type: ignore[assignment]
     mod = sys.modules[type(conn).__module__]
