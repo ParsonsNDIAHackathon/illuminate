@@ -4,13 +4,36 @@ citations, artifacts. Signals that returned no data are shown as no-data, never
 imputed to zero."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from . import db
 
 HOME = "US"
 
 SEVERITY_WEIGHT = {"high": 3.0, "medium": 2.0, "low": 1.0, "clear": 0.0}
+
+RISK_CONTRACT_VERSION = "uc11.vendor-risk.v1"
+RISK_CATEGORIES = {
+    "ownership": {"weight": 15, "predicates": ("ownership_screen",), "max_age_days": 365},
+    "financial": {"weight": 15, "predicates": ("financial_screen",), "max_age_days": 180},
+    "legal": {"weight": 10, "predicates": ("legal_screen",), "max_age_days": 365},
+    "sanctions_regulatory": {"weight": 20, "predicates": ("sanctions_screen", "exclusion_screen", "regulatory_screen"), "max_age_days": 30},
+    "cyber": {"weight": 15, "predicates": ("cyber_screen",), "max_age_days": 180},
+    "adverse_media": {"weight": 10, "predicates": ("adverse_media_screen",), "max_age_days": 30},
+    "supply_criticality": {"weight": 15, "predicates": ("supply_criticality_screen",), "max_age_days": 365},
+}
+RISK_BANDS = (
+    {"id": "low", "min": 0, "max": 24},
+    {"id": "moderate", "min": 25, "max": 49},
+    {"id": "high", "min": 50, "max": 74},
+    {"id": "critical", "min": 75, "max": 100},
+)
+RISK_DISPOSITIONS = {
+    "low": "standard_monitoring",
+    "moderate": "enhanced_diligence",
+    "high": "escalate_for_review",
+    "critical": "hold_and_escalate",
+}
 
 
 async def entity_core(entity_id: str) -> dict | None:
@@ -26,10 +49,10 @@ async def entity_core(entity_id: str) -> dict | None:
         OPTIONAL MATCH (e)-[:PROVIDES]->(c:Category)
         RETURN e{.*} AS e,
                inc{.code,.name} AS incorporated,
-               seat{.code,.name} AS parent_seat,
+               seat{.code,.name,.simulated} AS parent_seat,
                collect(DISTINCT mfg{.code,.name}) AS manufactures,
                collect(DISTINCT ops{.code,.name}) AS operates,
-               collect(DISTINCT up{.id,.name}) AS ultimate_parents,
+               collect(DISTINCT up{.id,.name,.simulated}) AS ultimate_parents,
                collect(DISTINCT {id: dp.id, name: dp.name, pct: o.pct}) AS direct_parents,
                collect(DISTINCT c{.id,.name,.kind}) AS categories
         LIMIT 1
@@ -44,6 +67,28 @@ async def entity_core(entity_id: str) -> dict | None:
     r["manufactures"] = [d for d in r["manufactures"] if d and d.get("code")]
     r["operates"] = [d for d in r["operates"] if d and d.get("code")]
     r["categories"] = [d for d in r["categories"] if d and d.get("id")]
+    ownership = await db.read(
+        """
+        MATCH (e:Entity {id:$id})
+        OPTIONAL MATCH (e)-[ps:PARENT_SEATED_IN]->(seat:Location)
+        OPTIONAL MATCH (pc:Claim {id:ps.claim_id})
+        WITH e, ps, seat, pc ORDER BY seat.code, coalesce(ps.id, elementId(ps))
+        RETURN collect({
+          id:coalesce(ps.id, elementId(ps)), claim_id:ps.claim_id,
+          source:ps.source, retrieved_at:ps.retrieved_at, confidence:ps.confidence,
+          status:ps.status, simulated:coalesce(ps.simulated,false),
+          seat_code:seat.code, seat_simulated:coalesce(seat.simulated,false),
+          claim_status:pc.status, claim_simulated:coalesce(pc.simulated,false),
+          artifact_simulated:CASE WHEN pc IS NULL THEN false ELSE EXISTS {
+            MATCH (pa:Artifact)-[:EVIDENCES]->(pc) WHERE coalesce(pa.simulated,false)
+          } END
+        }) AS evidence
+        """,
+        {"id": entity_id},
+    )
+    r["parent_seat_evidence"] = [
+        x for x in (ownership[0].get("evidence") if ownership else []) if x.get("id")
+    ]
     return r
 
 
@@ -52,13 +97,37 @@ async def supply_position(entity_id: str, root_id: str | None) -> dict:
     rows = await db.read(
         """
         MATCH (e:Entity {id:$id})-[s:SUPPLIES]->(c:Entity)
-        RETURN c.id AS id, c.name AS name, s.tier AS tier, s.sole_source AS sole_source, s.psc AS psc, s.naics AS naics,
-               s.contract_ref AS contract_ref, s.amount AS amount, s.source AS source, s.source_url AS source_url
+         RETURN c.id AS id, c.name AS name, s.tier AS tier, s.sole_source AS sole_source, s.psc AS psc, s.naics AS naics,
+                s.contract_ref AS contract_ref, s.amount AS amount, s.source AS source, s.source_url AS source_url,
+                coalesce(s.id, elementId(s)) AS evidence_id, s.claim_id AS claim_id, s.status AS status,
+                s.retrieved_at AS retrieved_at, s.confidence AS confidence,
+                coalesce(s.simulated,false) OR coalesce(c.simulated,false) AS simulated
         ORDER BY coalesce(s.amount, 0) DESC LIMIT 50
         """,
         {"id": entity_id},
     )
     out["supplies"] = rows
+    risk_rows = await db.read(
+        """
+        MATCH (e:Entity {id:$id})-[s:SUPPLIES]->(c:Entity)
+        OPTIONAL MATCH (sc:Claim {id:s.claim_id})
+        WITH e, s, c, sc ORDER BY coalesce(s.id, elementId(s))
+        RETURN collect({
+          sole_source:s.sole_source, contract_ref:s.contract_ref,
+          source:s.source, source_url:s.source_url,
+          evidence_id:coalesce(s.id, elementId(s)), claim_id:s.claim_id,
+          status:s.status, retrieved_at:s.retrieved_at, confidence:s.confidence,
+          simulated:coalesce(s.simulated,false),
+          entity_simulated:coalesce(e.simulated,false) OR coalesce(c.simulated,false),
+          claim_status:sc.status, claim_simulated:coalesce(sc.simulated,false),
+          artifact_simulated:CASE WHEN sc IS NULL THEN false ELSE EXISTS {
+            MATCH (sa:Artifact)-[:EVIDENCES]->(sc) WHERE coalesce(sa.simulated,false)
+          } END
+        }) AS evidence
+        """,
+        {"id": entity_id},
+    )
+    out["risk_evidence"] = risk_rows[0].get("evidence", []) if risk_rows else []
     out["sole_source_edges"] = sum(1 for r in rows if r.get("sole_source"))
     cnt = await db.read("MATCH (:Entity)-[:SUPPLIES]->(e:Entity {id:$id}) RETURN count(*) AS n", {"id": entity_id})
     out["suppliers_count"] = cnt[0]["n"] if cnt else 0
@@ -105,18 +174,244 @@ async def screens(entity_id: str) -> list[dict]:
     rows = await db.read(
         """
         MATCH (c:Claim)-[:ASSERTS]->(e:Entity {id:$id})
-        WHERE c.predicate ENDS WITH '_screen' AND c.status = 'committed'
+        WHERE c.predicate ENDS WITH '_screen'
         OPTIONAL MATCH (a:Artifact)-[:EVIDENCES]->(c)
-        RETURN c.predicate AS predicate, c.object_value AS result, c.source AS source, c.confidence AS confidence,
-               c.retrieved_at AS retrieved_at, collect(a{.id,.title,.url})[0] AS artifact, c.detail AS detail
-        ORDER BY c.retrieved_at DESC
+        WITH c, collect(DISTINCT a{.id,.title,.url,.source,.retrieved_at,.simulated}) AS artifacts
+        ORDER BY c.retrieved_at DESC, c.id
+        RETURN collect({
+          claim_id:c.id, predicate:c.predicate, result:c.object_value, source:c.source,
+          confidence:c.confidence, status:c.status, simulated:coalesce(c.simulated,false),
+          retrieved_at:c.retrieved_at, artifacts:artifacts, detail:c.detail
+        }) AS screens
         """,
         {"id": entity_id},
     )
-    latest: dict[str, dict] = {}
-    for r in rows:
-        latest.setdefault(r["predicate"], r)
-    return list(latest.values())
+    items = rows[0].get("screens", []) if rows else []
+    for item in items:
+        item["artifacts"] = sorted(
+            [a for a in item.get("artifacts", []) if a and a.get("id")],
+            key=lambda a: a["id"],
+        )
+        item["artifact"] = item["artifacts"][0] if item["artifacts"] else None
+        item["artifact_simulated"] = any(a.get("simulated") for a in item["artifacts"])
+    return items
+
+
+def _parse_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _severity(value: str | None) -> str | None:
+    value = (value or "").lower()
+    if value in SEVERITY_WEIGHT:
+        return value
+    if value in {"hit", "positive", "fail"}:
+        return "high"
+    if value in {"clear", "no_hit", "negative", "pass"}:
+        return "clear"
+    return None
+
+
+def _confidence(value: object, default: float = 1.0) -> float:
+    try:
+        return max(0.0, min(1.0, float(default if value is None else value)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _eligible_graph_fact(fact: dict, *nodes: dict) -> bool:
+    if fact.get("simulated") or fact.get("entity_simulated") or any(n.get("simulated") for n in nodes):
+        return False
+    if fact.get("claim_simulated") or fact.get("artifact_simulated"):
+        return False
+    if fact.get("claim_id"):
+        if fact.get("claim_status") != "committed":
+            return False
+    elif (
+        fact.get("status") not in (None, "committed")
+        or not fact.get("source")
+        or not fact.get("retrieved_at")
+        or fact.get("confidence") is None
+    ):
+        return False
+    return True
+
+
+def _screen_simulated(item: dict) -> bool:
+    return bool(
+        item.get("simulated")
+        or item.get("artifact_simulated")
+        or (item.get("artifact") or {}).get("simulated")
+        or any(a.get("simulated") for a in item.get("artifacts", []) if a)
+    )
+
+
+def evaluate_risk_contract(
+    core: dict, supply: dict, screens_data: list[dict], *, as_of: date | None = None
+) -> dict:
+    """Pure, deterministic UC-11 evaluation. Missing evidence never reduces risk."""
+    as_of = as_of or datetime.now(timezone.utc).date()
+    outputs: list[dict] = []
+    diligence: list[dict] = []
+    total = 0.0
+    confidence_numerator = 0.0
+    covered_weight = 0
+    complete = 0
+
+    for category, spec in RISK_CATEGORIES.items():
+        candidates = [s for s in screens_data if s.get("predicate") in spec["predicates"]]
+        approved = [
+            s for s in candidates
+            if s.get("status") == "committed"
+            and not _screen_simulated(s)
+            and not core.get("e", {}).get("simulated")
+            and _severity(s.get("result")) is not None
+        ]
+        approved.sort(key=lambda s: str(s.get("retrieved_at") or ""), reverse=True)
+        factors: list[dict] = []
+
+        # Ownership and supply criticality can also be established by approved graph facts.
+        if category == "ownership":
+            for evidence in core.get("parent_seat_evidence", []):
+                seat = evidence.get("seat_code")
+                seat_node = {"simulated": evidence.get("seat_simulated")}
+                if not seat or not _eligible_graph_fact(evidence, core.get("e", {}), seat_node):
+                    continue
+                severity = "high" if not seat.upper().startswith(HOME) else "clear"
+                refs = [x for x in (evidence.get("claim_id"), evidence.get("id")) if x]
+                factors.append({"rule_id": "ownership.foreign-parent.v1", "severity": severity,
+                                "evidence_refs": refs, "truth_status": "committed",
+                                "provenance": {
+                                    "source": evidence.get("source") or "graph",
+                                    "retrieved_at": evidence.get("retrieved_at"),
+                                    "confidence": _confidence(evidence.get("confidence"), default=0.0),
+                                },
+                                "explanation": f"Ultimate parent jurisdiction is {seat}."})
+        elif category == "supply_criticality" and supply.get("risk_evidence"):
+            eligible_supply = [
+                s for s in supply["risk_evidence"]
+                if s.get("evidence_id")
+                and isinstance(s.get("sole_source"), bool)
+                and _eligible_graph_fact(s, core.get("e", {}))
+            ]
+            for ref in eligible_supply:
+                severity = "medium" if ref["sole_source"] else "clear"
+                refs = [str(x) for x in (ref.get("claim_id"), ref.get("evidence_id")) if x]
+                factors.append({"rule_id": "supply.sole-source.v1", "severity": severity,
+                                "evidence_refs": refs, "truth_status": "committed",
+                                "provenance": {"source": ref.get("source") or "graph",
+                                               "retrieved_at": ref.get("retrieved_at"),
+                                               "confidence": _confidence(ref.get("confidence"), default=0.0)},
+                                "explanation": "A sole-source supply relationship exists." if ref["sole_source"] else "The supply relationship is explicitly recorded as non-sole-source."})
+
+        for item in approved:
+            severity = _severity(item.get("result"))
+            refs = [item.get("claim_id")] + [
+                a["id"] for a in item.get("artifacts", []) if a.get("id")
+            ]
+            refs = [x for x in refs if x]
+            factors.append({
+                "rule_id": f"{category}.screen-result.v1",
+                "severity": severity,
+                "evidence_refs": refs or [f"claim:{item.get('predicate')}"],
+                "truth_status": "committed",
+                "provenance": {"source": item.get("source"), "retrieved_at": item.get("retrieved_at"),
+                               "confidence": _confidence(item.get("confidence"), default=0.0)},
+                "explanation": item.get("detail") or f"{item.get('predicate')} returned {item.get('result')}.",
+            })
+
+        has_evidence = bool(factors)
+        if has_evidence:
+            complete += 1
+            severity = max((f["severity"] for f in factors), key=lambda x: SEVERITY_WEIGHT[x])
+            contribution = spec["weight"] * SEVERITY_WEIGHT[severity] / 3.0
+            covered_weight += spec["weight"]
+            supporting = [f for f in factors if f["severity"] == severity]
+            confidences = [_confidence((f.get("provenance") or {}).get("confidence"), default=0.0) for f in supporting]
+            category_confidence = min(confidences)
+            confidence_numerator += spec["weight"] * min(confidences)
+            raw_dates = [(f.get("provenance") or {}).get("retrieved_at") for f in supporting]
+            dates = [_parse_date(value) for value in raw_dates]
+            ages = [(as_of - d).days for d in dates if d]
+            freshness = (
+                "unknown" if not ages or len(ages) != len(raw_dates)
+                else ("stale" if max(ages) > spec["max_age_days"] else "current")
+            )
+            if freshness in {"stale", "unknown"}:
+                diligence.append({"category": category, "code": f"{freshness}_evidence",
+                                  "message": f"{category} evidence freshness is {freshness}."})
+        else:
+            severity, contribution, freshness, category_confidence = None, 0.0, "missing", 0.0
+            excluded = sorted({str(s.get("status") or "unknown") for s in candidates if s not in approved})
+            diligence.append({"category": category, "code": "missing_approved_evidence",
+                              "excluded_truth_statuses": excluded,
+                              "excluded_evidence": [{
+                                  "evidence_ref": s.get("claim_id") or f"claim:{s.get('predicate')}",
+                                  "truth_status": s.get("status") or "unknown",
+                                  "simulated": bool(_screen_simulated(s) or core.get("e", {}).get("simulated")),
+                              } for s in candidates if s not in approved],
+                              "message": f"No approved, non-simulated evidence covers {category}."})
+        total += contribution
+        outputs.append({"id": category, "weight": spec["weight"], "severity": severity,
+                        "contribution": round(contribution, 2), "confidence": round(category_confidence, 3),
+                        "freshness": freshness, "factors": factors})
+
+    score = round(100 * total / covered_weight) if covered_weight else None
+    band = (
+        next(b["id"] for b in RISK_BANDS if b["min"] <= score <= b["max"])
+        if score is not None else "not_assessed"
+    )
+    completeness = round(complete / len(RISK_CATEGORIES), 3)
+    disposition = (
+        "complete_diligence" if score is None or (completeness < 1 and band in {"low", "moderate"})
+        else RISK_DISPOSITIONS[band]
+    )
+    return {
+        "contract_version": RISK_CONTRACT_VERSION,
+        "score": score,
+        "band": band,
+        "disposition": disposition,
+        "confidence": round(confidence_numerator / covered_weight, 3) if covered_weight else 0.0,
+        "completeness": completeness,
+        "freshness": "diligence_required" if diligence else "current",
+        "categories": outputs,
+        "diligence_flags": diligence,
+        "policy": {
+            "weights": {k: v["weight"] for k, v in RISK_CATEGORIES.items()},
+            "category_contracts": RISK_CATEGORIES,
+            "bands": list(RISK_BANDS),
+            "severity_points": SEVERITY_WEIGHT,
+            "input_contract": {
+                "screen_evidence": {
+                    "required_fields": ["claim_id", "predicate", "result", "status", "simulated"],
+                    "provenance_fields": ["source", "confidence", "retrieved_at", "detail"],
+                    "artifact_fields": ["id", "source", "retrieved_at", "simulated"],
+                    "artifact_container": "artifacts (plural); legacy artifact is also validated",
+                },
+                "ownership_graph_evidence": {
+                    "container": "parent_seat_evidence",
+                    "fields": ["id", "claim_id", "claim_status", "claim_simulated",
+                               "artifact_simulated", "seat_code", "seat_simulated",
+                               "source", "retrieved_at", "confidence", "status", "simulated"],
+                },
+                "supply_graph_evidence": {
+                    "container": "risk_evidence",
+                    "fields": ["evidence_id", "claim_id", "claim_status", "claim_simulated",
+                               "artifact_simulated", "sole_source", "entity_simulated",
+                               "source", "retrieved_at", "confidence", "status", "simulated"],
+                },
+            },
+            "eligible_truth_status": "committed",
+            "simulated_evidence_scores": False,
+            "missing_evidence_behavior": "zero contribution; reduce completeness; create diligence flag",
+            "aggregate_behavior": "normalize observed contributions over covered category weights; no score when no categories are covered",
+        },
+    }
 
 
 async def artifacts(entity_id: str, limit: int = 50) -> list[dict]:
@@ -201,8 +496,12 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
     else:
         inds.append(_ind("people", "People", None, None, "No officers or directors resolved"))
     # 4. Sanctions & debarment
-    sanc = next((s for s in scr if s["predicate"] == "sanctions_screen"), None)
-    excl = next((s for s in scr if s["predicate"] == "exclusion_screen"), None)
+    eligible_scr = [
+        s for s in scr
+        if s.get("status") == "committed" and not _screen_simulated(s) and not e.get("simulated")
+    ]
+    sanc = next((s for s in eligible_scr if s["predicate"] == "sanctions_screen"), None)
+    excl = next((s for s in eligible_scr if s["predicate"] == "exclusion_screen"), None)
     if sanc or excl:
         hit = (sanc and sanc["result"] == "hit") or (excl and excl["result"] == "hit")
         src = " · ".join(x["source"] for x in (sanc, excl) if x)
@@ -211,7 +510,7 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
     else:
         inds.append(_ind("sanctions", "Sanctions and debarment screen", None, None, "Not yet screened"))
     # 5. Financial health — only meaningful for listed entities with filings
-    fin = next((s for s in scr if s["predicate"] == "financial_screen"), None)
+    fin = next((s for s in eligible_scr if s["predicate"] == "financial_screen"), None)
     if fin:
         inds.append(_ind("financial", "Financial health", fin["result"] if fin["result"] in SEVERITY_WEIGHT else "low", fin["source"], fin.get("detail")))
     elif e.get("public") and e.get("ticker"):
@@ -219,7 +518,7 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
     else:
         inds.append(_ind("financial", "Financial health — private entity, no filings", None, None))
     # 6. Adverse media
-    adv = next((s for s in scr if s["predicate"] == "adverse_media_screen"), None)
+    adv = next((s for s in eligible_scr if s["predicate"] == "adverse_media_screen"), None)
     if adv:
         inds.append(_ind("media", "Adverse media", adv["result"] if adv["result"] in SEVERITY_WEIGHT else "low", adv["source"], adv.get("detail")))
     else:
@@ -252,6 +551,7 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
     arts = await artifacts(entity_id)
     nws = await news(entity_id)
     risk = await risk_indicators(entity_id, core, supply, ppl, scr)
+    risk.update(evaluate_risk_contract(core, supply, scr))
     e = core["e"]
     sources = sorted({s for s in [e.get("source")] + [a.get("source") for a in arts] + [p.get("source") for p in ppl["current"] + ppl["former"]] if s})
     return {
@@ -269,7 +569,10 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
         "categories": core.get("categories"),
         "supply": supply,
         "people": ppl,
-        "screens": scr,
+        "screens": [] if e.get("simulated") else [
+            s for s in scr if s.get("status") == "committed" and not _screen_simulated(s)
+        ],
+        "screen_evidence": scr,
         "risk": risk,
         "artifacts": arts,
         "news": nws,

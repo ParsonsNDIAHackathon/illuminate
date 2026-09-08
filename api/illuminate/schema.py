@@ -39,6 +39,11 @@ RELS: dict[str, str] = {
 # Provenance every node and edge written by the system carries (Entity metadata table).
 PROVENANCE_FIELDS = ["source", "source_url", "retrieved_at", "method", "confidence", "claim_id"]
 
+# Claim truth states used by deterministic consumers such as vendor-risk scoring.
+# Only committed, non-simulated claims and artifacts are eligible as approved facts.
+CLAIM_TRUTH_STATUSES = ("staged", "committed", "rejected")
+APPROVED_TRUTH_STATUS = "committed"
+
 # APOC procedures/functions the validator allows (read side).
 APOC_ALLOWLIST = [
     "apoc.path.expand", "apoc.path.subgraphAll", "apoc.path.subgraphNodes", "apoc.path.spanningTree",
