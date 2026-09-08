@@ -10,6 +10,12 @@
         {{ family.label }}
       </span>
     </div>
+    <div class="tier-key" title="Suppliers are drawn by tier: primes largest, each tier down the chain smaller">
+      <strong>Supplier tier</strong>
+      <span v-for="t in TIER_SIZES" :key="t.tier" class="tier">
+        <i :style="{ width: `${t.size * TIER_KEY_SCALE}px`, height: `${t.size * TIER_KEY_SCALE}px`, background: organizationColor() }"></i>T{{ t.tier }}{{ t.tier === TIER_SIZES[TIER_SIZES.length - 1].tier ? '+' : '' }}
+      </span>
+    </div>
     <div class="simulation-key" :style="{ '--simulation-color': simulationColor() }"><i></i><b>SIM</b><span>Simulated / scenario data</span></div>
     <div v-if="graph.focusIds.length" class="focus-legend">
       <span class="path-line"></span><strong>Critical path</strong>
@@ -27,10 +33,13 @@
 <script setup lang="ts">
 import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
-import { resolveSwatch } from '../styles/palette'
+import { LABEL_COLORS, resolveSwatch } from '../styles/palette'
+import { TIER_SIZES } from '../styles/nodeSize'
 import { RELATIONSHIP_FAMILIES, type RelationshipFamily } from '../styles/relationshipFamilies'
 const graph = useGraph(); const ws = useWorkspace()
+const TIER_KEY_SCALE = 0.4   // canvas px → legend px, so a T1 disc fits a 12px line
 function familyColor(family: RelationshipFamily) { return ws.theme === 'dark' ? family.darkColor : family.color }
+function organizationColor() { return LABEL_COLORS.Entity[ws.theme === 'dark' ? 'dark' : 'light'] }
 function simulationColor() { return ws.theme === 'dark' ? '#f6c453' : '#b77900' }
 </script>
 <style scoped>
@@ -43,6 +52,10 @@ function simulationColor() { return ws.theme === 'dark' ? '#f6c453' : '#b77900' 
 .family i { width: 25px; flex: none; border-top: 3px solid var(--family-color); }
 .family .line-dashed { border-top-style: dashed; }
 .family .line-dotted { border-top-style: dotted; }
+.tier-key { display: flex; align-items: center; gap: 10px; }
+.tier-key strong { font-size: 10px; letter-spacing: .035em; text-transform: uppercase; opacity: .75; }
+.tier-key .tier { display: inline-flex; align-items: center; gap: 4px; }
+.tier-key .tier i { display: inline-block; border-radius: 50%; opacity: .85; }
 .simulation-key { display: flex; align-items: center; gap: 7px; color: var(--simulation-color); font-weight: 700; }
 .simulation-key i { width: 25px; border-top: 4px dotted var(--simulation-color); }
 .simulation-key b { padding: 0 3px; border: 1px dashed var(--simulation-color); font-size: 9px; line-height: 14px; }

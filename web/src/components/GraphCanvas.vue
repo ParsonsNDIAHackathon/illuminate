@@ -23,6 +23,7 @@ import cola from 'cytoscape-cola'
 import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 import { applyStyleOps, clearStyleOps } from '../styles/styleOps'
+import { nodeSize, supplierTiers } from '../styles/nodeSize'
 import { LABEL_COLORS } from '../styles/palette'
 import { relationshipFamily } from '../styles/relationshipFamilies'
 
@@ -140,9 +141,13 @@ function styleSheet(): any[] {
 function toElements() {
   const root = graph.focusId
   const zoom = cy?.zoom() || 1
+  // Supplier tier drives entity size (see styles/nodeSize.ts); it is resolved over the edge list, so
+  // a node grows or shrinks as edges arrive — sync() re-applies data() for nodes already drawn.
+  const tiers = supplierTiers(graph.edgeList, graph.nodeList)
   const nodes = graph.nodeList.map(n => {
-    const size = n.props?.kind === 'program' ? 56 : n.label === 'Entity' ? 34 : n.label === 'Person' ? 26 : 22
-    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, layer: layerOf(n), baseColor: baseColor(n), shape: shapeFor(n), size, simSize: size / zoom, simFont: 11 / zoom, simBorder: 3 / zoom, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
+    const tier = tiers.get(n.id)
+    const size = nodeSize(n, tier)
+    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, layer: layerOf(n), baseColor: baseColor(n), shape: shapeFor(n), size, tier, simSize: size / zoom, simFont: 11 / zoom, simBorder: 3 / zoom, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
   })
   const edges = graph.edgeList.map(e => {
     const family = relationshipFamily(e.type)
