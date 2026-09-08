@@ -1,0 +1,1 @@
+- [Neo4j on Replit](neo4j-on-replit.md) — Nix Neo4j needs a writable config and explicit APOC plugin wiring for this app.

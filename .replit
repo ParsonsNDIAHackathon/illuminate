@@ -1,0 +1,49 @@
+modules = ["python-base-3.13", "nodejs-24"]
+
+[nix]
+channel = "stable-25_05"
+packages = ["cargo", "jdk21", "libiconv", "libxcrypt", "neo4j", "openssl", "pkg-config", "rapidfuzz-cpp", "rustc", "taskflow"]
+
+[[ports]]
+localPort = 7474
+externalPort = 3002
+
+[[ports]]
+localPort = 7687
+externalPort = 3001
+
+[[ports]]
+localPort = 8000
+externalPort = 80
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 8081
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "UC7 Illuminate"
+
+[[workflows.workflow]]
+name = "UC7 Illuminate"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "scripts/replit-dev.sh"
+waitForPort = 8080
+
+[workflows.workflow.metadata]
+outputType = "webview"
