@@ -36,8 +36,19 @@ def cache_dir() -> Path:
     return _cache_dir
 
 
+_SECRET_PARAMS = {"api_key", "api_token", "token", "apikey", "key"}
+
+
+def scrub(url: str) -> str:
+    """Remove credential query parameters so neither the cache key nor the stored
+    URL ever carries a key (fixtures are committed)."""
+    u = httpx.URL(url)
+    params = [(k, v) for k, v in u.params.multi_items() if k.lower() not in _SECRET_PARAMS]
+    return str(u.copy_with(query=None).copy_merge_params(params)) if params else str(u.copy_with(query=None))
+
+
 def _key(method: str, url: str, body: Any) -> str:
-    h = hashlib.sha1(f"{method} {url} {json.dumps(body, sort_keys=True) if body is not None else ''}".encode()).hexdigest()
+    h = hashlib.sha1(f"{method} {scrub(url)} {json.dumps(body, sort_keys=True) if body is not None else ''}".encode()).hexdigest()
     return h
 
 
@@ -81,7 +92,7 @@ async def fetch_json(method: str, url: str, *, params: dict | None = None, json_
         raise HttpError(r.status_code, full, "non-JSON response")
     if ttl > 0:
         try:
-            path.write_text(json.dumps({"_ts": time.time(), "url": full, "body": body}))
+            path.write_text(json.dumps({"_ts": time.time(), "url": scrub(full), "body": body}))
         except Exception:
             pass
     return body

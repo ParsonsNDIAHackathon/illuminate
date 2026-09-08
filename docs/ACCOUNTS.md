@@ -16,12 +16,13 @@ prompt. Record passwords in your own password manager, not here.
 | LittleSis | littlesis.org/api | officers, directors, tenures (CC BY-SA 4.0) |
 | SEC EDGAR | sec.gov / data.sec.gov | tickers, submissions; needs the descriptive User-Agent we send |
 | GDELT | api.gdeltproject.org | news; rate-limited (~1 req / 5 s, 429 otherwise) — treated as best-effort |
+| **SAM.gov Exclusions (public extract)** | sam.gov Data Services daily ZIP | debarment/suspension screen done locally against ~34k firm + special-entity records; no key, no quota; slim index committed in fixtures for offline use |
 
 ## Needs a key — please register
 
 | Connector | Register at | Free? | Why we want it |
 |---|---|---|---|
-| **SAM.gov Entity & Exclusions** | https://sam.gov → sign in with login.gov → Individual account → Workspace › Profile › **API Key** | yes | registration status, CAGE, incorporation, **debarment/exclusion screen** — the authoritative negative of "approved". **Not** an api.data.gov key: api.sam.gov answered every request carrying one (and every unkeyed request) with a bare 404 on 2026-09-07 |
+| SAM.gov Entity Management | https://sam.gov → login.gov → Individual account → Workspace › Profile › **API Key** | yes, ~10 req/day | registration status, CAGE, incorporation, NAICS per vendor. **Key received and stored 2026-09-07.** Exclusions no longer need this key (see public extract above) |
 | **OpenAI** | https://platform.openai.com/api-keys | pay-as-you-go | chat, Cypher generation, extraction, summaries, web-search enrichment. Without it the app runs in template-only mode |
 | OpenCorporates | https://opencorporates.com/api_accounts/new | free tier on approval | registry + officer records across jurisdictions |
 | Market data (Finnhub) | https://finnhub.io/register | yes | quotes for the few listed parents; low priority |
@@ -33,6 +34,7 @@ certificate had expired on 2026-09-05 and 2026-09-07; data.trade.gov requires a 
 
 | Credential | Vault slot | Status |
 |---|---|---|
+| SAM.gov personal API key (issued 2026-09-07 to berge472@gmail.com's SAM.gov account) | `sam` | stored encrypted; **works** (Entity v3 + Exclusions v4 verified) but the personal tier is throttled to **~10 requests/day** — the quota message names the reset time (00:00 UTC). The connector backs off on 429 and the seed stops its SAM pass at the first 429. 5 suppliers were screened on day one; the rest fill in ~10/day, or all at once with a federal/system-account key |
 | api.data.gov key (registered 2026-09-07 with berge472@gmail.com) | `api_data_gov` | stored encrypted; not used by any connector yet — usable for other api.data.gov-fronted federal APIs (Regulations.gov, NASA, etc.) if a connector needs one |
 
 ## Local infrastructure

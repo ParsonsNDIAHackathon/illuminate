@@ -18,7 +18,7 @@ from ..schema import RELS
 REL_PREDICATES = set(RELS) - {"EVIDENCES", "ASSERTS", "TARGETS", "ABOUT"}
 ATTR_ALLOWLIST = {"uei", "cage", "lei", "registration_status", "public", "ticker", "cik", "legal_name", "employees", "website",
                   "board_size", "flagged", "littlesis_id", "opencorporates_id", "duns", "business_types", "naics_codes", "sam_registered",
-                  "incorporation_date", "entity_status", "market_cap", "last_price", "price_change_12m"}
+                  "incorporation_date", "entity_status", "market_cap", "last_price", "price_change_12m", "registration_expires", "organization_structure"}
 SCREEN_PREDICATES = {"sanctions_screen", "exclusion_screen", "financial_screen", "adverse_media_screen", "registry_screen"}
 # 'mention' asserts only that an artifact is about the subject — the connector's own observation, committed on arrival.
 OBSERVATION_PREDICATES = SCREEN_PREDICATES | {"mention"}

@@ -53,8 +53,9 @@ every response under `api/illuminate/seed/fixtures/` so the graph rebuilds offli
   parents (`OWNS`, `ULTIMATE_PARENT_OF`, `PARENT_SEATED_IN`). Real finding: eight tier-1
   suppliers resolve to a foreign ultimate parent (e.g. Subaru → JP, Canadian Commercial
   Corporation → CA).
-- **OFAC SDN** — sanctions screen on every entity, recorded as a `Claim` with the list
-  size / matched rows as detail.
+- **OFAC SDN** and **SAM.gov exclusions** (public daily extract, ~34k firm/special-entity
+  records) — sanctions and debarment screens on every entity, matched locally by UEI, CAGE
+  and strict name, recorded as `Claim`s with the matched rows as detail. No API quota spent.
 - **LittleSis + SEC EDGAR** — officers and directors as `Person` nodes with one tenured
   `HELD_ROLE` edge per term; tickers, CIKs and filings for listed firms.
 - **`--scenario`** adds a clearly-labelled *simulated* adversarial tie (the brief allows
@@ -118,6 +119,10 @@ by program. Text-to-Cypher fails in ways that look like answers, which is why te
 the default and the query is always shown. People are harder to resolve than companies and
 coverage is skewed to large listed firms. An interlock is a lead, not a finding. **The tool
 flags; it does not accuse.**
+
+SAM.gov's personal-key tier allows ~10 Entity API calls a day, so per-vendor registration
+details fill in slowly unless a federal or system-account key is used; the exclusion screen
+does not depend on it because it runs against the public daily extract.
 
 Cut on purpose for the three days: vector index over filings, multi-tenant auth, adverse
 media / financial-health scoring (shown as no-data instead), market data (wired, keyed off).

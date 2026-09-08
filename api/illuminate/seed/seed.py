@@ -230,7 +230,10 @@ async def enrich_with(connector_names: list[str], entity_ids: list[str], *, comm
             try:
                 facts = await conn.enrich(rows[0]["e"], "local")
             except Exception as e:
-                log(f"  {name}: {rows[0]['e']['name']}: {type(e).__name__}: {str(e)[:80]}")
+                log(f"  {name}: {rows[0]['e']['name']}: {type(e).__name__}: {str(e)[:100]}")
+                if type(e).__name__ == "SAMRateLimited":
+                    log(f"  {name}: stopping this pass — remaining entities keep their cached results only")
+                    break
                 continue
             for f in facts:
                 cid = await claims.stage(f, source=conn.name, trust=conn.trust)
@@ -317,9 +320,14 @@ async def main_async(args) -> None:
     if not args.skip_enrich:
         await enrich_with(["gleif"], all_ids, commit_open=False)
         await enrich_with(["ofac"], all_ids, commit_open=False)
+        await enrich_with(["sam_exclusions"], all_ids, commit_open=False)
+        if (await get_connector("sam").status("local")).get("connected"):
+            await enrich_with(["sam"], all_ids, commit_open=False)
+        else:
+            log("sam: no SAM.gov key in vault — registration/exclusion screen skipped")
         # a parent brought in by GLEIF deserves a jurisdiction + screen too
         parents = [r["id"] for r in await db.read("MATCH (p:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(:Entity) WHERE NOT (p)-[:SUPPLIES]->() AND coalesce(p.simulated,false)=false RETURN DISTINCT p.id AS id")]
-        await enrich_with(["gleif", "ofac"], parents, commit_open=False)
+        await enrich_with(["gleif", "ofac", "sam_exclusions"], parents, commit_open=False)
         await enrich_with(["littlesis"], top_ids + parents[:10], commit_open=True)
         await enrich_with(["edgar"], top_ids + parents[:10], commit_open=False)
     if args.scenario:
