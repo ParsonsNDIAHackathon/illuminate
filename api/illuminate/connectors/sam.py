@@ -67,7 +67,9 @@ class SAMConnector(Connector):
             if e.status == 429:
                 _note_429()
                 raise SAMRateLimited("SAM.gov returned 429 — daily request budget exhausted (personal key ≈10/day)")
-            raise RuntimeError(f"SAM entity API: {e}")
+            # Raised as-is: the status is the diagnostic, and wrapping it flattened every
+            # failure — an offline CacheMiss included — into an unreadable bare 'RuntimeError'.
+            raise
         for ent in (res.get("entityData") or [])[:1]:
             reg = ent.get("entityRegistration") or {}
             core = ent.get("coreData") or {}

@@ -22,7 +22,7 @@ from pathlib import Path
 from .. import db
 from ..connectors import get_connector
 from ..connectors.base import now_iso
-from ..connectors.http import set_cache_dir
+from ..connectors.http import CacheMiss, set_cache_dir
 from ..connectors.registry import source_metadata
 from ..connectors.usaspending import award_detail, award_url, is_sole_source, psc_category, recipient, recipient_url, search_awards
 from ..enrichment import claims
@@ -278,13 +278,18 @@ async def enrich_with(connector_names: list[str], entity_ids: list[str], *, comm
         conn = get_connector(name)
         if not conn:
             continue
-        n_facts = n_commit = 0
+        n_facts = n_commit = n_missing = 0
         for eid in entity_ids:
             rows = await db.read("MATCH (e:Entity {id:$id}) RETURN e{.*} AS e", {"id": eid})
             if not rows:
                 continue
             try:
                 facts = await conn.enrich(rows[0]["e"], "local")
+            except CacheMiss:
+                # Offline: nobody recorded this call. An absent fixture is not a source failure,
+                # so it is counted, not logged per entity and not written as an error record.
+                n_missing += 1
+                continue
             except Exception as e:
                 await claims.record_connector_error(name, eid, e)
                 safe_error = claims.connector_error_metadata(e)["connector_error"]
@@ -300,7 +305,8 @@ async def enrich_with(connector_names: list[str], entity_ids: list[str], *, comm
                     st = await claims.commit(cid, note="seed: pre-event build committed from open source")
                 n_facts += 1
                 n_commit += st == "committed"
-        log(f"{name}: {n_facts} facts, {n_commit} committed over {len(entity_ids)} entities")
+        log(f"{name}: {n_facts} facts, {n_commit} committed over {len(entity_ids)} entities"
+            + (f" ({n_missing} not in the offline fixtures)" if n_missing else ""))
 
 async def seed_catalog_lineage() -> None:
     """Load deterministic representative retrieval records for the judged catalog path."""

@@ -69,6 +69,14 @@ class HttpError(Exception):
         self.status = status
 
 
+class CacheMiss(HttpError):
+    """Offline (fixture-only) mode was asked for a response nobody recorded. Distinct from a
+    real HTTP failure so callers can stay quiet about it instead of reporting a source error."""
+
+    def __init__(self, url: str):
+        super().__init__(0, url, "not in fixture cache (offline mode)")
+
+
 async def probe_source(url: str, *, params: dict | None = None, headers: dict | None = None,
                        timeout: float = 8.0, max_bytes: int = 4096) -> None:
     """Make one bounded, non-cached GET used only for connector diagnostics."""
@@ -110,7 +118,7 @@ async def fetch_json(method: str, url: str, *, params: dict | None = None, json_
         except Exception:
             pass
     if _read_only_cache:
-        raise HttpError(0, full, "not in fixture cache (offline mode)")
+        raise CacheMiss(full)
     await _throttle(req.url.host or "")
     hdrs = {"User-Agent": settings.illuminate_user_agent, "Accept": "application/json", **(headers or {})}
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
@@ -135,7 +143,7 @@ async def fetch_text(url: str, *, ttl: float = 86400, timeout: float = 60.0, hea
     if ttl > 0 and path.exists() and (_read_only_cache or time.time() - path.stat().st_mtime < ttl):
         return path.read_text()
     if _read_only_cache:
-        raise HttpError(0, url, "not in fixture cache (offline mode)")
+        raise CacheMiss(url)
     hdrs = {"User-Agent": settings.illuminate_user_agent, **(headers or {})}
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         r = await client.get(url, headers=hdrs)
@@ -171,7 +179,7 @@ async def fetch_document(url: str, *, ttl: float = DOC_TTL, timeout: float = 60.
         except Exception:
             pass
     if _read_only_cache:
-        raise HttpError(0, url, "not in fixture cache (offline mode)")
+        raise CacheMiss(url)
     parsed = httpx.URL(url)
     if parsed.scheme not in ("http", "https"):
         raise HttpError(0, url, f"unsupported scheme {parsed.scheme!r}")
