@@ -2,7 +2,7 @@
   <v-container fluid>
     <div class="d-flex align-center ga-2 mb-2"><h2 class="text-h6">Artifacts</h2><v-select v-model="kind" :items="['', 'award', 'registry', 'filing', 'news', 'web', 'record', 'document']" label="kind" hide-details style="max-width: 160px" /><v-spacer /><span class="text-caption">{{ items.length }} evidence artifacts</span></div>
     <v-data-table :items="items" :headers="headers" density="compact" :items-per-page="50" :loading="loading">
-      <template #item.title="{ item }"><SourceLink :href="item.url">{{ item.title }}</SourceLink></template>
+      <template #item.title="{ item }"><SourceLink :href="item.url" :artifact-id="item.id">{{ item.title }}</SourceLink></template>
       <template #item.about="{ item }"><router-link v-for="a in item.about" :key="a.id" :to="`/entities/${a.id}`" class="mr-2">{{ a.name }}</router-link></template>
       <template #item.amount="{ item }">{{ item.amount ? '$' + Number(item.amount).toLocaleString() : '' }}</template>
       <template #item.raw="{ item }"><v-btn icon="mdi-text-box-search-outline" size="x-small" variant="text" title="View contents" @click="rawId = item.id" /></template>
