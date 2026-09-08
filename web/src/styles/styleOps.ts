@@ -1,5 +1,5 @@
 import type { Core } from 'cytoscape'
-import { resolveSwatch } from './palette'
+import { resolveSwatch } from './palette.ts'
 
 export interface StyleSpec { fill?: string; stroke?: string; badge?: string; size?: 'sm' | 'md' | 'lg' | 'xl'; shape?: string; dashed?: boolean }
 export interface StyleOp { op: 'clear' | 'set' | 'dim' | 'highlight' | 'hide'; ids?: string[]; scope?: 'all' | 'nodes' | 'edges'; style?: StyleSpec; label?: string }

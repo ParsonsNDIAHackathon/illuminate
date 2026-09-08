@@ -21,10 +21,18 @@
       <v-avatar size="28" color="primary" class="ml-1 mr-2"><span class="text-caption">jb</span></v-avatar>
     </v-app-bar>
     <v-navigation-drawer v-model="drawer" :rail="!narrow" :temporary="narrow" :permanent="!narrow" border>
-      <v-list density="compact" nav>
-        <v-list-item v-for="n in nav" :key="n.to" :to="n.external ? undefined : n.to" :href="n.external ? n.to : undefined" :prepend-icon="n.icon" :title="n.title" :value="n.to">
-          <template #append v-if="n.badge"><v-badge :content="n.badge" color="warning" inline /></template>
-        </v-list-item>
+      <v-list density="compact" nav aria-label="Product navigation">
+        <v-list-item :to="withContext('/')" prepend-icon="mdi-target" title="Start mission" value="mission" color="primary" />
+        <v-list-item :to="withContext('/explorer')" prepend-icon="mdi-graph-outline" title="Mission graph" value="graph" />
+        <v-menu location="end" :close-on-content-click="true">
+          <template #activator="{ props }"><v-list-item v-bind="props" prepend-icon="mdi-database-outline" title="Supporting records" :active="recordsNav.some(item => item.to === route.path)" /></template>
+          <v-list density="compact" nav aria-label="Supporting records">
+            <v-list-item v-for="n in recordsNav" :key="n.to" :to="withContext(n.to)" :prepend-icon="n.icon" :title="n.title" :value="n.to">
+              <template #append v-if="n.badge"><v-badge :content="n.badge" color="warning" inline /></template>
+            </v-list-item>
+          </v-list>
+        </v-menu>
+        <v-list-item :to="withContext('/settings')" prepend-icon="mdi-cog-outline" title="Administration" value="administration" :active="route.path === '/settings' || route.path === '/connectors'" />
       </v-list>
     </v-navigation-drawer>
     <v-main>
@@ -36,7 +44,7 @@
 </template>
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, type LocationQueryRaw } from 'vue-router'
 import { useGraph } from './stores/graph'
 import { useDisplay } from 'vuetify'
 import { useWorkspace } from './stores/workspace'
@@ -50,20 +58,21 @@ const { smAndDown } = useDisplay()
 const narrow = smAndDown
 const drawer = ref(!narrow.value)
 const staged = ref(0); const snack = ref(false); const snackText = ref('')
-const nav = computed(() => [
-  { to: '/', icon: 'mdi-target', title: 'Mission' },
-  { to: '/explorer', icon: 'mdi-graph', title: 'Graph' },
-  { to: '/portfolio', icon: 'mdi-view-dashboard-outline', title: 'Triage' },
-  { to: '/compare/vendors', icon: 'mdi-compare-horizontal', title: 'Compare' },
+const recordsNav = computed(() => [
   { to: '/entities', icon: 'mdi-domain', title: 'Entities' },
   { to: '/programs', icon: 'mdi-clipboard-text-outline', title: 'Programs' },
   { to: '/people', icon: 'mdi-account-tie', title: 'People' },
-  { to: '/artifacts', icon: 'mdi-file-document-multiple', title: 'Artifacts' },
-  { to: '/claims', icon: 'mdi-check-decagram', title: 'Claims', badge: staged.value || undefined },
-  { to: '/api/exports/v1/findings?format=csv', icon: 'mdi-download-outline', title: 'Export', external: true },
-  { to: '/connectors', icon: 'mdi-power-plug', title: 'Connectors' },
-  { to: '/settings', icon: 'mdi-cog', title: 'Settings' },
+  { to: '/artifacts', icon: 'mdi-file-document-multiple-outline', title: 'Evidence' },
+  { to: '/claims', icon: 'mdi-check-decagram-outline', title: 'Evidence review', badge: staged.value || undefined },
 ])
+function contextQuery(): LocationQueryRaw {
+  const keys = ['root_id', 'program', 'vendor', 'focus', 'finding', 'family', 'evidence']
+  const query: LocationQueryRaw = {}
+  for (const key of keys) if (route.query[key] != null) query[key] = route.query[key]
+  if (!query.root_id && graph.focusId) query.root_id = graph.focusId
+  return query
+}
+function withContext(path: string) { return { path, query: contextQuery() } }
 async function refreshStaged() { try { staged.value = (await api.get('/api/claims?status=staged&limit=500')).length } catch {} }
 onMounted(async () => { await ws.load(); chat.bind(); perms.load(); jobs.load(); refreshStaged(); setInterval(refreshStaged, 20000) })
 watch(() => jobs.jobs.map(j => j.status).join(), (a, b) => { if (a !== b) { const done = jobs.jobs.find(j => ['succeeded', 'empty', 'partial', 'failed', 'timed_out'].includes(j.status)); if (done) { snackText.value = `Enrichment ${done.status}: ${done.entity_name}`; snack.value = true; refreshStaged() } } })

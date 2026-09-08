@@ -1,6 +1,15 @@
 <template>
   <v-container style="max-width: 860px">
-    <h2 class="text-h6 mb-3">Settings</h2>
+    <h1 class="text-h6 mb-1">Administration</h1>
+    <p class="text-body-2 mb-3" style="opacity:.75">Manage workspace behavior and data access from one place.</p>
+    <v-card class="mb-4" variant="outlined">
+      <v-card-title class="text-subtitle-1">Data connectors</v-card-title>
+      <v-card-text class="d-flex align-center flex-wrap ga-3">
+        <span class="text-body-2">Add, replace, test, or remove credentials used by external data sources.</span>
+        <v-spacer />
+        <v-btn :to="{ path: '/connectors', query: route.query }" prepend-icon="mdi-power-plug-outline" variant="tonal">Manage connectors</v-btn>
+      </v-card-text>
+    </v-card>
     <v-card class="mb-4" variant="outlined">
       <v-card-title class="text-subtitle-1">NDIA catalog contribution</v-card-title>
       <v-card-text>
@@ -58,7 +67,7 @@
           <v-text-field v-model="fast" label="Fast (extraction, classification)" :placeholder="ws.ws.defaults?.model_fast" hide-details style="min-width: 260px" @blur="saveModels" />
           <v-text-field v-model="baseUrl" label="OpenAI-compatible base URL (optional)" hide-details style="min-width: 300px" @blur="saveModels" />
         </div>
-        <p class="text-caption mt-2" style="opacity:.7">The key itself lives under <router-link to="/connectors">Connectors</router-link>. The constant system prefix (schema, tools, taxonomy) is prompt-cached.</p>
+        <p class="text-caption mt-2" style="opacity:.7">The key itself is managed in <router-link :to="{ path: '/connectors', query: route.query }">Administration › Data connectors</router-link>. The constant system prefix (schema, tools, taxonomy) is prompt-cached.</p>
       </v-card-text>
     </v-card>
     <v-card variant="outlined">
@@ -71,9 +80,11 @@
 </template>
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ndiaCatalog, type CatalogContributionPreview, type CatalogContributionResult } from '../api/client'
 import { useWorkspace } from '../stores/workspace'
 const ws = useWorkspace()
+const route = useRoute()
 const strong = ref(''); const fast = ref(''); const baseUrl = ref('')
 const catalogPreview = ref<CatalogContributionPreview | null>(null)
 const catalogResult = ref<CatalogContributionResult | null>(null)

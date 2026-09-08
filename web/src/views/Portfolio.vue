@@ -112,6 +112,7 @@ import { useRoute } from 'vue-router'
 import { api, qs, type EntityListResponse, type EntityReportContract, type EntityRiskContract, type EntitySummary } from '../api/client'
 import { compareTrustworthy } from '../lib/portfolioTriage'
 import { identityLine } from '../lib/vendorIdentity'
+import { missionRootFromQuery } from '../navigationState'
 import { useGraph } from '../stores/graph'
 import { ScopedRowRequests } from '../lib/latestRequest'
 
@@ -135,8 +136,12 @@ const coverage = computed(() => rows.value.length ? Math.round(loadedCount.value
 const tierOptions = computed(() => [...new Set(rows.value.map(r => r.entity.tier).filter(v => v != null))].sort())
 const categoryOptions = computed(() => [...new Set(rows.value.flatMap(categoryNames))].sort())
 const staleCount = computed(() => rows.value.filter(hasStaleEvidence).length)
-const missionRoot = computed(() => String(route.query.root_id || graph.focusId || ''))
-const missionLabel = computed(() => graph.focusLabel || (missionRoot.value ? 'the active mission' : 'the full workspace'))
+const missionRoot = computed(() => missionRootFromQuery(route.query, graph.focusId))
+const missionLabel = computed(() => !missionRoot.value
+  ? 'the full workspace'
+  : graph.focusId === missionRoot.value && graph.focusLabel
+    ? graph.focusLabel
+    : missionRoot.value)
 const duplicateNames = computed(() => {
   const counts = new Map<string, number>()
   for (const row of rows.value) {
@@ -166,11 +171,13 @@ function contractOf(report: EntityReportContract): EntityRiskContract | null {
 async function load() {
   const generation = portfolioRequests.beginScope()
   const rootId = missionRoot.value
-  loading.value = true; reportsLoading.value = false; fatalError.value = ''; rows.value = []; portfolioTotal.value = 0
+  loading.value = true; reportsLoading.value = false; retrying.value = false; fatalError.value = ''; rows.value = []; portfolioTotal.value = 0
   try {
     const list = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: rootId, limit: 1000 })}`)
+    if (portfolioRequests.currentScope() !== generation) return
     while (list.items.length < list.total) {
       const page = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: rootId, limit: 1000, offset: list.items.length })}`)
+      if (portfolioRequests.currentScope() !== generation) return
       if (!page.items.length) throw new Error(`The organization index stopped after ${list.items.length} of ${list.total} vendors.`)
       list.items.push(...page.items)
     }
@@ -215,11 +222,14 @@ async function retryFailed() {
   retrying.value = true
   try {
     const failed = rows.value.filter(row => !row.contract && !row.pending)
-    for (let offset = 0; offset < failed.length; offset += REPORT_BATCH_SIZE) await Promise.all(failed.slice(offset, offset + REPORT_BATCH_SIZE).map(row => loadReport(row, generation, rootId)))
-  } finally { retrying.value = false }
+    for (let offset = 0; offset < failed.length; offset += REPORT_BATCH_SIZE) {
+      if (portfolioRequests.currentScope() !== generation) return
+      await Promise.all(failed.slice(offset, offset + REPORT_BATCH_SIZE).map(row => loadReport(row, generation, rootId)))
+    }
+  } finally { if (portfolioRequests.currentScope() === generation) retrying.value = false }
 }
-function vendorDestination(id: string, tab?: 'risk' | 'artifacts') { return { path: `/entities/${id}`, query: { tab, root_id: missionRoot.value || undefined } } }
-function comparisonDestination(id: string) { return { path: '/compare/vendors', query: { left: id, root_id: missionRoot.value || undefined } } }
+function vendorDestination(id: string, tab?: 'risk' | 'artifacts') { return { path: `/entities/${id}`, query: { ...route.query, tab, root_id: missionRoot.value || undefined, vendor: id } } }
+function comparisonDestination(id: string) { return { path: '/compare/vendors', query: { ...route.query, left: id, root_id: missionRoot.value || undefined, vendor: id } } }
 function isAmbiguous(entity: EntitySummary) { return (duplicateNames.value.get(entity.name.toLocaleLowerCase()) || 0) > 1 }
 function percent(v: number | null | undefined) { if (v == null) return null; return Math.round(v <= 1 ? v * 100 : v) }
 function meetsFloor(v: number | null | undefined, floor: number) { const p = percent(v); return p == null ? floor === 0 : p >= floor }

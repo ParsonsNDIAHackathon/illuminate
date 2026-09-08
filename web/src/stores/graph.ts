@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
-import { api, qs } from '../api/client'
-import type { StyleOp, LegendItem } from '../styles/styleOps'
-import { deriveLegend } from '../styles/styleOps'
-import { restrictDeltaToFocus } from './graphDelta'
+import { api, qs } from '../api/client.ts'
+import type { StyleOp, LegendItem } from '../styles/styleOps.ts'
+import { deriveLegend } from '../styles/styleOps.ts'
+import { restrictDeltaToFocus } from './graphDelta.ts'
 
 export interface GNode { id: string; label: string; labels?: string[]; layer?: string | null; name: string; props: Record<string, any> }
 export interface GEdge { id: string; source: string; target: string; type: string; props: Record<string, any> }
@@ -29,6 +29,7 @@ export const useGraph = defineStore('graph', {
     focusId: null as string | null, focusLabel: null as string | null,
     programs: [] as { id: string; name: string }[],
     truncated: false, fresh: [] as string[], freshVersion: 0,
+    requestVersion: 0, replacementRequest: 0,
   }),
   getters: {
     selected: s => s.selectedId ? s.nodes.get(s.selectedId) || null : null,
@@ -65,15 +66,22 @@ export const useGraph = defineStore('graph', {
       this.legend = deriveLegend(this.styleOps); this.styleVersion++
     },
     clearStyleOps() { this.styleOps = [{ op: 'clear', scope: 'all' }]; this.legend = []; this.styleVersion++ },
-
-    /** A change committed on the server — a new entity, an enrichment fact, an approved claim.
-     *  Merge it and flag what is genuinely new so the canvas can place and reveal it. */
+    invalidatePendingRequests() {
+      this.requestVersion++
+      this.replacementRequest = 0
+      this.loading = false
+    },
+    prepareScope(entityId: string | null) {
+      if (this.focusId === entityId) return
+      this.nodes = new Map(); this.edges = new Map(); this.fresh = []
+      this.selectedId = null; this.selectedEdgeId = null
+      this.focusId = null; this.focusLabel = null; this.truncated = false; this.lastCypher = null
+      this.clearFocus()
+      this.version++
+    },
     applyDelta(sub: { nodes: GNode[]; edges: GEdge[] } | null | undefined, focus?: string[]) {
       if (!sub?.nodes?.length) return
-      // A program in the delta belongs in the picker whether or not it is drawn here.
       this.notePrograms(sub.nodes)
-      // A focused canvas is one program's supply chain: another program arriving live
-      // must not sneak in through a supplier the two share.
       if (this.focusId) {
         sub = restrictDeltaToFocus(sub, { nodes: this.nodeList, edges: this.edgeList }, this.focusId)
         if (!sub.nodes.length) return
@@ -81,22 +89,15 @@ export const useGraph = defineStore('graph', {
       const newNodes = sub.nodes.filter(n => !this.nodes.has(n.id)).map(n => n.id)
       const newEdges = (sub.edges || []).filter(e => !this.edges.has(e.id)).map(e => e.id)
       this.merge(sub)
-      // What to draw attention to: whatever is new, plus the node the change was about.
       const arrived = [...newNodes, ...newEdges, ...(focus || [])].filter(id => this.nodes.has(id) || this.edges.has(id))
       if (!arrived.length) return
-      this.fresh = [...new Set([...this.fresh, ...arrived])]
-      this.freshVersion++
+      this.fresh = [...new Set([...this.fresh, ...arrived])]; this.freshVersion++
       const stale = new Set(arrived)
       setTimeout(() => { this.fresh = this.fresh.filter(id => !stale.has(id)); this.freshVersion++ }, FRESH_MS)
     },
-
-    /** The programs the canvas can be narrowed to. */
     async loadPrograms() {
-      try { this.programs = (await api.get('/api/graph/programs')).items } catch { /* keep whatever the deltas have given us */ }
+      try { this.programs = (await api.get('/api/graph/programs')).items } catch { /* retain programs learned from deltas */ }
     },
-
-    /** Fold programs seen in graph data into the picker, in place, by name order. A
-     *  program created while the canvas is open is selectable immediately. */
     notePrograms(nodes: GNode[]) {
       let touched = false
       for (const n of nodes) {
@@ -108,54 +109,65 @@ export const useGraph = defineStore('graph', {
       }
       if (touched) this.programs = [...this.programs].sort((a, b) => a.name.localeCompare(b.name))
     },
-
-    /** Everything in the graph, bounded by the active layers. The default view. */
     async loadAll(layers: Record<string, boolean>) {
+      const request = ++this.requestVersion
+      this.replacementRequest = request
       this.loading = true
       try {
         const r = await api.get(`/api/graph/all?${qs(layerParams(layers))}`)
-        this.focusId = null
-        this.focusLabel = null
-        this.truncated = !!r.truncated
-        this.replace(r.subgraph)
-        this.notePrograms(this.nodeList)
-        this.lastCypher = null
-      } finally { this.loading = false }
-    },
-
-    /** Narrow the canvas to one program's supply chain — that program and what reaches it,
-     *  with the other programs (and anything hanging off only them) left out. */
-    async focus(entityId: string, label: string | null, depth: number, layers: Record<string, boolean>) {
-      const was = { id: this.focusId, label: this.focusLabel }
-      // Set before loading: the load is what confines the walk to this program, and it
-      // reads the focus to do it.
-      this.focusId = entityId
-      this.focusLabel = label || this.programs.find(p => p.id === entityId)?.name || null
-      try {
-        await this.loadNeighbourhood(entityId, depth, layers, true)
-      } catch (e) {
-        this.focusId = was.id; this.focusLabel = was.label
-        throw e
+        if (request !== this.requestVersion) return false
+        this.focusId = null; this.focusLabel = null; this.truncated = !!r.truncated
+        this.replace(r.subgraph); this.notePrograms(this.nodeList); this.lastCypher = null
+        return true
+      } finally {
+        if (this.replacementRequest === request) this.replacementRequest = 0
+        if (request === this.requestVersion) this.loading = false
       }
-      this.truncated = false
     },
-
-    async loadNeighbourhood(entityId: string, depth: number, layers: Record<string, boolean>, replace = false) {
+    async focus(entityId: string, label: string | null, depth: number, layers: Record<string, boolean>) {
+      const request = ++this.requestVersion
+      this.replacementRequest = request
+      const focusLabel = label || this.programs.find(p => p.id === entityId)?.name || null
       this.loading = true
       try {
-        const r = await api.get(`/api/graph/subgraph?${qs({ entity_id: entityId, depth, ...layerParams(layers), program_id: this.focusId })}`)
-        replace ? this.replace(r.subgraph) : this.merge(r.subgraph)
+        const r = await api.get(`/api/graph/subgraph?${qs({ entity_id: entityId, depth, ...layerParams(layers), program_id: entityId })}`)
+        if (request !== this.requestVersion) return false
+        this.focusId = entityId; this.focusLabel = focusLabel; this.truncated = false
+        this.replace(r.subgraph)
         this.notePrograms(r.subgraph?.nodes || [])
         this.lastCypher = { statement: r.cypher, params: r.params }
-      } finally { this.loading = false }
+        return true
+      } finally {
+        if (this.replacementRequest === request) this.replacementRequest = 0
+        if (request === this.requestVersion) this.loading = false
+      }
+    },
+    async loadNeighbourhood(entityId: string, depth: number, layers: Record<string, boolean>, replace = false) {
+      if (this.replacementRequest !== 0 && this.replacementRequest === this.requestVersion) return false
+      const request = ++this.requestVersion
+      const programId = this.focusId
+      this.loading = true
+      try {
+        const r = await api.get(`/api/graph/subgraph?${qs({ entity_id: entityId, depth, ...layerParams(layers), program_id: programId })}`)
+        if (request !== this.requestVersion) return false
+        replace ? this.replace(r.subgraph) : this.merge(r.subgraph)
+        this.notePrograms(r.subgraph?.nodes || []); this.lastCypher = { statement: r.cypher, params: r.params }
+        return true
+      } finally { if (request === this.requestVersion) this.loading = false }
     },
     async runTemplate(name: string, params: any, applyStyles = true) {
-      // A template's root is whatever the canvas is focused on unless the caller says otherwise.
-      const r = await api.post('/api/query/template', { name, params: { root_id: this.focusId, ...params }, apply_styles: applyStyles })
-      if (r.subgraph) this.merge(r.subgraph)
-      if (r.style_ops?.length) this.applyStyleOps(r.style_ops)
-      if (r.cypher) this.lastCypher = { statement: r.cypher, params: r.params }
-      return r
+      if (this.replacementRequest !== 0 && this.replacementRequest === this.requestVersion) return { stale: true }
+      const request = ++this.requestVersion
+      const rootId = this.focusId
+      this.loading = true
+      try {
+        const r = await api.post('/api/query/template', { name, params: { root_id: rootId, ...params }, apply_styles: applyStyles })
+        if (request !== this.requestVersion) return { ...r, stale: true }
+        if (r.subgraph) this.merge(r.subgraph)
+        if (r.style_ops?.length) this.applyStyleOps(r.style_ops)
+        if (r.cypher) this.lastCypher = { statement: r.cypher, params: r.params }
+        return r
+      } finally { if (request === this.requestVersion) this.loading = false }
     },
   },
 })

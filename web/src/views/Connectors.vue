@@ -1,6 +1,7 @@
 <template>
   <v-container style="max-width: 980px">
-    <h2 class="text-h6 mb-1">Settings › Connectors</h2>
+    <nav class="text-caption mb-1" aria-label="Administration breadcrumb"><router-link :to="{ path: '/settings', query: route.query }">Administration</router-link> › Connectors</nav>
+    <h1 class="text-h6 mb-1">Data connectors</h1>
     <p class="text-body-2 mb-4" style="opacity:.75">Credentials are encrypted at rest and decrypted only inside the connector process; they never enter a prompt. Without an OpenAI key the app degrades to graph browsing and template queries.</p>
     <v-list lines="two">
       <v-list-item v-for="c in items" :key="c.name" :title="c.label" :subtitle="c.description">
@@ -56,10 +57,12 @@
 </template>
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { api, type ConnectorTestResult } from '../api/client'
 import { invalidateConnectorResults, isModelBackedConnector, recordConnectorResult } from '../connectors/diagnosticState'
 import { useChat } from '../stores/chat'
 const items = ref<any[]>([]); const coverage = ref<any[]>([]); const dlg = ref(false); const editing = ref<any>(null); const value = ref(''); const saving = ref(false); const checking = ref<Record<string, boolean>>({}); const checkResults = ref<Record<string, ConnectorTestResult>>({})
+const route = useRoute()
 async function load() {
   const [connectors, sources] = await Promise.all([api.get<any[]>('/api/connectors'), api.get<any[]>('/api/connectors/coverage')])
   items.value = connectors

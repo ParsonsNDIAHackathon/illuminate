@@ -1,10 +1,11 @@
 <template>
   <div class="explorer">
     <div class="canvas">
+      <h1 data-route-heading class="route-heading">Mission graph</h1>
       <GraphCanvas ref="canvas" @expand="expand" />
       <div class="toolbar">
         <LayerToggles @change="reload" />
-        <v-select class="focus" :model-value="graph.focusId" :items="focusItems" item-title="name" item-value="id"
+        <v-select class="focus" :model-value="routeFocusId" :items="focusItems" item-title="name" item-value="id"
                   density="compact" variant="solo" flat hide-details prepend-inner-icon="mdi-target"
                   :title="graph.focusId ? 'Showing one program and its supply chain — pick Everything to see them all' : 'Showing every program'"
                   @update:model-value="setFocus" />
@@ -27,7 +28,8 @@
           <small>Loaded mission context remains visible; unrelated elements are recessed.</small>
           <small v-if="graph.focusUnavailableIds.length" class="focus-missing">{{ graph.focusUnavailableIds.length }} referenced element{{ graph.focusUnavailableIds.length === 1 ? '' : 's' }} unavailable in the loaded graph.</small>
           <div class="focus-links">
-            <router-link :to="`/entities/${graph.focusVendorId}`">Vendor report</router-link>
+            <router-link :to="{ path: `/entities/${graph.focusVendorId}`, query: preservedQuery }">Vendor report</router-link>
+            <router-link :to="{ name: 'vendor-comparison', query: { ...preservedQuery, left: graph.focusVendorId } }">Compare vendor</router-link>
             <a v-if="route.query.evidence" :href="String(route.query.evidence)" target="_blank" rel="noopener">Matching evidence</a>
             <span v-else>No matching evidence destination</span>
           </div>
@@ -64,7 +66,7 @@
 </template>
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api, qs } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
 import Inspector from '../components/Inspector.vue'
@@ -73,19 +75,37 @@ import ChatRail from '../components/ChatRail.vue'
 import Legend from '../components/Legend.vue'
 import LayerToggles from '../components/LayerToggles.vue'
 import CypherBlock from '../components/CypherBlock.vue'
+import {
+  missionAnalysisKey,
+  resolveMissionAnalysis,
+  retainMissionCompletion,
+  shouldRunMissionAnalysis,
+  type MissionAnalysisCompletion,
+} from '../missionAnalysisState'
+import { createRequestGate } from '../navigationState'
 import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 const graph = useGraph(); const ws = useWorkspace()
+const navigationRequests = createRequestGate()
 const route = useRoute()
+const router = useRouter()
 const q = ref(''); const hits = ref<any[]>([]); const searching = ref(false); const open = ref(false); const graphError = ref('')
 // The programs the canvas can be narrowed to. The store keeps this current from live
 // deltas, so a program added while this view is open shows up here without a reload.
 const focusItems = computed(() => [{ id: null, name: 'Everything' }, ...graph.programs])
+const routeFocusId = computed(() => String(route.query.root_id || '') || null)
 const hasSimulation = computed(() => graph.nodeList.some(n => n.props?.simulated) || graph.edgeList.some(e => e.props?.simulated))
 const presetRunning = ref(false)
-const presetCompletion = ref<{ template: string; root: string; elements: number } | null>(null)
+const presetCompletion = ref<MissionAnalysisCompletion | null>(null)
+const preservedQuery = computed(() => ({
+  root_id: String(route.query.root_id || graph.focusId || '') || undefined,
+  vendor: String(route.query.vendor || graph.focusVendorId || '') || undefined,
+  focus: route.query.focus,
+  finding: route.query.finding,
+  family: route.query.family,
+  evidence: route.query.evidence,
+}))
 let t: any
-let lastMissionPreset = ''
 const missionTemplates: Record<string, () => Record<string, string | number>> = {
   manufactures_in: () => ({ root_id: missionRootId(), country: String(route.query.country || 'CN'), min_tier: Number(route.query.min_tier || 2) }),
   foreign_parent: () => ({ root_id: missionRootId(), home_country: String(route.query.home_country || 'US') }),
@@ -102,50 +122,59 @@ watch(q, (v) => {
 // A search hit is already on the canvas when nothing is filtered out; pull it in only if it isn't.
 async function onPick(id: string) {
   open.value = false; q.value = ''
-  if (!graph.nodes.has(id)) await graph.loadNeighbourhood(id, 1, ws.ws.layers)
-  graph.select(id)
+  if (!graph.nodes.has(id) && !await graph.loadNeighbourhood(id, 1, ws.ws.layers)) return
+  if (graph.nodes.has(id)) graph.select(id)
 }
 async function setFocus(id: string | null) {
+  const query = { ...route.query }
+  presetRunning.value = false
   graphError.value = ''
   try {
-    if (id) await graph.focus(id, graph.programs.find(p => p.id === id)?.name || null, ws.depth, ws.ws.layers)
-    else await graph.loadAll(ws.ws.layers)
+    await router.replace({ query: { ...query, root_id: id || undefined } })
   } catch (cause) {
-    graphError.value = cause instanceof Error ? cause.message : 'The selected program graph could not be loaded.'
+    graphError.value = cause instanceof Error ? cause.message : 'The selected program could not be opened.'
   }
 }
 async function reload() {
-  graphError.value = ''
-  try {
-    if (graph.focusId) await graph.focus(graph.focusId, graph.focusLabel, ws.depth, ws.ws.layers)
-    else await graph.loadAll(ws.ws.layers)
-  } catch (cause) {
-    graphError.value = cause instanceof Error ? cause.message : 'The graph could not be loaded.'
-  }
+  await applyRouteFocus(true)
 }
 async function expand(id: string) { await graph.loadNeighbourhood(id, 1, ws.ws.layers) }
-async function applyRouteFocus() {
+async function applyRouteFocus(forceGraph = false) {
+  const request = navigationRequests.begin()
+  graph.invalidatePendingRequests()
+  const query = { ...route.query }
+  const template = String(query.template || '')
+  const missionKey = missionAnalysisKey(query)
+  presetCompletion.value = retainMissionCompletion(presetCompletion.value, missionKey, Boolean(missionTemplates[template]))
+  graph.prepareScope(String(query.root_id || '') || null)
+  presetRunning.value = false
+  graphError.value = ''
   if (!ws.loaded) await ws.load()
-  const ids = String(route.query.focus || '').split(',').filter(Boolean)
-  const vendor = String(route.query.vendor || '')
-  const missionRoot = String(route.query.root_id || '')
+  if (!navigationRequests.isCurrent(request)) return
+  const ids = String(query.focus || '').split(',').filter(Boolean)
+  const vendor = String(query.vendor || '')
+  const missionRoot = String(query.root_id || '')
   if (vendor) {
     // A report can be scoped to a mission other than the workspace's retained focus.
     // Establish the incoming mission before loading the vendor trace so evidence is
     // never resolved against the previous program (or an unscoped fresh session).
-    if (missionRoot && (graph.focusId !== missionRoot || !graph.nodes.size)) {
-      try { await graph.focus(missionRoot, graph.programs.find(program => program.id === missionRoot)?.name || null, ws.depth, ws.ws.layers) }
-      catch (cause) {
+    if (missionRoot && (forceGraph || graph.focusId !== missionRoot || !graph.nodes.size)) {
+      try {
+        const applied = await graph.focus(missionRoot, graph.programs.find(program => program.id === missionRoot)?.name || null, ws.depth, ws.ws.layers)
+        if (!applied || !navigationRequests.isCurrent(request)) return
+      } catch (cause) {
+        if (!navigationRequests.isCurrent(request)) return
         graphError.value = cause instanceof Error ? cause.message : 'The mission program graph could not be loaded.'
         return
       }
     } else if (graph.focusId && !graph.nodes.has(graph.focusId)) {
-      await graph.loadNeighbourhood(graph.focusId, ws.depth, ws.ws.layers)
+      const applied = await graph.loadNeighbourhood(graph.focusId, ws.depth, ws.ws.layers)
+      if (!applied || !navigationRequests.isCurrent(request)) return
     }
     // A report trace may reference people, locations, or evidence hidden by the normal workspace
     // layers. Merge those elements for the trace without changing the user's layer preferences.
     try {
-      await graph.loadNeighbourhood(vendor, Math.max(2, ws.depth), {
+      const applied = await graph.loadNeighbourhood(vendor, Math.max(2, ws.depth), {
         ...ws.ws.layers,
         people: true,
         countries: true,
@@ -154,22 +183,34 @@ async function applyRouteFocus() {
         sources: true,
         claims: true,
       })
+      if (!applied || !navigationRequests.isCurrent(request)) return
     } catch (cause) {
+      if (!navigationRequests.isCurrent(request)) return
       graphError.value = cause instanceof Error ? cause.message : 'The report trace could not be loaded.'
     }
-    graph.setFocus(ids, String(route.query.finding || 'Selected risk indicator'), vendor, String(route.query.family || ''))
+    graph.setFocus(ids, String(query.finding || 'Selected risk indicator'), vendor, String(query.family || ''))
   } else {
     graph.clearFocus()
-    if (missionRoot && (graph.focusId !== missionRoot || !graph.nodes.size)) {
-      try { await graph.focus(missionRoot, graph.programs.find(program => program.id === missionRoot)?.name || null, ws.depth, ws.ws.layers) }
-      catch (cause) { graphError.value = cause instanceof Error ? cause.message : 'The mission program graph could not be loaded.' }
-    } else if (!graph.nodes.size) await reload()
+    if (missionRoot && (forceGraph || graph.focusId !== missionRoot || !graph.nodes.size)) {
+      try {
+        const applied = await graph.focus(missionRoot, graph.programs.find(program => program.id === missionRoot)?.name || null, ws.depth, ws.ws.layers)
+        if (!applied || !navigationRequests.isCurrent(request)) return
+      } catch (cause) {
+        if (!navigationRequests.isCurrent(request)) return
+        graphError.value = cause instanceof Error ? cause.message : 'The mission program graph could not be loaded.'
+      }
+    } else if (forceGraph || !graph.nodes.size) {
+      try {
+        const applied = await graph.loadAll(ws.ws.layers)
+        if (!applied || !navigationRequests.isCurrent(request)) return
+      } catch (cause) {
+        if (!navigationRequests.isCurrent(request)) return
+        graphError.value = cause instanceof Error ? cause.message : 'The graph could not be loaded.'
+      }
+    }
   }
-  const template = String(route.query.template || '')
-  const missionKey = `${route.query.mission || ''}:${template}:${JSON.stringify(route.query)}`
-  if (missionTemplates[template] && lastMissionPreset !== missionKey) {
-    lastMissionPreset = missionKey
-    presetCompletion.value = null
+  if (!navigationRequests.isCurrent(request)) return
+  if (shouldRunMissionAnalysis(presetCompletion.value, missionKey, Boolean(missionTemplates[template]))) {
     if (!missionRootId()) {
       graphError.value = 'Select a mission program before running this analysis.'
       return
@@ -178,25 +219,26 @@ async function applyRouteFocus() {
     await nextTick()
     try {
       const result = await graph.runTemplate(template, missionTemplates[template]())
-      const elements = (result.subgraph?.nodes?.length || 0) + (result.subgraph?.edges?.length || 0)
-      if (!result.ok) graphError.value = result.data?.error || `${route.query.mission || 'Guided'} analysis could not be completed.`
-      else if (!elements) graphError.value = `${route.query.mission || 'Guided'} analysis returned no usable graph results.`
-      else presetCompletion.value = { template, root: missionRootId(), elements }
+      if (!navigationRequests.isCurrent(request) || result.stale) return
+      const outcome = resolveMissionAnalysis(result, missionKey, template, missionRoot, String(query.mission || 'Guided'))
+      presetCompletion.value = outcome.completion
+      graphError.value = outcome.error
     } catch (cause) {
-      graphError.value = cause instanceof Error ? cause.message : `${route.query.mission || 'Guided'} analysis could not be completed.`
+      if (navigationRequests.isCurrent(request)) graphError.value = cause instanceof Error ? cause.message : `${query.mission || 'Guided'} analysis could not be completed.`
     } finally {
-      presetRunning.value = false
+      if (navigationRequests.isCurrent(request)) presetRunning.value = false
     }
   }
 }
 onMounted(async () => { await applyRouteFocus(); graph.loadPrograms() })
-watch(() => route.fullPath, applyRouteFocus)
+watch(() => route.fullPath, () => applyRouteFocus())
 // Depth only shapes a focused view; the whole graph is not walked from a root.
 watch(() => ws.depth, () => { if (graph.focusId) reload() })
 </script>
 <style scoped>
 .explorer { display: grid; grid-template-columns: minmax(0, 1fr) 380px; height: calc(100dvh - 48px); min-width: 0; }
 .canvas { position: relative; min-width: 0; min-height: 0; }
+.route-heading { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .side { display: grid; grid-template-rows: minmax(120px, 42%) 1fr; border-left: 1px solid rgba(128,128,128,.2); min-width: 0; min-height: 0; }
 .inspector-pane { border-bottom: 1px solid rgba(128,128,128,.2); overflow: auto; min-width: 0; min-height: 0; }
 .chat-pane { min-width: 0; min-height: 0; }

@@ -13,7 +13,7 @@ Keep the generated development credential and the existing graph store on the sa
 
 **Why:** An existing Neo4j store retains its admin credential. Generating a different credential after the local credential state disappears prevents the workflow from restarting even though the graph data is still healthy.
 
-**How to apply:** If the local credential state is missing, preserve the graph data and reset the development admin credential in place through a bounded auth-recovery flow before restarting. Verify authenticated Bolt access before persisting the credential hint, bound shutdown with escalation, and do not delete or reseed the store to work around authentication.
+**How to apply:** Treat the retained graph store and its credential metadata as one lifecycle. If they diverge, restore consistency without deleting or reseeding graph data, and require authenticated access before declaring startup ready.
 
 Never externally forward Neo4j HTTP or Bolt listeners, including in development.
 Credential recovery temporarily disables authentication, so loopback binding is

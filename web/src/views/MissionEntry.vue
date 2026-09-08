@@ -7,13 +7,13 @@
         <p>Start with a deterministic mission lens, inspect the graph and ranked vendor findings, verify the supporting evidence, then export findings with their review status intact.</p>
         <div class="hero-actions">
           <v-btn color="secondary" size="large" prepend-icon="mdi-radar" :disabled="!missionProgramId" :to="missionProgramId ? presetLink(presets[0]) : undefined">Find supply exposure</v-btn>
-          <v-btn size="large" variant="outlined" :disabled="!missionProgramId" :to="missionProgramId ? scopedLink('/portfolio') : undefined">Open vendor triage</v-btn>
+          <v-btn size="large" variant="outlined" :disabled="!missionProgramId" :to="missionProgramId ? contextualLink('/portfolio') : undefined">Open vendor triage</v-btn>
         </div>
         <small class="speed">Fast path: the first actionable graph finding is one click away.</small>
       </div>
       <div class="decision-card">
         <span>PROGRAM IN SCOPE</span>
-        <v-select v-if="programs.length > 1" v-model="selectedProgramId" :items="programs" item-title="name" item-value="id" label="Mission program" density="compact" hide-details />
+        <v-select v-if="programs.length > 1" :model-value="selectedProgramId" :items="programs" item-title="name" item-value="id" label="Mission program" density="compact" hide-details @update:model-value="selectProgram" />
         <strong>{{ selectedProgram?.name || 'No program available' }}</strong>
         <small>{{ missionProgramId || programError || 'Add a program in Settings before live graph exploration.' }}</small>
         <v-chip size="small" :color="ready ? 'success' : status === 'loading' ? 'info' : 'warning'" variant="tonal">
@@ -63,9 +63,9 @@
     <section aria-labelledby="workflow-title">
       <div class="section-title"><div><span>03 / DECISION WORKFLOW</span><h2 id="workflow-title">Trace every conclusion to reviewable evidence.</h2></div></div>
       <div class="workflow">
-        <router-link :to="scopedLink('/portfolio')"><b>1</b><span><strong>Triage vendors</strong>Rank risk separately from evidence quality.</span></router-link>
-        <router-link :to="scopedLink('/compare/vendors')"><b>2</b><span><strong>Compare</strong>Align trustworthy and risky vendor profiles.</span></router-link>
-        <router-link to="/claims"><b>3</b><span><strong>Review evidence</strong>Accept or reject staged claims before release.</span></router-link>
+        <router-link :to="contextualLink('/portfolio')"><b>1</b><span><strong>Triage vendors</strong>Rank risk separately from evidence quality.</span></router-link>
+        <router-link :to="contextualLink('/compare/vendors')"><b>2</b><span><strong>Compare</strong>Align trustworthy and risky vendor profiles.</span></router-link>
+        <router-link :to="contextualLink('/claims')"><b>3</b><span><strong>Review evidence</strong>Accept or reject staged claims before release.</span></router-link>
         <a href="/api/exports/v1/findings?format=csv"><b>4</b><span><strong>Export with review status</strong>Download the versioned finding contract for controlled downstream review.</span></a>
       </div>
     </section>
@@ -77,17 +77,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api, type ReadinessContract } from '../api/client'
+import { createActiveRouteRequestGate, missionProgramFromQuery } from '../navigationState'
 import { useWorkspace } from '../stores/workspace'
 
 const ws = useWorkspace()
+const route = useRoute()
+const router = useRouter()
+const entryRequests = createActiveRouteRequestGate('mission')
 const health = ref<ReadinessContract | null>(null)
 const status = ref<'loading' | 'done'>('loading')
 const error = ref('')
 const programError = ref('')
 const programs = ref<Array<{ id: string; name: string }>>([])
-const selectedProgramId = ref('')
+const selectedProgramId = ref(String(route.query.root_id || route.query.program || ''))
 const presets = [
   { kind: 'SUPPLY CHAIN', title: 'Supply exposure', description: 'Reveal dependencies at tier 2 and below, including geographic exposure.', icon: 'mdi-transit-connection-variant', template: 'manufactures_in', params: { country: 'CN', min_tier: 2 } },
   { kind: 'CONTROL', title: 'Hidden control', description: 'Trace suppliers whose ultimate parent is seated outside the United States.', icon: 'mdi-account-lock-outline', template: 'foreign_parent', params: { home_country: 'US' } },
@@ -108,32 +113,68 @@ const freshnessDetail = computed(() => {
   return fresh.latest_retrieved_at || 'No retrieval timestamp reported'
 })
 function presetLink(preset: any) {
-  if (preset.to) return scopedLink(preset.to)
-  return { path: '/explorer', query: { mission: preset.title, template: preset.template, root_id: missionProgramId.value, ...preset.params } }
+  return preset.to ? contextualLink(preset.to) : { path: '/explorer', query: { mission: preset.title, template: preset.template, root_id: missionProgramId.value, ...preset.params } }
 }
-function scopedLink(target: string) {
-  const [path, search = ''] = target.split('?')
-  return { path, query: { ...Object.fromEntries(new URLSearchParams(search)), root_id: missionProgramId.value || undefined } }
+function contextualLink(destination: string) {
+  const [path, search = ''] = destination.split('?')
+  const query: Record<string, any> = {}
+  for (const key of ['vendor', 'focus', 'finding', 'family', 'evidence']) {
+    if (route.query[key] != null) query[key] = route.query[key]
+  }
+  Object.assign(query, Object.fromEntries(new URLSearchParams(search)))
+  if (missionProgramId.value) query.root_id = missionProgramId.value
+  return { path, query }
+}
+async function selectProgram(id: string) {
+  selectedProgramId.value = id
+  await router.push({ query: { ...route.query, root_id: id || undefined, program: undefined } })
+}
+async function applyRouteProgram(canonicalize = false, request = entryRequests.current()) {
+  if (!entryRequests.isCurrent(request, route.name)) return
+  const query = { ...route.query }
+  const selected = missionProgramFromQuery(query, programs.value)
+  if (!entryRequests.isCurrent(request, route.name)) return
+  selectedProgramId.value = selected
+  if (canonicalize && selected && String(query.root_id || '') !== selected) {
+    if (!entryRequests.isCurrent(request, route.name)) return
+    await router.replace({ query: { ...query, root_id: selected, program: undefined } })
+  }
 }
 async function load(refresh = false) {
+  const request = entryRequests.begin()
   status.value = 'loading'; error.value = ''; programError.value = ''
   try {
     if (!ws.loaded) await ws.load()
-    health.value = await api.get<ReadinessContract>(`/api/health${refresh ? '?refresh=true' : ''}`)
+    const nextHealth = await api.get<ReadinessContract>(`/api/health${refresh ? '?refresh=true' : ''}`)
+    if (!entryRequests.isCurrent(request, route.name)) return
+    health.value = nextHealth
     try {
-      programs.value = (await api.get<{ items: Array<{ id: string; name: string }> }>('/api/graph/programs')).items
-      const preferred = selectedProgramId.value
-      selectedProgramId.value = programs.value.some(program => program.id === preferred) ? preferred : (programs.value[0]?.id || '')
+      const nextPrograms = (await api.get<{ items: Array<{ id: string; name: string }> }>('/api/graph/programs')).items
+      if (!entryRequests.isCurrent(request, route.name)) return
+      programs.value = nextPrograms
+      await applyRouteProgram(true, request)
     } catch (cause) {
-      programError.value = cause instanceof Error ? cause.message : 'Program index unavailable.'
+      if (entryRequests.isCurrent(request, route.name)) {
+        programError.value = cause instanceof Error ? cause.message : 'Program index unavailable.'
+      }
     }
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : 'Unknown readiness failure.'
+    if (entryRequests.isCurrent(request, route.name)) {
+      error.value = cause instanceof Error ? cause.message : 'Unknown readiness failure.'
+    }
   } finally {
-    status.value = 'done'
+    if (entryRequests.isCurrent(request, route.name)) status.value = 'done'
   }
 }
-onMounted(() => load())
+onMounted(() => {
+  entryRequests.mount()
+  void load()
+})
+onUnmounted(() => entryRequests.unmount())
+watch(() => [route.query.root_id, route.query.program], () => {
+  const request = entryRequests.current()
+  if (entryRequests.isCurrent(request, route.name)) void applyRouteProgram(true, request)
+})
 </script>
 
 <style scoped>

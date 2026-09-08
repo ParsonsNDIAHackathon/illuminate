@@ -6,7 +6,7 @@
         <p class="text-body-2" style="opacity:.72">Aligned UC-11 categories. Scores prioritize review; they are not proof of wrongdoing.</p>
       </div>
       <v-spacer />
-      <v-btn prepend-icon="mdi-snowflake" variant="tonal" @click="loadPreset">Load judged preset</v-btn>
+      <v-btn prepend-icon="mdi-snowflake" variant="tonal" @click="showPreset">Use calibration example</v-btn>
     </div>
     <v-alert v-if="isPreset" type="info" variant="tonal" density="compact" class="mb-3">
       Offline judged case · frozen {{ asOf }} · all vendor names and evidence are simulated calibration data.
@@ -17,11 +17,11 @@
           <template #item="{ props: itemProps, item }"><v-list-item v-bind="itemProps" :subtitle="item.raw.identityLine"><template #append><v-chip v-if="item.raw.ambiguous" size="x-small" color="warning">AMBIGUOUS NAME</v-chip></template><div class="match-context">{{ item.raw.matchContext }}</div></v-list-item></template>
           <template #selection="{ item }"><span>{{ item.raw.name }} <small>— {{ item.raw.identityLine }}</small></span></template>
         </v-autocomplete>
-        <v-autocomplete v-model="rightId" :items="candidates" item-title="name" item-value="id" label="Comparator vendor" placeholder="Search by vendor name" :loading="candidatesLoading" :disabled="loading" clearable no-data-text="No matching vendors" density="compact">
+        <v-autocomplete v-model="rightId" :items="candidates" item-title="name" item-value="id" label="Choose a second vendor" placeholder="Search by vendor name" :loading="candidatesLoading" :disabled="loading" clearable no-data-text="No matching vendors" density="compact">
           <template #item="{ props: itemProps, item }"><v-list-item v-bind="itemProps" :subtitle="item.raw.identityLine"><template #append><v-chip v-if="item.raw.ambiguous" size="x-small" color="warning">AMBIGUOUS NAME</v-chip></template><div class="match-context">{{ item.raw.matchContext }}</div></v-list-item></template>
           <template #selection="{ item }"><span>{{ item.raw.name }} <small>— {{ item.raw.identityLine }}</small></span></template>
         </v-autocomplete>
-        <v-btn color="primary" :loading="loading" :disabled="!canCompare" @click="loadLive">Compare live reports</v-btn>
+        <v-btn color="primary" :loading="loading" :disabled="!canCompare" @click="compareSelected">Compare live reports</v-btn>
         <p v-if="leftId && !rightId" class="picker-help">First vendor preserved. Choose a comparator by name; identifiers and match context appear before selection.</p>
         <p v-else-if="leftId && leftId === rightId" class="picker-help error-copy">Choose two different legal records.</p>
       </v-card-text>
@@ -41,7 +41,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, getVendorRiskProfile, qs, type EntityListResponse, type EntitySummary, type VendorRiskProfile } from '../api/client'
 import VendorRiskColumn from '../components/VendorRiskColumn.vue'
@@ -58,6 +58,10 @@ const loading = ref(false)
 const candidatesLoading = ref(false)
 const entities = ref<EntitySummary[]>([])
 const error = ref('')
+let requestVersion = 0
+let candidateVersion = 0
+let candidateRoot: string | null = null
+let candidatePromise: Promise<void> | null = null
 const asOf = '2026-09-08'
 const isPreset = computed(() => profiles.value?.every(profile => profile.sourceMode === 'frozen'))
 const candidates = computed(() => vendorCandidates(entities.value))
@@ -70,21 +74,56 @@ const categoryOrder = computed(() => {
   return [...seen.values()]
 })
 
-function loadPreset() {
-  profiles.value = structuredClone(TRUSTWORTHY_RISKY_PRESET)
-  error.value = ''
+async function showPreset() {
+  const { left, right, ...query } = route.query
+  await router.push({ query: { ...query, preset: 'judged' } })
 }
-async function loadLive() {
-  const selectedLeft = leftId.value.trim()
-  const selectedRight = rightId.value.trim()
+async function compareSelected() {
+  const { preset, ...query } = route.query
+  const destination = { query: { ...query, left: leftId.value, right: rightId.value } }
+  if (router.resolve(destination).fullPath === route.fullPath) await applyRoute()
+  else await router.push(destination)
+}
+async function applyRoute() {
+  const version = ++requestVersion
+  const selectedLeft = String(route.query.left || '')
+  const selectedRight = String(route.query.right || '')
+  const selectedRoot = rootId.value
+  leftId.value = selectedLeft
+  rightId.value = selectedRight
+  if (route.query.preset === 'judged') {
+    loading.value = false
+    leftId.value = ''
+    rightId.value = ''
+    profiles.value = structuredClone(TRUSTWORTHY_RISKY_PRESET)
+    error.value = ''
+    void ensureCandidates(selectedRoot)
+    return
+  }
+  if (!leftId.value || !rightId.value) {
+    loading.value = false
+    profiles.value = null
+    void ensureCandidates(selectedRoot)
+    return
+  }
+  if (leftId.value === rightId.value) {
+    loading.value = false
+    profiles.value = null
+    error.value = 'Choose two different vendors to compare.'
+    void ensureCandidates(selectedRoot)
+    return
+  }
   loading.value = true
+  profiles.value = null
   error.value = ''
   try {
+    await ensureCandidates(selectedRoot)
+    if (version !== requestVersion) return
     const liveProfiles = await Promise.all([
-      getVendorRiskProfile(selectedLeft, undefined, rootId.value),
-      getVendorRiskProfile(selectedRight, undefined, rootId.value),
+      getVendorRiskProfile(selectedLeft, undefined, selectedRoot),
+      getVendorRiskProfile(selectedRight, undefined, selectedRoot),
     ]) as [VendorRiskProfile, VendorRiskProfile]
-    if (leftId.value !== selectedLeft || rightId.value !== selectedRight) return
+    if (version !== requestVersion || rootId.value !== selectedRoot || leftId.value !== selectedLeft || rightId.value !== selectedRight) return
     profiles.value = liveProfiles.map(profile => {
       const candidate = entities.value.find(entity => entity.id === profile.id)
       return {
@@ -95,35 +134,46 @@ async function loadLive() {
         tier: profile.tier ?? candidate?.tier,
       }
     }) as [VendorRiskProfile, VendorRiskProfile]
-    await router.replace({ query: { ...route.query, preset: undefined, left: selectedLeft, right: selectedRight } })
   } catch (cause: any) {
-    error.value = `Live comparison unavailable: ${cause.message}. The frozen preset remains available offline.`
+    if (version === requestVersion) error.value = `Live comparison unavailable: ${cause.message}. The frozen preset remains available offline.`
   } finally {
-    loading.value = false
+    if (version === requestVersion) loading.value = false
   }
 }
-async function loadCandidates() {
+function ensureCandidates(root: string) {
+  if (candidateRoot === root && candidatePromise) return candidatePromise
+  if (candidateRoot === root) return Promise.resolve()
+  const version = ++candidateVersion
+  candidateRoot = root
   candidatesLoading.value = true
-  try {
-    const result = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: rootId.value, limit: 1000 })}`)
-    const items = [...result.items]
-    while (items.length < result.total) {
-      const page = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: rootId.value, limit: 1000, offset: items.length })}`)
-      if (!page.items.length) break
-      items.push(...page.items)
+  entities.value = []
+  candidatePromise = (async () => {
+    try {
+      const result = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: root, limit: 1000 })}`)
+      const items = [...result.items]
+      while (items.length < result.total) {
+        const page = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: root, limit: 1000, offset: items.length })}`)
+        if (!page.items.length) break
+        items.push(...page.items)
+      }
+      if (version === candidateVersion) entities.value = items
+    } catch (cause: any) {
+      if (version === candidateVersion) {
+        candidateRoot = null
+        error.value = `Vendor picker unavailable: ${cause.message}`
+      }
+    } finally {
+      if (version === candidateVersion) {
+        candidatesLoading.value = false
+        candidatePromise = null
+      }
     }
-    entities.value = items
-  } catch (cause: any) {
-    error.value = `Vendor picker unavailable: ${cause.message}`
-  } finally {
-    candidatesLoading.value = false
-  }
+  })()
+  return candidatePromise
 }
-onMounted(async () => {
-  await loadCandidates()
-  if (leftId.value && rightId.value) await loadLive()
-  else if (route.query.preset === 'judged' && !leftId.value && !rightId.value) loadPreset()
-})
+watch(leftId, value => { if (value === rightId.value) rightId.value = '' })
+watch(() => route.fullPath, applyRoute)
+onMounted(applyRoute)
 </script>
 
 <style scoped>
