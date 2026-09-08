@@ -382,9 +382,11 @@ async def scenario(root_id: str) -> None:
     await merge_rel(ning, "PARENT_SEATED_IN", location_id("CN"), {**S})
     await merge_rel(hk, "INCORPORATED_IN", location_id("HK"), S)
     await merge_rel(zj, "INCORPORATED_IN", location_id("CN"), S)
+    # Only the two OWNS hops are stated. That Zhejiang is the ultimate parent is nowhere in the
+    # data — it is what traversing the ownership chain to its root discovers, which is the point
+    # of the scenario: the risk is reachable, not labelled.
     await merge_rel(hk, "OWNS", ning, {**S, "pct": 100.0})
     await merge_rel(zj, "OWNS", hk, {**S, "pct": 100.0})
-    await merge_rel(zj, "ULTIMATE_PARENT_OF", ning, {**S, "detail": "100% via two intermediaries"})
     await merge_rel(ning, "PROVIDES", "cat_castings", S)
     await merge_rel(ning, "SUPPLIES", h["id"], {**S, "tier": tier, "sole_source": True, "psc": "1615", "contract_ref": "SIM-PO-0417", "detail": "sole-source investment castings"})
     # people: a former director of the host now on Ningbo's board; a director sitting on two real supplier boards
