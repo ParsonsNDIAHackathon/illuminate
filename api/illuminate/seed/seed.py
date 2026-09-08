@@ -103,13 +103,22 @@ async def seed_program(keywords: list[str], root_name: str, *, since: str, until
 
     prime_ids: dict[str, str] = {}  # recipient_id → entity id
     for rid, slot in ranked:
-        rec = await recipient(rid)
+        # USAspending serves some recipient profiles as a 502 that never resolves (and offline,
+        # one may simply not be recorded). The award rows still name the recipient, so it is
+        # kept on what they carry, the way the sub-awardee pass already does, rather than
+        # letting one broken profile abort the whole seed.
+        try:
+            rec = await recipient(rid)
+        except Exception as e:
+            log(f"recipient profile unavailable for {slot['name']} ({rid}): {type(e).__name__}: {e}; keeping the award-row name")
+            rec = {}
         uei = rec.get("uei")
         eid = entity_id(uei=uei, name=rec.get("name") or slot["name"])
         loc = _country(rec.get("location"))
         await merge_entity(eid, {"name": rec.get("name") or slot["name"], "kind": "organization", "uei": uei, "duns": rec.get("duns"),
                                  "aliases": rec.get("alternate_names") or [], "aliases_norm": [normalize_name(x) for x in rec.get("alternate_names") or []],
-                                 "business_types": rec.get("business_types") or [], "source_url": recipient_url(rid), **PROV})
+                                 "business_types": rec.get("business_types") or [], "source_url": recipient_url(rid), **PROV,
+                                 **({} if rec else {"confidence": 0.75, "method": "name_match"})})
         if loc:
             await merge_rel(eid, "OPERATES_IN", await merge_location(loc), {**PROV, "source_url": recipient_url(rid), "detail": "recipient address"})
         prime_ids[rid] = eid
@@ -313,7 +322,7 @@ async def main_async(args) -> None:
     # enrichment: authoritative connectors over every supplier; people/EDGAR over the biggest
     all_ids = [r["id"] for r in await db.read("MATCH (e:Entity) WHERE e.kind='organization' AND coalesce(e.simulated,false)=false RETURN e.id AS id")]
     top_ids = [r["id"] for r in await db.read(
-        "MATCH (e:Entity)-[s:SUPPLIES]->() WHERE coalesce(e.simulated,false)=false RETURN e.id AS id, sum(coalesce(s.amount,0)) AS amt ORDER BY amt DESC LIMIT $n", {"n": args.people})]
+        "MATCH (e:Entity)-[s:SUPPLIES]->() WHERE coalesce(e.simulated,false)=false RETURN e.id AS id, sum(coalesce(s.amount,0)) AS amt ORDER BY amt DESC, id LIMIT $n", {"n": args.people})]
     if not args.skip_enrich:
         await enrich_with(["gleif"], all_ids, commit_open=False)
         await enrich_with(["ofac"], all_ids, commit_open=False)
@@ -322,8 +331,12 @@ async def main_async(args) -> None:
             await enrich_with(["sam"], all_ids, commit_open=False)
         else:
             log("sam: no SAM.gov key in vault — registration/exclusion screen skipped")
-        # a parent brought in by GLEIF deserves a jurisdiction + screen too
-        parents = [r["id"] for r in await db.read("MATCH (p:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(:Entity) WHERE NOT (p)-[:SUPPLIES]->() AND coalesce(p.simulated,false)=false RETURN DISTINCT p.id AS id")]
+        # a parent brought in by GLEIF deserves a jurisdiction + screen too. Ordered by what its
+        # subsidiaries supply so the ten that also get the people layer are the same every run —
+        # an unordered pick chose different parents offline than the fixtures were recorded for.
+        parents = [r["id"] for r in await db.read(
+            "MATCH (p:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(c:Entity) WHERE NOT (p)-[:SUPPLIES]->() AND coalesce(p.simulated,false)=false "
+            "OPTIONAL MATCH (c)-[s:SUPPLIES]->() RETURN p.id AS id, sum(coalesce(s.amount,0)) AS amt ORDER BY amt DESC, id")]
         await enrich_with(["gleif", "ofac", "sam_exclusions"], parents, commit_open=False)
         await enrich_with(["littlesis"], top_ids + parents[:10], commit_open=True)
         await enrich_with(["edgar"], top_ids + parents[:10], commit_open=False)
