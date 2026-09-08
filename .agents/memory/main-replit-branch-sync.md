@@ -30,6 +30,16 @@ while a bounded loop avoids silently chasing a branch that never settles.
 pushing. If the fetched tip is not an ancestor, merge it and revalidate; retry only
 a small fixed number of times, and stop for review if the remote keeps advancing.
 
+Treat Replit's platform-owned `main-repl/main` as a read-only integration ref.
+Task completion may rebase workspace `main` onto it and replay local merge content.
+
+**Why:** Local changes to the integration ref can be replaced by forced platform
+refreshes, while task-completion rebases can change the candidate commit history.
+
+**How to apply:** Wait for active integrations to settle, use the platform conflict
+flow during completion, then rerun validation and GitHub synchronization against
+the rebased candidate. Never try to make the integration ref authoritative locally.
+
 Treat any credential-delivery channel as readable by the whole Git process tree,
 not just the intended credential prompt.
 
