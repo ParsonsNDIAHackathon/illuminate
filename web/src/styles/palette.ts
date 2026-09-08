@@ -27,5 +27,6 @@ export const LABEL_COLORS: Record<string, { light: string; dark: string }> = {
   Category: { light: '#7c3aed', dark: '#a78bfa' },
   Location: { light: '#92400e', dark: '#d6a26b' },
   Artifact: { light: '#6b7280', dark: '#9ca3af' },
+  Source: { light: '#0369a1', dark: '#7dd3fc' },   // an Artifact on the sources layer (registry entry / source record)
   Claim: { light: '#be185d', dark: '#f472b6' },
 }
