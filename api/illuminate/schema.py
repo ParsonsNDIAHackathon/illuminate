@@ -13,7 +13,7 @@ LABELS: dict[str, str] = {
     "Person": "An executive, director or beneficial owner. Joined to entities by HELD_ROLE / BENEFICIAL_OWNER_OF.",
     "Category": "Goods or services taxonomy node. kind ∈ {goods, services}; hierarchical via SUBCATEGORY_OF.",
     "Location": "Country / region / city. kind ∈ {country, region, city}; code is ISO-3166 where applicable.",
-    "Artifact": "Evidence: filing, award record, registry record, news article, web page. Never a raw blob.",
+    "Artifact": "Evidence: filing, award record, registry record, news article, web page. Never a raw blob. kind ∈ {award, registry, filing, news, web, document, record}.",
     "Claim": "Reified assertion (subject, predicate, object) with source, method, confidence, status ∈ {staged, committed, rejected}.",
 }
 
@@ -35,6 +35,11 @@ RELS: dict[str, str] = {
     "TARGETS": "(c:Claim)-[:TARGETS]->(object) — the claim's object node, when the object is a node",
     "ABOUT": "(a:Artifact)-[:ABOUT]->(e:Entity) — an artifact that mentions an entity without a specific claim",
 }
+
+# Artifact kinds that are a pointer at a data source (a LittleSis org page, a registry entry, a
+# sanctions list, a quote) rather than a document in their own right. The canvas draws these on the
+# "sources" layer and the remaining kinds (filing, news, award, web, document) on "artifacts".
+SOURCE_KINDS = ("record", "registry")
 
 # Provenance every node and edge written by the system carries (Entity metadata table).
 PROVENANCE_FIELDS = ["source", "source_url", "retrieved_at", "method", "confidence", "claim_id"]

@@ -27,7 +27,7 @@ TOOLS: list[dict] = [
             "properties": {
                 "entity_id": {"type": "string"},
                 "depth": {"type": "integer", "default": 2, "minimum": 1, "maximum": 6},
-                "layers": {"type": "object", "description": "override toggles: {people, countries, artifacts, categories}"},
+                "layers": {"type": "object", "description": "override toggles: {people, countries, categories, artifacts, sources, claims}"},
             },
             "required": ["entity_id"],
         },

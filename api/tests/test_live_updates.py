@@ -100,3 +100,22 @@ def test_graph_all_honours_layers(client):
     assert not [n for n in lean["nodes"] if n["label"] == "Person"]
     full = client.get("/api/graph/all?people=true&artifacts=true").json()["subgraph"]
     assert len(full["nodes"]) >= len(lean["nodes"])
+
+
+def test_graph_all_splits_artifacts_sources_and_claims(client):
+    from illuminate.schema import SOURCE_KINDS
+    every = client.get("/api/graph/all?artifacts=true&sources=true&claims=true").json()["subgraph"]["nodes"]
+    for n in every:
+        if n["label"] == "Artifact":
+            expected = "sources" if (n["props"].get("kind") or "record") in SOURCE_KINDS else "artifacts"
+            assert n["layer"] == expected, n["name"]
+        elif n["label"] == "Claim":
+            assert n["layer"] == "claims"
+    only_sources = client.get("/api/graph/all?sources=true").json()["subgraph"]["nodes"]
+    assert all(n["layer"] == "sources" for n in only_sources if n["label"] == "Artifact")
+    assert not [n for n in only_sources if n["label"] == "Claim"]
+    only_claims = client.get("/api/graph/all?claims=true").json()["subgraph"]["nodes"]
+    assert not [n for n in only_claims if n["label"] == "Artifact"]
+    only_docs = client.get("/api/graph/all?artifacts=true").json()["subgraph"]["nodes"]
+    assert all(n["layer"] == "artifacts" for n in only_docs if n["label"] == "Artifact")
+    assert not [n for n in only_docs if n["label"] == "Claim"]
