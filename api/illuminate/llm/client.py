@@ -39,4 +39,4 @@ async def check_key(user: str = "local") -> dict:
         strong, fast = models(user)
         return {"ok": True, "models": len(ids), "strong_available": strong in ids or not ids, "fast_available": fast in ids or not ids}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": e}

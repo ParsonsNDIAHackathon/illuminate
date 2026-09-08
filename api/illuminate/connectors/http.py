@@ -69,6 +69,32 @@ class HttpError(Exception):
         self.status = status
 
 
+async def probe_source(url: str, *, params: dict | None = None, headers: dict | None = None,
+                       timeout: float = 8.0, max_bytes: int = 4096) -> None:
+    """Make one bounded, non-cached GET used only for connector diagnostics."""
+    req = httpx.Request("GET", url, params=params)
+    full = str(req.url)
+    await _throttle(req.url.host or "")
+    hdrs = {
+        "User-Agent": settings.illuminate_user_agent,
+        "Accept": "*/*",
+        "Range": f"bytes=0-{max_bytes - 1}",
+        **(headers or {}),
+    }
+    # Redirects are deliberately not followed: automatic redirect handling can
+    # buffer an unbounded intermediate body before exposing the final stream.
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        async with client.stream("GET", full, headers=hdrs) as response:
+            if response.status_code < 200 or response.status_code >= 300:
+                # Never read an upstream error body into memory or the exception.
+                raise HttpError(response.status_code, full)
+            read = 0
+            async for chunk in response.aiter_raw(chunk_size=min(1024, max_bytes)):
+                read += len(chunk)
+                if read >= max_bytes:
+                    break
+
+
 async def fetch_json(method: str, url: str, *, params: dict | None = None, json_body: Any = None, headers: dict | None = None,
                      ttl: float = 7 * 86400, timeout: float = 30.0) -> Any:
     """GET/POST returning parsed JSON, with cache. ttl<=0 disables caching."""

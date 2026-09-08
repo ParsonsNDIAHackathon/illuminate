@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 Trust = Literal["authoritative", "open"]
+DiagnosticCategory = Literal["missing_credentials", "authentication", "rate_limited", "timeout", "unavailable"]
 
 
 def now_iso() -> str:
@@ -54,6 +55,8 @@ class Connector:
     key_name: str | None = None         # vault credential name, None when no key is needed
     key_url: str | None = None          # where a user registers for one
     key_note: str | None = None
+    diagnostic_url: str | None = None
+    diagnostic_params: dict[str, Any] = {}
 
     def needs_key(self) -> bool:
         return self.key_name is not None
@@ -67,6 +70,23 @@ class Connector:
     async def enrich(self, entity: dict, user: str) -> list[Fact]:
         raise NotImplementedError
 
+    async def check_connectivity(self, user: str) -> dict:
+        """Perform one lightweight source read without invoking enrichment."""
+        from ..vault import vault
+        from .http import probe_source
+
+        key = vault().get(user, self.key_name) if self.key_name else None
+        if self.key_name and not key:
+            return diagnostic_failure("missing_credentials")
+        if not self.diagnostic_url:
+            raise RuntimeError("connector diagnostic is not configured")
+        params = {
+            name: (key if value == "$credential" else value)
+            for name, value in self.diagnostic_params.items()
+        }
+        await probe_source(self.diagnostic_url, params=params or None, timeout=8, max_bytes=4096)
+        return {"ok": True, "status": "available", "detail": "Source is available"}
+
     def to_dict(self) -> dict:
         # Local import avoids coupling connector implementations to the registry
         # while still exposing stable lineage metadata at the API boundary.
@@ -74,3 +94,16 @@ class Connector:
         return {"name": self.name, "label": self.label, "description": self.description, "trust": self.trust,
                 "key_name": self.key_name, "key_url": self.key_url, "key_note": self.key_note,
                 **source_metadata(self.name)}
+
+
+_DIAGNOSTIC_DETAILS: dict[str, str] = {
+    "missing_credentials": "Add a credential before testing this connector",
+    "authentication": "The credential was rejected; replace it and try again",
+    "rate_limited": "The source is rate limiting requests; try again later",
+    "timeout": "The source did not respond in time; try again later",
+    "unavailable": "The source is currently unavailable; try again later",
+}
+
+
+def diagnostic_failure(category: DiagnosticCategory) -> dict:
+    return {"ok": False, "status": category, "detail": _DIAGNOSTIC_DETAILS[category]}

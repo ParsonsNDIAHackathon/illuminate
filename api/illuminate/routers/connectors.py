@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from ..connectors import REGISTRY, get_connector
-from ..llm.client import check_key
+from ..connectors.base import diagnostic_failure
+from ..connectors.http import HttpError
 from ..vault import vault
 from .deps import user_id
 
@@ -44,6 +48,25 @@ async def delete_credential(name: str, user: str = Depends(user_id)):
     return {**c.to_dict(), **(await c.status(user))}
 
 
-@router.post("/openai/check")
-async def openai_check(user: str = Depends(user_id)):
-    return await check_key(user)
+def _failure_for(error: Exception) -> dict:
+    if isinstance(error, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
+        return diagnostic_failure("timeout")
+    status = error.status if isinstance(error, HttpError) else getattr(error, "status_code", None)
+    if status in (401, 403):
+        return diagnostic_failure("authentication")
+    if status == 429:
+        return diagnostic_failure("rate_limited")
+    return diagnostic_failure("unavailable")
+
+
+@router.post("/{name}/test")
+async def test_connector(name: str, user: str = Depends(user_id)):
+    connector = get_connector(name)
+    if not connector:
+        raise HTTPException(404, "unknown connector")
+    if connector.key_name and not vault().get(user, connector.key_name):
+        return diagnostic_failure("missing_credentials")
+    try:
+        return await asyncio.wait_for(connector.check_connectivity(user), timeout=10)
+    except Exception as error:
+        return _failure_for(error)

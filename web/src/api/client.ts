@@ -27,6 +27,12 @@ export const api = {
   del: <T = any>(p: string) => request<T>('DELETE', p),
 }
 
+export interface ConnectorTestResult {
+  ok: boolean
+  status: 'available' | 'missing_credentials' | 'authentication' | 'rate_limited' | 'timeout' | 'unavailable'
+  detail: string
+  diagnostics?: Record<string, boolean | number | string>
+}
 export const qs = (o: Record<string, any>) =>
   Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&')
 

@@ -12,6 +12,7 @@ from .sam import SAMConnector
 from .sam_exclusions import SAMExclusionsConnector
 from .usaspending import USAspendingConnector
 from .websearch import WebSearchConnector
+from ..llm.client import check_key
 
 
 # Stable, downstream-safe source descriptions.  Connector labels are presentation
@@ -105,11 +106,51 @@ class OpenAIPseudoConnector(Connector):
     async def enrich(self, entity, user):
         return []
 
+    async def check_connectivity(self, user: str) -> dict:
+        result = await check_key(user)
+        if not result["ok"]:
+            if result.get("error") == "no key":
+                from .base import diagnostic_failure
+                return diagnostic_failure("missing_credentials")
+            raise result["error"]
+        return {
+            "ok": True,
+            "status": "available",
+            "detail": "OpenAI is available",
+            "diagnostics": {
+                "models": result["models"],
+                "strong_available": result["strong_available"],
+                "fast_available": result["fast_available"],
+            },
+        }
+
 
 REGISTRY: list[Connector] = [
     SAMConnector(), SAMExclusionsConnector(), USAspendingConnector(), GLEIFConnector(), LittleSisConnector(), EDGARConnector(), GDELTConnector(),
     OFACConnector(), MarketConnector(), OpenCorporatesConnector(), WebSearchConnector(), OpenAIPseudoConnector(),
 ]
+
+# Explicit, non-mutating probes. Parameters are intentionally minimal and never
+# include user/entity data. "$credential" is substituted inside the connector.
+_DIAGNOSTICS = {
+    "sam": ("https://api.sam.gov/entity-information/v3/entities", {"api_key": "$credential", "registrationStatus": "A", "legalBusinessName": "a"}),
+    "sam_exclusions": ("https://sam.gov/api/prod/fileextractservices/v1/api/listfiles", {"domain": "Exclusions/Public V2", "privacy": "Public"}),
+    "usaspending": ("https://api.usaspending.gov/api/v2/references/toptier_agencies/", {}),
+    "gleif": ("https://api.gleif.org/api/v1/lei-records", {"page[size]": "1"}),
+    "littlesis": ("https://littlesis.org/api/entities/search", {"q": "a"}),
+    "edgar": ("https://www.sec.gov/files/company_tickers.json", {}),
+    "gdelt": ("https://api.gdeltproject.org/api/v2/doc/doc", {"query": "sourcecountry:US", "mode": "artlist", "format": "json", "maxrecords": "1"}),
+    "ofac": ("https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV", {}),
+    "market": ("https://finnhub.io/api/v1/quote", {"symbol": "AAPL", "token": "$credential"}),
+    "opencorporates": ("https://api.opencorporates.com/v0.4/companies/search", {"q": "a", "api_token": "$credential", "per_page": "1"}),
+}
+for _connector in REGISTRY:
+    if _connector.name in _DIAGNOSTICS:
+        _connector.diagnostic_url, _connector.diagnostic_params = _DIAGNOSTICS[_connector.name]
+for _connector in REGISTRY:
+    if _connector.name == "websearch":
+        # Web search uses the same user-owned OpenAI capability.
+        _connector.check_connectivity = OpenAIPseudoConnector.check_connectivity.__get__(_connector, Connector)
 _BY_NAME = {c.name: c for c in REGISTRY}
 
 
