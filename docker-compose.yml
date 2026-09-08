@@ -68,7 +68,9 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in your local environment}
       ILLUMINATE_DATA_DIR: /data
       ILLUMINATE_CORS_ORIGINS: http://localhost:5173,http://localhost:8080
-      ILLUMINATE_FETCH_CACHE_URL: ${ILLUMINATE_FETCH_CACHE_URL:?Set the shared fetch-cache service URL}
+      # Fixture-mode startup is allowed without a cache authority. Live retrieval
+      # still fails closed because ILLUMINATE_FETCH_CACHE_REQUIRED remains true.
+      ILLUMINATE_FETCH_CACHE_URL: ${ILLUMINATE_FETCH_CACHE_URL:-}
       ILLUMINATE_FETCH_CACHE_NAMESPACE: ${ILLUMINATE_FETCH_CACHE_NAMESPACE:-illuminate-v1}
       ILLUMINATE_FETCH_CACHE_TOKEN: ${ILLUMINATE_FETCH_CACHE_TOKEN:-${SESSION_SECRET}}
       ILLUMINATE_FETCH_CACHE_REQUIRED: "true"

@@ -82,6 +82,10 @@ configures the host-side API under `make dev`. Both secrets are required and hav
 defaults — `make up` stops with a named variable rather than booting insecurely. `.env`
 is gitignored.
 
+The default development startup is fixture-driven and does not require a fetch-cache
+authority. Live connector retrieval fails closed until this environment has its own
+`ILLUMINATE_FETCH_CACHE_URL`; do not point development at the production authority.
+
 Open http://localhost:8080. Then **Settings › Connectors** → paste an OpenAI key to enable
 chat and Cypher generation. Without a key the app still browses the graph and answers
 template questions.
@@ -108,7 +112,6 @@ http://localhost:7474. The Neo4j username is `neo4j`; its password is whatever y
 for `NEO4J_PASSWORD`. `make down` stops everything and keeps the data. `make dev` runs
 Neo4j in Docker with the API and web on the host with hot reload (web on
 http://localhost:5173).
-
 ### Docker operations
 
 - **Configuration:** Compose injects the same `NEO4J_*`, `SESSION_SECRET`,
