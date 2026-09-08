@@ -9,6 +9,7 @@ import base64
 import asyncio
 import csv
 import hashlib
+import hmac
 import io
 import json
 import uuid
@@ -19,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import db
+from ..config import settings
 
 router = APIRouter(prefix="/api/exports/v1", tags=["exports"])
 VERSION = "1.0"
@@ -305,14 +307,28 @@ def _utc_now() -> datetime:
 
 def _token(data: dict[str, Any]) -> str:
     raw = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
-    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    encoded = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    signature = hmac.new(
+        settings.session_secret.get_secret_value().encode(),
+        encoded.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{encoded}.{signature}"
 
 
 def _untoken(value: str | None, kind: str) -> dict[str, Any] | None:
     if not value:
         return None
     try:
-        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        encoded, supplied = value.rsplit(".", 1)
+        expected = hmac.new(
+            settings.session_secret.get_secret_value().encode(),
+            encoded.encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(supplied, expected):
+            raise ValueError
+        raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
         data = json.loads(raw)
         position_key = "after" if kind == "cursor" else "position"
         if (not isinstance(data, dict) or data.get("v") != VERSION or data.get("kind") != kind
@@ -542,8 +558,10 @@ async def _page(limit: int, cursor: str | None, since: str | None, include_rejec
         current_upper = await _sync_export_ledger()
         mode = "incremental" if incremental else "full"
         since_revision = int(mark["position"][0]) if mark else 0
+        if since_revision > current_upper:
+            raise HTTPException(409, "watermark is ahead of the current export ledger")
         after_revision, after_id = since_revision, ""
-        upper_revision = max(current_upper, since_revision)
+        upper_revision = current_upper
     params = {
         "version": VERSION, "upper": upper_revision, "fetch": limit + 1,
         "include_rejected": include_rejected, "after_id": after_id,
@@ -618,7 +636,7 @@ async def sample():
 
 @router.get("/findings", response_model=None)
 async def findings(limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT), cursor: str | None = None,
-                   format: Literal["json", "ndjson", "csv"] = "json", include_rejected: bool = True):
+                   format: Literal["json", "ndjson", "csv"] = "json", include_rejected: bool = False):
     return _render(await _page(limit, cursor, None, include_rejected), format)
 
 

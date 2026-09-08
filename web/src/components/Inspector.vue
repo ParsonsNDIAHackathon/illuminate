@@ -171,4 +171,6 @@ section { margin-top: 10px; }
 h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; margin-bottom: 4px; }
 dl { display: grid; grid-template-columns: 90px 1fr; gap: 2px 8px; margin: 0; }
 dt { opacity: .6; } dd { margin: 0; }
+dd, .name, .ids { overflow-wrap: anywhere; min-width: 0; }
+@media (max-width: 420px) { dl { grid-template-columns: 76px minmax(0,1fr); } }
 </style>

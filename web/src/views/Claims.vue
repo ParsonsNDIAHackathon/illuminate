@@ -2,10 +2,10 @@
   <v-container fluid>
     <div class="d-flex align-center ga-2 mb-2">
       <h2 class="text-h6">Claims</h2>
-      <v-btn-toggle v-model="status" mandatory density="compact" variant="outlined"><v-btn value="staged">Staged</v-btn><v-btn value="committed">Committed</v-btn><v-btn value="rejected">Rejected</v-btn></v-btn-toggle>
+      <v-btn-toggle v-model="status" class="status-toggle" mandatory density="compact" variant="outlined"><v-btn value="staged">Staged</v-btn><v-btn value="committed">Committed</v-btn><v-btn value="rejected">Rejected</v-btn></v-btn-toggle>
       <v-spacer /><span class="text-caption">{{ items.length }} · authoritative connectors auto-commit; open-web facts wait here for a human or a second source</span>
     </div>
-    <v-data-table :items="items" :headers="headers" density="compact" :items-per-page="50" :loading="loading">
+    <v-data-table class="claims-table" :items="items" :headers="headers" density="compact" :items-per-page="50" :loading="loading">
       <template #item.assertion="{ item }">
         <span>{{ item.subject }}</span> <b class="mono">{{ item.claim.predicate }}</b> <span>{{ item.object || item.claim.object_value }}</span>
         <div class="text-caption" style="opacity:.7">{{ item.claim.detail }}</div>
@@ -35,11 +35,20 @@ import { useRoute } from 'vue-router'
 const route = useRoute()
 const requestedStatus = String(route.query.status || '')
 const status = ref(['staged', 'committed', 'rejected'].includes(requestedStatus) ? requestedStatus : 'staged'); const items = ref<any[]>([]); const loading = ref(false); const rawId = ref<string | null>(null)
-const headers = [{ title: 'Assertion', key: 'assertion' }, { title: 'Truth status', key: 'status', width: 120 }, { title: 'Source lineage', key: 'source', width: 220 }, { title: 'Evidence', key: 'artifacts', width: 140 }, { title: 'Retrieved', key: 'when', width: 140 }, { title: '', key: 'actions', width: 160 }]
+const headers = [{ title: 'Assertion', key: 'assertion', width: 360 }, { title: 'Truth status', key: 'status', width: 120 }, { title: 'Source lineage', key: 'source', width: 220 }, { title: 'Evidence', key: 'artifacts', width: 140 }, { title: 'Retrieved', key: 'when', width: 140 }, { title: '', key: 'actions', width: 170 }]
 async function load() { loading.value = true; try { const entity = String(route.query.entity_id || ''); items.value = await api.get(`/api/claims?status=${status.value}${entity ? `&entity_id=${encodeURIComponent(entity)}` : ''}&limit=500`) } finally { loading.value = false } }
 async function act(id: string, what: 'commit' | 'reject') { await api.post(`/api/claims/${id}/${what}`, {}); load() }
 function confidence(value: unknown) { const n = Number(value); return Number.isFinite(n) ? `${Math.round(n * 100)}%` : 'Unavailable' }
 function date(value: unknown) { return value ? new Date(String(value)).toLocaleString() : 'Unavailable' }
 watch(status, load); onMounted(load)
 </script>
-<style scoped>.mono { font-family: ui-monospace, monospace; font-size: 12px; }.simulation-note { max-width: 130px; margin-top: 3px; color: #8a5213; font-size: 10px; font-weight: 700; }</style>
+<style scoped>
+.mono { font-family: ui-monospace, monospace; font-size: 12px; }
+.simulation-note { max-width: 130px; margin-top: 3px; color: #8a5213; font-size: 10px; font-weight: 700; }
+.claims-table :deep(table) { min-width: 1150px; }
+.claims-table :deep(th:first-child), .claims-table :deep(td:first-child) { min-width: 360px; }
+@media (max-width: 500px) {
+  .status-toggle { display: flex; width: 100%; }
+  .status-toggle :deep(.v-btn) { flex: 1 1 0; min-width: 0; padding-inline: 6px; font-size: 11px; }
+}
+</style>

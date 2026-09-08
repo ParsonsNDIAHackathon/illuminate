@@ -6,6 +6,8 @@ Hackathon, Washington DC, 8–10 Sep 2026 (UC-7 supply chain illumination, UC-11
 **What it is, what is in the graph, and how it is built: open [`details.html`](details.html).**
 For a concise judge-facing source-to-decision view, trust boundaries, deployment paths, and
 presenter answers, see the [architecture and lineage brief](docs/architecture-lineage-brief.md).
+For role-specific goals, safety expectations, and executable review scenarios, see the
+[NDIA user personas](docs/NDIA_USER_PERSONAS.md).
 
 **Building a partner consumer:** see the
 [`Interoperability consumer guide`](docs/INTEROPERABILITY.md) for versioned
@@ -13,8 +15,16 @@ findings, incremental retrieval, provenance, simulation handling, and the
 planned NDIA catalog contribution.
 
 **New contributor? Follow the [contributor onboarding guide](docs/ONBOARDING.md)**
-to create a task, work in a branch, open a merge request, and run Illuminate
+to create a task, work in a branch, open a pull request, and run Illuminate
 locally.
+
+GitHub `origin/main` is the canonical shared history. Before starting work on a
+clean Replit `main`, run `make sync-pre`. After reviewed, validated work reaches
+Replit `main`, run `make sync-publish`; see the
+[main-branch synchronization policy](docs/ONBOARDING.md#keep-replit-main-and-github-main-synchronized).
+In Replit these guarded commands consume the existing `GITHUB_KEY` secret
+automatically. Agents and contributors must never print, copy, or embed that
+secret in commands, remote URLs, files, or Git configuration.
 
 Requires Docker and `make`. For the host-side dev loop (hot reload) you also need
 Python ≥ 3.12 and Node ≥ 20.
@@ -47,7 +57,8 @@ cd api && .venv/bin/python -m illuminate.seed.record littlesis   # adds fixtures
 ```
 
 Other addresses: API and docs at http://localhost:8000/docs, Neo4j browser at
-http://localhost:7474 (`neo4j` / `illuminate-dev`). `make down` stops everything and keeps
+http://localhost:7474. Set unique `NEO4J_PASSWORD` and `SESSION_SECRET` environment
+values before `make up`; the username is `neo4j`. `make down` stops everything and keeps
 the data. `make dev` runs Neo4j in Docker with the API and web on the host with hot reload
 (web on http://localhost:5173).
 

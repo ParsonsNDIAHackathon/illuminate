@@ -14,3 +14,4 @@ echo "Building the web application..."
 npm run build --prefix web
 
 echo "Post-merge setup complete."
+echo "After reviewing and validating canonical main, publish it explicitly with: make sync-publish"

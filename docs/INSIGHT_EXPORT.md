@@ -30,9 +30,11 @@ watermark and continuation cursor are returned in `X-Illuminate-Watermark` and
 `X-Illuminate-Next-Cursor`.
 
 The exporter selects a fixed set of safe properties. It never exports raw
-cached documents, credentials, or arbitrary node properties. Rejected claims
-are included by default so incremental consumers see truth-state transitions;
-set `include_rejected=false` only for a filtered view.
+cached documents, credentials, or arbitrary node properties. Full traversals
+exclude rejected claims by default; pass `include_rejected=true` for a review
+view. Incremental streams include rejected transitions by default so consumers
+cannot silently retain a claim that was later rejected; set
+`include_rejected=false` only for a deliberately filtered stream.
 Simulation propagates from the claim, subject, target, and evidence artifacts.
 
 Run the dependency-free consumer:

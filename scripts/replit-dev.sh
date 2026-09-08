@@ -15,13 +15,33 @@ mkdir -p "$NEO4J_server_directories_data" "$NEO4J_server_directories_logs" \
   "$NEO4J_server_directories_run" "$NEO4J_server_directories_transaction_logs_root" \
   "$NEO4J_server_directories_plugins" "$NEO4J_CONF"
 
+PASSWORD_FILE="$ROOT/.neo4j/dev-password"
+if [ ! -f "$PASSWORD_FILE" ]; then
+  if [ -f "$ROOT/.neo4j/.password-set" ]; then
+    if [ -z "${NEO4J_PASSWORD:-}" ]; then
+      echo "Existing Neo4j data needs its current NEO4J_PASSWORD once to create the protected local credential file." >&2
+      exit 1
+    fi
+  fi
+  umask 077
+  if [ -n "${NEO4J_PASSWORD:-}" ]; then
+    printf '%s\n' "$NEO4J_PASSWORD" > "$PASSWORD_FILE"
+  else
+    python3 - <<'PY' > "$PASSWORD_FILE"
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+  fi
+fi
+export NEO4J_PASSWORD="$(cat "$PASSWORD_FILE")"
+
 NEO4J_BIN="$(readlink -f "$(command -v neo4j)")"
 NEO4J_SHARE="$(cd "$(dirname "$NEO4J_BIN")/../share/neo4j" && pwd)"
 ln -sf "$NEO4J_SHARE/labs/apoc-5.26.1-core.jar" \
   "$NEO4J_server_directories_plugins/apoc-5.26.1-core.jar"
 
 cat > "$NEO4J_CONF/neo4j.conf" <<EOF
-server.default_listen_address=0.0.0.0
+server.default_listen_address=127.0.0.1
 server.directories.data=$NEO4J_server_directories_data
 server.directories.logs=$NEO4J_server_directories_logs
 server.directories.run=$NEO4J_server_directories_run
@@ -32,7 +52,7 @@ dbms.security.procedures.unrestricted=apoc.*
 EOF
 
 if [ ! -f "$ROOT/.neo4j/.password-set" ]; then
-  neo4j-admin dbms set-initial-password illuminate-dev --require-password-change=false
+  neo4j-admin dbms set-initial-password "$NEO4J_PASSWORD" --require-password-change=false
   touch "$ROOT/.neo4j/.password-set"
 fi
 

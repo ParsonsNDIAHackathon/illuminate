@@ -1,8 +1,8 @@
 # Accounts, keys and credentials
 
-Status as of 2026-09-07. **No accounts were created on your behalf** — every keyed
-source below needs an email-verified signup, which I could not complete. Register with
-berge472@gmail.com and paste the key into **Settings › Connectors** in the app; keys are
+Status as of 2026-09-07. **No accounts are created on an operator's behalf** — keyed
+sources may require an email-verified signup. Use an approved organization account and
+paste the key into **Settings › Connectors** in the app; keys are
 encrypted at rest (`api/data/vault.json`, key in `api/data/vault.key`) and never enter a
 prompt. Record passwords in your own password manager, not here.
 
@@ -34,17 +34,17 @@ certificate had expired on 2026-09-05 and 2026-09-07; data.trade.gov requires a 
 
 | Credential | Vault slot | Status |
 |---|---|---|
-| SAM.gov personal API key (issued 2026-09-07 to berge472@gmail.com's SAM.gov account) | `sam` | stored encrypted; **works** (Entity v3 + Exclusions v4 verified) but the personal tier is throttled to **~10 requests/day** — the quota message names the reset time (00:00 UTC). The connector backs off on 429 and the seed stops its SAM pass at the first 429. 5 suppliers were screened on day one; the rest fill in ~10/day, or all at once with a federal/system-account key |
-| api.data.gov key (registered 2026-09-07 with berge472@gmail.com) | `api_data_gov` | stored encrypted; not used by any connector yet — usable for other api.data.gov-fronted federal APIs (Regulations.gov, NASA, etc.) if a connector needs one |
+| SAM.gov API key | `sam` | stored encrypted when configured; personal tiers may be heavily throttled. The connector backs off on 429 and stops its SAM seed pass at the first quota response |
+| api.data.gov key | `api_data_gov` | stored encrypted when configured; not used by a connector yet |
 
 ## Local infrastructure
 
 | Thing | Value |
 |---|---|
-| Neo4j (docker compose) | bolt://localhost:7687 · user `neo4j` · password `illuminate-dev` · browser http://localhost:7474 |
+| Neo4j (docker compose) | bolt://localhost:7687 · user `neo4j` · operator-supplied password · browser http://localhost:7474 |
 | API | http://localhost:8000 (OpenAPI at /docs) · MCP streamable HTTP at /mcp |
 | Web (vite dev) | http://localhost:5173 |
 | Web (compose, nginx) | http://localhost:8080 |
 
-Change `NEO4J_AUTH` in `docker-compose.yml` and `NEO4J_PASSWORD` in the API env together
-before exposing anything beyond localhost.
+Set unique `NEO4J_PASSWORD` and `SESSION_SECRET` environment values before starting
+Docker Compose. Do not expose the database or API directly beyond localhost.

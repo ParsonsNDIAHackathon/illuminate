@@ -1,17 +1,31 @@
 ---
-name: Main Replit branch sync
-description: How to verify the main Replit project's branch from a task workspace when its SSH remote cannot fetch non-interactively.
+name: Main branch synchronization
+description: Durable safety rules for reconciling Replit and GitHub main histories without rewriting or racing shared work.
 ---
 
-In a task workspace, treat `main-repl/main` as a platform-refreshed tracking ref and
-re-check it immediately before completion. A direct `git fetch main-repl main` may
-prompt for an SSH password that the task workspace cannot provide.
+Fetch the remote branch into the exact tracking ref used for comparison; do not
+assume a successful fetch refreshed that ref through ambient fetch mappings.
+Capture the local candidate before ancestry evaluation and publish only that
+immutable commit, never a mutable branch name resolved later.
 
-**Why:** Replit's post-merge/task plumbing refreshed `main-repl/main` several times
-while parallel tasks completed, even though a manual fetch through the configured
-SSH proxy could not authenticate non-interactively.
+**Why:** Custom refspecs can leave a stale tracking ref while fetch succeeds, and
+concurrent local work can advance a branch between validation and push. Either
+case can make synchronization falsely report success or publish unevaluated work.
 
-**How to apply:** Verify the tracking ref's commit and divergence before and after
-long conflict-resolution work. Merge any newly arrived commits, then confirm
-`main-repl/main` is an ancestor and has zero remote-only commits. Do not replace or
-delete the Replit remote merely because a manual fetch prompts for credentials.
+**How to apply:** Fetch before work and again after concurrent merges. Fast-forward
+only when remote history is an ancestor-safe continuation; refuse dirty or
+diverged states. Push without force, then fetch and compare exact commit IDs again.
+Task-workspace SSH remotes may be platform-refreshed even when direct fetch cannot
+authenticate, so do not delete those remotes merely because a manual fetch prompts.
+
+Treat any credential-delivery channel as readable by the whole Git process tree,
+not just the intended credential prompt.
+
+**Why:** Repository-controlled hooks inherit Git's environment and open file
+descriptors. A secret absent from command arguments can still leak if a hook runs
+while its delivery channel is available.
+
+**How to apply:** Remove workspace secrets from the environment before the first
+Git subprocess. During secret-backed network operations, disable repository hooks
+through a private, empty, command-scoped hooks directory; do not persist that
+setting or alter normal local credential-helper behavior.

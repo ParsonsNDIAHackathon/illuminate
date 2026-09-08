@@ -99,5 +99,11 @@ function simulationColor() { return ws.theme === 'dark' ? '#f6c453' : '#b77900' 
 .risk-ring { width: 13px; height: 13px; border: 3px solid #a93622; border-radius: 50%; }
 .focus-legend button { margin-left: auto; color: #087f72; font: inherit; font-weight: 700; border: 0; border-left: 1px solid rgba(0,107,98,.25); padding-left: 9px; background: none; cursor: pointer; }
 .style-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding-top: 6px; border-top: 1px solid rgba(100,116,139,.2); }
-@media (max-width: 520px) { .family-grid { grid-template-columns: 1fr; } }
+@media (max-width: 767px) {
+  .legend { left: 8px; bottom: 8px; width: min(430px, calc(100% - 16px)); max-height: 150px; overflow: auto; padding: 8px; }
+  .legend-heading, .simulation-key { display: none; }
+  .family-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 4px 8px; }
+}
+@media (max-width: 340px) { .family-grid { grid-template-columns: 1fr; } }
+@media (max-width: 420px) { .family { min-width: 0; font-size: 10px; white-space: normal; } }
 </style>

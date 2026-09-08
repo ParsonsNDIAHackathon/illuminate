@@ -174,7 +174,13 @@ async def test_public_http_contract_rejects_invalid_page_requests(fake_db, param
         response = await client.get("/api/exports/v1/findings", params=params)
     assert response.status_code == status
 
-
+async def test_incremental_contract_rejects_malformed_watermark(fake_db):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(
+            "/api/exports/v1/findings/incremental",
+            params={"since": "not-a-token"},
+        )
+    assert response.status_code == 400
 async def test_rejected_findings_are_filterable_and_cursor_preserves_policy(monkeypatch):
     rows = [dict(ROWS[0]), {**ROWS[1], "status": "rejected"}]
     events = [
@@ -379,3 +385,34 @@ async def test_concurrently_updated_association_is_not_tombstoned(monkeypatch):
     monkeypatch.setattr(exports.db, "read", read)
     assert await exports._sync_export_ledger() == 1
     assert writes == []
+
+async def test_incremental_contract_rejects_tampered_and_future_watermarks(fake_db):
+    valid = exports._token({
+        "v": exports.VERSION,
+        "kind": "watermark",
+        "position": ["1", ""],
+    })
+    encoded, signature = valid.split(".")
+    tampered_payload = json.loads(
+        __import__("base64").urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+    )
+    tampered_payload["position"][0] = "999"
+    tampered_encoded = __import__("base64").urlsafe_b64encode(
+        json.dumps(tampered_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        tampered = await client.get(
+            "/api/exports/v1/findings/incremental",
+            params={"since": f"{tampered_encoded}.{signature}"},
+        )
+        future = await client.get(
+            "/api/exports/v1/findings/incremental",
+            params={"since": exports._token({
+                "v": exports.VERSION,
+                "kind": "watermark",
+                "position": ["999", ""],
+            })},
+        )
+    assert tampered.status_code == 400
+    assert future.status_code == 409

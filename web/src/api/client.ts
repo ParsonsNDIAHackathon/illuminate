@@ -33,6 +33,22 @@ export interface ConnectorTestResult {
   detail: string
   diagnostics?: Record<string, boolean | number | string>
 }
+export interface ReadinessContract {
+  ok: boolean
+  status: 'ready' | 'degraded' | 'unavailable'
+  primary_workflow_ready: boolean
+  message: string
+  graph_counts: { nodes: number; relationships: number }
+  required: {
+    seed: {
+      status: string
+      action: string | null
+      coverage: { status: string; root_exists: boolean; primes: number; subcontractors: number }
+    }
+  }
+  source_coverage: Array<{ source: string; nodes: number; relationships: number; records: number; latest_retrieved_at: string | null }>
+  freshness: { status: 'current' | 'stale' | 'unknown' | 'empty'; latest_retrieved_at: string | null; age_hours: number | null; action?: string | null }
+}
 export const qs = (o: Record<string, any>) =>
   Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&')
 
@@ -183,6 +199,31 @@ export interface EntityReportContract {
 export interface EntityListResponse {
   items: EntitySummary[]
   total: number
+}
+
+export interface Program {
+  id: string
+  name: string
+  agency: string | null
+  program_code: string | null
+  description: string | null
+  source: string
+  created_at: string | null
+  created_by: string | null
+}
+
+export interface ProgramListResponse {
+  items: Program[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface ProgramCreate {
+  name: string
+  agency?: string
+  program_code?: string
+  description?: string
 }
 
 export interface EntityRiskContract {

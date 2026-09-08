@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { api, qs } from '../api/client'
 import type { StyleOp, LegendItem } from '../styles/styleOps'
 import { deriveLegend } from '../styles/styleOps'
+import { restrictDeltaToFocus } from './graphDelta'
 
 export interface GNode { id: string; label: string; labels?: string[]; layer?: string | null; name: string; props: Record<string, any> }
 export interface GEdge { id: string; source: string; target: string; type: string; props: Record<string, any> }
@@ -74,19 +75,8 @@ export const useGraph = defineStore('graph', {
       // A focused canvas is one program's supply chain: another program arriving live
       // must not sneak in through a supplier the two share.
       if (this.focusId) {
-        const foreign = new Set(sub.nodes.filter(n => isProgram(n) && n.id !== this.focusId).map(n => n.id))
-        if (foreign.size) sub = { nodes: sub.nodes.filter(n => !foreign.has(n.id)), edges: (sub.edges || []).filter(e => !foreign.has(e.source) && !foreign.has(e.target)) }
-      }
-      // A delta carries one hop of context around what changed. Take it whole while the canvas
-      // shows everything; when focused on one consumer, take only what attaches to what is drawn,
-      // unless the change itself is a brand new node the user just asked for.
-      if (this.focusId && !(focus || []).some(id => !this.nodes.has(id))) {
-        const keep = new Set(sub.nodes.filter(n => this.nodes.has(n.id)).map(n => n.id))
-        for (const e of sub.edges || []) {
-          if (keep.has(e.source)) keep.add(e.target)
-          if (keep.has(e.target)) keep.add(e.source)
-        }
-        sub = { nodes: sub.nodes.filter(n => keep.has(n.id)), edges: sub.edges }
+        sub = restrictDeltaToFocus(sub, { nodes: this.nodeList, edges: this.edgeList }, this.focusId)
+        if (!sub.nodes.length) return
       }
       const newNodes = sub.nodes.filter(n => !this.nodes.has(n.id)).map(n => n.id)
       const newEdges = (sub.edges || []).filter(e => !this.edges.has(e.id)).map(e => e.id)

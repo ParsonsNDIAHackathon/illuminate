@@ -3,9 +3,10 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__, db, events
@@ -16,9 +17,10 @@ from .routers.deps import user_id
 from .routers import settings as settings_router
 from .schema import ensure_schema
 from .tools.permissions import gate
-from .routers import catalog, chat, claims, connectors, enrichment, exports, graph, permissions, query
+from .mcp_server import AuthenticatedMCP, build_server
+from .routers import catalog, chat, claims, connectors, enrichment, exports, graph, permissions, programs, query
 
-from .mcp_server import build_server
+
 class _MCPMount:
     """ASGI shim so the MCP transport (whose session manager runs once per
     lifespan) can be re-created each time the app starts — tests start it twice."""
@@ -49,7 +51,8 @@ async def lifespan(app: FastAPI):
     worker.start()
     # MCP over streamable HTTP, same handlers (D1). Its session manager has its own lifespan; run it inside ours.
     server = build_server()
-    _mcp_mount.app = server.streamable_http_app(streamable_http_path="/", stateless_http=True, json_response=True, host="0.0.0.0")
+    transport = server.streamable_http_app(streamable_http_path="/", stateless_http=True, json_response=True, host="0.0.0.0")
+    _mcp_mount.app = AuthenticatedMCP(transport)
     async with server.session_manager.run():
         yield
     _mcp_mount.app = None
@@ -58,7 +61,23 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Illuminate", version=__version__, lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(_request: Request, exc: RequestValidationError):
+    """Return useful field errors without reflecting rejected request values."""
+    detail = [
+        {key: error[key] for key in ("type", "loc", "msg") if key in error}
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 
 @app.get("/api/health", tags=["operations"])
@@ -67,7 +86,7 @@ async def health(refresh: bool = False, user: str = Depends(user_id)):
     return await build_readiness(user, refresh=refresh)
 
 
-for r in (graph.router, query.router, permissions.router, claims.router, enrichment.router, connectors.router, exports.router, catalog.router, settings_router.router, chat.router):
+for r in (graph.router, programs.router, query.router, permissions.router, claims.router, enrichment.router, connectors.router, exports.router, catalog.router, settings_router.router, chat.router):
     app.include_router(r)
 
 @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)
