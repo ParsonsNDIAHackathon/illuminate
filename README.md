@@ -4,6 +4,8 @@ Supplier-network intelligence: one graph, any consumer. Built for the NDIA Globa
 Hackathon, Washington DC, 8–10 Sep 2026 (UC-7 supply chain illumination, UC-11 vendor risk).
 
 **What it is, what is in the graph, and how it is built: open [`details.html`](details.html).**
+For a concise judge-facing source-to-decision view, trust boundaries, deployment paths, and
+presenter answers, see the [architecture and lineage brief](docs/architecture-lineage-brief.md).
 
 Requires Docker and `make`. For the host-side dev loop (hot reload) you also need
 Python ≥ 3.12 and Node ≥ 20.
