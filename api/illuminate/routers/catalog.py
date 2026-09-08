@@ -348,6 +348,12 @@ async def submit(
                 message=record["message"], dry_run=False, idempotent=True,
                 submitted_at=submitted_at, metadata=current.metadata,
             )
+        if recorded.get("contribution_state") in {"submitting", "unknown"}:
+            raise HTTPException(
+                409,
+                "a prior submission has an uncertain outcome and lookup returned no "
+                "dataset identity; reconcile it in the portal before retrying",
+            )
 
         # This is the complete official dataset shape; publication bookkeeping
         # stays in local state and the idempotency header, not ad-hoc body fields.
@@ -377,6 +383,15 @@ async def submit(
             raise
         dataset_id = remote.get("dataset_id") or remote.get("id")
         if not dataset_id:
+            state = _load_state()
+            pending = state.get(key, {})
+            pending["contribution_state"] = "unknown"
+            pending["message"] = (
+                "NDIA catalog returned a malformed response without a dataset identity; "
+                "automatic retry is blocked until lookup reconciliation."
+            )
+            state[key] = pending
+            _save_state(state)
             raise HTTPException(502, "NDIA catalog response did not include a dataset ID")
         submitted_at = _now()
         record = {

@@ -20,6 +20,7 @@ class Connector:
 async def test_worker_failure_is_truthful_and_sanitized(monkeypatch):
     monkeypatch.setattr("illuminate.enrichment.worker.get_connector", lambda name: Connector())
     monkeypatch.setattr("illuminate.enrichment.worker.db.read", _entity)
+    monkeypatch.setattr("illuminate.enrichment.worker.db.write", lambda *args, **kwargs: _result({}))
     monkeypatch.setattr(Worker, "_refresh_summary", _no_summary)
     w = Worker()
     job = Job("j", "e", "Entity", ["test"])
