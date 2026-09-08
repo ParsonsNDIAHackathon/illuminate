@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
-from .. import db
+from .. import db, events
 from ..connectors import REGISTRY, get_connector
 from . import claims
 
@@ -117,6 +117,10 @@ class Worker:
                 res["error"] = f"{type(e).__name__}: {e}"
             job.results[name] = res
             await self._emit("job_update", job.to_dict())
+            # Claims commit straight to the graph, so the canvas is told after every connector
+            # rather than at the end of the job: facts appear as they are found.
+            if res["committed"] or res["staged"]:
+                await events.announce([job.entity_id], reason=f"enrich:{name}", source="enrichment")
             # entity may have gained identifiers (LEI, CIK…) that later connectors use
             rows = await db.read("MATCH (e:Entity {id:$id}) RETURN e{.*} AS e", {"id": job.entity_id})
             entity = rows[0]["e"]
@@ -124,6 +128,7 @@ class Worker:
         job.status = "done"
         job.finished_at = time.time()
         await self._emit("job_update", job.to_dict())
+        await events.announce([job.entity_id], reason="enrich:done", source="enrichment")
 
     async def _refresh_summary(self, job: Job) -> None:
         try:

@@ -160,6 +160,17 @@ async def commit(cid: str, note: str | None = None) -> str:
     return "committed"
 
 
+async def endpoints(cid: str) -> list[str]:
+    """The nodes a claim speaks about — what committing it changes in the graph."""
+    rows = await db.read(
+        "MATCH (c:Claim {id:$id})-[:ASSERTS]->(s) OPTIONAL MATCH (c)-[:TARGETS]->(o) RETURN s.id AS sid, o.id AS oid",
+        {"id": cid},
+    )
+    if not rows:
+        return [cid]
+    return [i for i in (rows[0]["sid"], rows[0]["oid"], cid) if i]
+
+
 async def reject(cid: str, note: str | None = None) -> str:
     await db.write("MATCH (c:Claim {id:$id}) SET c.status='rejected', c.decided_at=$now, c.decision_note=$note", {"id": cid, "now": now_iso(), "note": note})
     return "rejected"

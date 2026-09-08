@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from .. import db
+from .. import db, events
 from ..content import document, summarize
 from ..connectors.http import HttpError, fetch_document
+from ..graphio import subgraph_from_graph
 from ..raw import find_raw
 from ..report import build_report
 from ..tools.handlers import ToolContext, expand_subgraph, search_entities
@@ -33,6 +34,37 @@ async def subgraph(entity_id: str, depth: int = 2, people: bool = True, countrie
     ctx = ToolContext.from_workspace(source="ui", user=user)
     r = await expand_subgraph(ctx, entity_id, depth, {"people": people, "countries": countries, "artifacts": artifacts, "categories": categories})
     return {"subgraph": r.subgraph, "cypher": r.cypher, "params": r.params}
+
+
+# Layer name -> the node labels it governs. Entities are always drawn.
+_LAYER_LABELS = {"people": ["Person"], "countries": ["Location"], "categories": ["Category"], "artifacts": ["Artifact", "Claim"]}
+
+
+@router.get("/graph/all")
+async def graph_all(people: bool = True, countries: bool = False, artifacts: bool = False, categories: bool = False,
+                    limit: int = Query(1500, le=5000)):
+    """The whole graph, not one consumer's neighbourhood. A workspace holds several
+    programs and the entities that supply them; the canvas shows all of it by default
+    and narrows to a single consumer only when the user asks for that."""
+    on = {"people": people, "countries": countries, "artifacts": artifacts, "categories": categories}
+    labels = ["Entity"] + [l for k, v in on.items() if v for l in _LAYER_LABELS[k]]
+    # Collected into two lists rather than a row per edge: the read cap counts records, and
+    # the graph is hydrated from whatever the row references however deeply it is nested.
+    _, graph, _ = await db.read_graph(
+        """
+        MATCH (n) WHERE any(l IN labels(n) WHERE l IN $labels)
+        WITH n, CASE WHEN n:Entity THEN 0 WHEN n:Person THEN 1 WHEN n:Location THEN 2
+                     WHEN n:Category THEN 3 WHEN n:Artifact THEN 4 ELSE 5 END AS rank
+        ORDER BY rank, coalesce(n.name, n.id)
+        WITH collect(n)[..$limit] AS nodes
+        UNWIND nodes AS n
+        OPTIONAL MATCH (n)-[r]->(m) WHERE m IN nodes
+        RETURN nodes, collect(DISTINCT r) AS rels
+        """,
+        {"labels": labels, "limit": limit},
+    )
+    sub = subgraph_from_graph(graph)
+    return {"subgraph": sub, "truncated": len(sub["nodes"]) >= limit}
 
 
 @router.get("/graph/node/{node_id}")
@@ -219,4 +251,5 @@ async def regenerate_summary(entity_id: str, user: str = Depends(user_id)):
         raise HTTPException(502, "model did not return a summary")
     await db.write("MATCH (e:Entity {id:$id}) SET e.summary=$s, e.summary_model=$m, e.summary_at=$t",
                    {"id": entity_id, "s": out["summary"], "m": out["model"], "t": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+    await events.announce([entity_id], reason="summary", source="ui")
     return {"summary": out["summary"], "model": out["model"]}
