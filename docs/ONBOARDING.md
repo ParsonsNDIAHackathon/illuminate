@@ -131,6 +131,13 @@ Read the task's acceptance criteria before editing. Preserve the repository's
 existing structure and terminology, and never add generated files, local data,
 credentials, or backups to Git.
 
+The [Product Data and Software BOM](BOM.md) is a same-change engineering
+contract. If a change adds, removes, or materially changes a source, connector,
+fixture, Python/npm package, service, plugin, container image, frontend asset,
+license, or cost assumption, update `docs/bom.json`, regenerate `docs/BOM.md`,
+and run `make validate-bom`. Do not guess legal or variable pricing facts; mark
+them `REVIEW_REQUIRED` with an authoritative reference.
+
 Use the checks appropriate to the files changed:
 
 ```bash
@@ -139,6 +146,9 @@ Use the checks appropriate to the files changed:
 
 # Web production build
 (cd web && npm run build)
+
+# Product data and software inventory contract
+make validate-bom
 
 # Review all changes before committing
 git status --short

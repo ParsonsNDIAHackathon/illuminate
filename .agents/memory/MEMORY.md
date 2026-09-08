@@ -17,3 +17,4 @@
 - [Nested Docker verification](nested-docker-verification.md) — keep Replit daemon workarounds temporary; verify the committed portable Compose path separately.
 - [Seed replay identity](seed-replay-identity.md) — invalidate readiness before rebuilds and keep fixture-backed claim identities stable across destructive replay.
 - [Credential diagnostic truth](credential-diagnostic-truth.md) — accept credentials only from complete provider success envelopes; bounded unknown responses fail closed.
+- [Inventory contract boundaries](inventory-contract-boundaries.md) — reconcile declarations bidirectionally and keep generated evidence separate from curated review conclusions.

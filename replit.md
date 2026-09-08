@@ -12,6 +12,11 @@ GitHub `origin/main` is the canonical shared history. The Replit workspace's
   conflicts.
 - After concurrent task merges, re-run `make sync-pre` before final integration.
 - Commit only intended files and validate the complete task before publishing.
+- Update `docs/bom.json` and regenerate `docs/BOM.md` in the same change whenever
+  adding, removing, or materially changing a source, fixture, package, service,
+  plugin, container image, frontend asset, license, or cost assumption. Run
+  `make validate-bom`; label unknown legal or pricing facts `REVIEW_REQUIRED`
+  rather than guessing.
 - After a reviewed task reaches Replit `main`, run `make sync-publish` and verify
   that it reports `main` and `origin/main` at the same commit before declaring
   completion.

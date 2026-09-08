@@ -9,6 +9,10 @@ presenter answers, see the [architecture and lineage brief](docs/architecture-li
 For role-specific goals, safety expectations, and executable review scenarios, see the
 [NDIA user personas](docs/NDIA_USER_PERSONAS.md).
 
+Release and deployment decisions must also consult the maintained
+[Product Data and Software BOM](docs/BOM.md). Run `make validate-bom` to detect
+unrecorded sources, fixtures, packages, images, plugins, or incomplete metadata.
+
 **Building a partner consumer:** see the
 [`Interoperability consumer guide`](docs/INTEROPERABILITY.md) for versioned
 findings, incremental retrieval, provenance, simulation handling, and the

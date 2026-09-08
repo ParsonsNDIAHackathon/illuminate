@@ -3,7 +3,7 @@ services:
   #   docker compose down && BACKUP=illuminate-20260908-101500.tgz docker compose up
   # (or BACKUP=latest). Do not put BACKUP in .env — it would restore on every start.
   restore:
-    image: python:3.12-alpine
+    image: python:3.12-alpine@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa09bca53e708a35a
     environment:
       BACKUP: ${BACKUP:-}
       HOST_UID: ${HOST_UID:-1000}
@@ -17,7 +17,7 @@ services:
 
   # `make backup` (or `docker compose run --rm backup`) with neo4j stopped.
   backup:
-    image: python:3.12-alpine
+    image: python:3.12-alpine@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa09bca53e708a35a
     profiles: [tools]
     environment:
       NAME: ${NAME:-}
@@ -31,7 +31,7 @@ services:
     command: sh /backup.sh
 
   neo4j:
-    image: neo4j:5
+    image: neo4j:5@sha256:037cf5756f0135cbfd66b739b6df7c7c4bb100f9ce11602f6f9538e17e02c74d
     container_name: illuminate-neo4j
     depends_on:
       restore:
