@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__, db
@@ -71,19 +71,40 @@ async def health(refresh: bool = False, user: str = Depends(user_id)):
 for r in (graph.router, query.router, permissions.router, claims.router, enrichment.router, connectors.router, exports.router, catalog.router, settings_router.router, chat.router):
     app.include_router(r)
 
+@app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)
+async def mcp_endpoint_redirect():
+    """Keep the public MCP URL unambiguous without letting it fall through to the SPA."""
+    return RedirectResponse(url="/mcp/", status_code=307)
+
+
 app.mount("/mcp", _mcp_mount)
 
-# Serve the built frontend when present (docker image / single-process demo).
-_dist = Path(__file__).resolve().parents[2] / "web" / "dist"
-if _dist.exists():
-    app.mount("/assets", StaticFiles(directory=_dist / "assets"), name="assets")
+_dist = (Path(__file__).resolve().parents[2] / "web" / "dist").resolve()
 
-    @app.get("/{full_path:path}", include_in_schema=False)
+
+def _dist_file(full_path: str, dist: Path | None = None) -> Path | None:
+    """Resolve a requested asset without allowing traversal or escaping symlinks."""
+    root = (dist or _dist).resolve()
+    candidate = (root / full_path).resolve()
+    if candidate.is_relative_to(root) and candidate.is_file():
+        return candidate
+    return None
+
+
+def _mount_frontend(application: FastAPI, dist: Path) -> None:
+    """Register built assets and history fallback on a FastAPI application."""
+    application.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
+
+    @application.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str):
-        f = _dist / full_path
-        if full_path and f.is_file():
+        f = _dist_file(full_path, dist) if full_path else None
+        if f is not None:
             return FileResponse(f)
-        return FileResponse(_dist / "index.html")
+        return FileResponse(dist / "index.html")
+
+
+if _dist.exists():
+    _mount_frontend(app, _dist)
 
 
 def run() -> None:

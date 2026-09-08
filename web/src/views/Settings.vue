@@ -71,7 +71,7 @@
     <v-card variant="outlined">
       <v-card-title class="text-subtitle-1">MCP</v-card-title>
       <v-card-text class="text-body-2">
-        Same tools, second transport. Streamable HTTP at <code>{{ origin }}/mcp</code>; stdio via <code>illuminate-mcp</code>. Writes from external agents queue here for approval exactly like chat.
+        Same tools, second transport. Streamable HTTP at <code>{{ origin }}/mcp/</code>; stdio via <code>illuminate-mcp</code>. Writes from external agents queue here for approval exactly like chat.
       </v-card-text>
     </v-card>
   </v-container>

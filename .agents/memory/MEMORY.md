@@ -5,3 +5,4 @@
 - [AI summary authority boundary](ai-summary-authority.md) — Models may prioritize approved findings, but deterministic code owns narrative, citations, scores, and fallback.
 - [NDIA catalog contract](ndia-catalog-contract.md) — event-3 read fields are public, but organizer-provided write routes must remain opt-in.
 - [Evidence lineage safety](evidence-lineage-safety.md) — connector diagnostics must be allowlisted, and shared artifact provenance must remain immutable.
+- [Locked Python subprojects on Replit](locked-python-subprojects.md) — override Replit’s shared uv environment with an absolute subproject path for isolated locked builds.
