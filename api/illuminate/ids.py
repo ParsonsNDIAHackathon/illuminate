@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 import uuid
 
 _SUFFIXES = re.compile(
@@ -24,6 +25,31 @@ def normalize_person(name: str) -> str:
     s = re.sub(r"\b(mr|mrs|ms|dr|sir|jr|sr|ii|iii|phd|mba|esq)\b\.?", " ", s)
     s = re.sub(r"[^\w\s]", " ", s)
     return re.sub(r"\s+", " ", s).strip()
+
+
+def fold_text(s: str) -> str:
+    """Case-, accent- and punctuation-insensitive form: "Société L-3 Harris" -> "societe l 3 harris"."""
+    s = unicodedata.normalize("NFKD", s or "")
+    s = "".join(ch for ch in s if not unicodedata.combining(ch)).lower()
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]|_", " ", s)).strip()
+
+
+def search_tokens(query: str) -> list[str]:
+    return [t for t in fold_text(query).split(" ") if t]
+
+
+def lucene_query(query: str) -> str:
+    """Fulltext query for a typed search: every word must match, each as exact, prefix or (for
+    longer words) one-edit fuzzy, so "pame" finds Pamela, "wickam" finds Wickham, and "pamela wickham"
+    does not drag in every other person with an "a" in their name. Tokens are folded to word characters so no
+    Lucene syntax escaping is needed."""
+    parts = []
+    for t in search_tokens(query):
+        alts = [t, f"{t}*"]
+        if len(t) >= 4:
+            alts.append(f"{t}~1")
+        parts.append("(" + " OR ".join(alts) + ")")
+    return " AND ".join(parts)
 
 
 def name_match_score(a: str, b: str) -> float:
