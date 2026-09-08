@@ -21,6 +21,7 @@ function isProgram(node: DeltaNode) {
 }
 
 const CONTROL_UPSTREAM = new Set(['OWNS', 'ULTIMATE_PARENT_OF', 'BENEFICIAL_OWNER_OF'])
+const AFFILIATIONS = new Set(['MEMBER_OF', 'TRANSACTS_WITH', 'LOBBIES', 'DONATED_TO'])
 
 function supplyMembers<N extends DeltaNode, E extends DeltaEdge>(
   graph: GraphDelta<N, E>,
@@ -67,6 +68,7 @@ export function restrictDeltaToFocus<N extends DeltaNode, E extends DeltaEdge>(
       if (keep.has(edge.target) && !keep.has(edge.source)) { keep.add(edge.source); changed = true }
     }
   }
+  const supplyMemberIds = new Set(keep)
 
   // Retain ancillary context for known members. Non-entity nodes may form
   // evidence chains; ownership entities are followed only upstream so a shared
@@ -85,6 +87,17 @@ export function restrictDeltaToFocus<N extends DeltaNode, E extends DeltaEdge>(
         keep.add(edge.source); changed = true
       }
     }
+  }
+
+  // Affiliation counterparties are useful context, but only one hop from an
+  // established supply member. Never let an affiliation establish supply
+  // membership or become a new root for contextual expansion.
+  for (const edge of edges) {
+    if (!AFFILIATIONS.has(edge.type)) continue
+    const source = byId.get(edge.source)
+    const target = byId.get(edge.target)
+    if (supplyMemberIds.has(edge.source) && target?.label === 'Entity') keep.add(edge.target)
+    if (supplyMemberIds.has(edge.target) && source?.label === 'Entity') keep.add(edge.source)
   }
 
   return {

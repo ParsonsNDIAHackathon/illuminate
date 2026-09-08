@@ -19,9 +19,10 @@ import cola from 'cytoscape-cola'
 import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 import { applyStyleOps, clearStyleOps } from '../styles/styleOps'
-import { LABEL_COLORS } from '../styles/palette'
+import { nodeSize, supplierTiers } from '../styles/nodeSize'
+import { fillFor, glyphScaleFor, glyphYFor, iconFor, shapeFor } from '../styles/nodeTypes'
 import { relationshipFamily } from '../styles/relationshipFamilies'
-import { layerData, layerOf, layerVisible } from '../stores/graphLayers'
+import { layerData, layerVisible } from '../stores/graphLayers'
 
 cytoscape.use(fcose)
 cytoscape.use(cola)
@@ -35,17 +36,6 @@ const emit = defineEmits<{ (e: 'expand', id: string): void; (e: 'report', id: st
 
 const SAME_NAME_COLLAPSE_ZOOM = 1
 
-function baseColor(n: any) {
-  const t = ws.theme
-  if (n.props?.kind === 'program') return LABEL_COLORS.Program[t]
-  if (layerOf(n) === 'sources') return LABEL_COLORS.Source[t]
-  return (LABEL_COLORS[n.label] || LABEL_COLORS.Entity)[t]
-}
-function shapeFor(n: any) {
-  if (n.props?.kind === 'program') return 'round-rectangle'
-  if (layerOf(n) === 'sources') return 'barrel'
-  return ({ Entity: 'ellipse', Person: 'diamond', Category: 'hexagon', Location: 'round-triangle', Artifact: 'rectangle', Claim: 'tag' } as any)[n.label] || 'ellipse'
-}
 function badgeFor(n: any) {
   const p = n.props || {}
   const bits: string[] = []
@@ -81,7 +71,9 @@ function styleSheet(): any[] {
   const outline = dark ? '#0e1013' : '#ffffff'
   const simulation = dark ? '#f6c453' : '#b77900'
   return [
-    { selector: 'node', style: { 'background-color': 'data(baseColor)', shape: 'data(shape)', width: 'data(size)', height: 'data(size)', label: 'data(name)', color: text, 'font-size': 10, 'text-wrap': 'ellipsis', 'text-max-width': 120, 'text-valign': 'bottom', 'text-margin-y': 4, 'text-outline-color': outline, 'text-outline-width': 2, 'border-width': 1.5, 'border-color': dark ? '#374151' : '#cbd5e1', 'overlay-padding': 4 } },
+    // The glyph is sized as a share of the node, so it follows supplier tier and the simulated
+    // screen-space rescale on its own; `fit: none` is what makes the percentages authoritative.
+    { selector: 'node', style: { 'background-color': 'data(baseColor)', shape: 'data(shape)', width: 'data(size)', height: 'data(size)', 'background-image': 'data(icon)', 'background-fit': 'none', 'background-width': 'data(glyphScale)', 'background-height': 'data(glyphScale)', 'background-position-y': 'data(glyphY)', 'background-image-opacity': 0.95, label: 'data(name)', color: text, 'font-size': 10, 'text-wrap': 'ellipsis', 'text-max-width': 120, 'text-valign': 'bottom', 'text-margin-y': 4, 'text-outline-color': outline, 'text-outline-width': 2, 'border-width': 1.5, 'border-color': dark ? '#374151' : '#cbd5e1', 'overlay-padding': 4 } },
     { selector: 'node[?isRoot]', style: { 'border-width': 3, 'border-color': dark ? '#60a5fa' : '#1d4ed8', 'font-weight': 'bold', 'font-size': 12 } },
     { selector: 'node[badge != ""]', style: { label: (e: any) => `${e.data('name')}\n${e.data('badge')}`, 'text-wrap': 'wrap' } },
     { selector: 'node[?simulated]', style: { width: 'data(simSize)', height: 'data(simSize)', 'font-size': 'data(simFont)', 'border-style': 'dashed', 'border-color': simulation, 'border-width': 'data(simBorder)', 'background-opacity': .55 } },
@@ -89,6 +81,7 @@ function styleSheet(): any[] {
     { selector: 'edge[family = "supply"]', style: { width: 3.2, 'arrow-scale': 1.15 } },
     { selector: 'edge[family = "control"]', style: { width: 2.6, 'arrow-scale': 1.05 } },
     { selector: 'edge[family = "people"]', style: { width: 2.2, 'line-style': 'dashed' } },
+    { selector: 'edge[family = "affiliation"]', style: { width: 1.8, 'line-style': 'dashed', 'line-dash-pattern': [2, 3] } },
     { selector: 'edge[family = "location"]', style: { width: 2, 'line-style': 'dashed' } },
     { selector: 'edge[family = "evidence"]', style: { width: 2.2, 'line-style': 'dotted' } },
     { selector: 'edge[family = "classification"]', style: { 'line-style': 'dotted' } },
@@ -135,9 +128,13 @@ function styleSheet(): any[] {
 function toElements() {
   const root = graph.focusId
   const zoom = cy?.zoom() || 1
+  // Supplier tier drives entity size (see styles/nodeSize.ts); it is resolved over the edge list, so
+  // a node grows or shrinks as edges arrive — sync() re-applies data() for nodes already drawn.
+  const tiers = supplierTiers(graph.edgeList, graph.nodeList)
   const nodes = graph.nodeList.map(n => {
-    const size = n.props?.kind === 'program' ? 56 : n.label === 'Entity' ? 34 : n.label === 'Person' ? 26 : 22
-    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, ...layerData(n), baseColor: baseColor(n), shape: shapeFor(n), size, simSize: size / zoom, simFont: 11 / zoom, simBorder: 3 / zoom, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
+    const tier = tiers.get(n.id)
+    const size = nodeSize(n, tier)
+    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, ...layerData(n), baseColor: fillFor(n, ws.theme), shape: shapeFor(n), icon: iconFor(n), glyphScale: glyphScaleFor(n), glyphY: glyphYFor(n), size, tier, simSize: size / zoom, simFont: 11 / zoom, simBorder: 3 / zoom, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
   })
   const edges = graph.edgeList.map(e => {
     const family = relationshipFamily(e.type)

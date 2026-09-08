@@ -25,8 +25,12 @@ RELS: dict[str, str] = {
     "SUPPLIES": "(supplier:Entity)-[:SUPPLIES {tier, sole_source, contract_ref, amount, psc, naics, claim_id}]->(consumer:Entity); scored sole-source values require a committed Claim evidenced by the exact award Artifact",
     "OWNS": "(parent:Entity)-[:OWNS {pct, effective_date, as_of_date}]->(child:Entity) — direct ownership",
     "ULTIMATE_PARENT_OF": "(ultimate:Entity)-[:ULTIMATE_PARENT_OF {effective_date, as_of_date}]->(child:Entity)",
-    "HELD_ROLE": "(p:Person)-[:HELD_ROLE {title, role_type ∈ {executive, board, both}, from, to, current}]->(e:Entity) — one edge per tenure",
+    "HELD_ROLE": "(p:Person)-[:HELD_ROLE {title, role_type ∈ {executive, board, both, position}, from, to, current}]->(e:Entity) — one edge per tenure; the entity may be an agency for a government post",
     "BENEFICIAL_OWNER_OF": "(p:Person)-[:BENEFICIAL_OWNER_OF {pct, effective_date, as_of_date}]->(e:Entity)",
+    "MEMBER_OF": "(e:Entity)-[:MEMBER_OF {from, to, current}]->(org:Entity) — trade council, association or consortium membership",
+    "TRANSACTS_WITH": "(a:Entity)-[:TRANSACTS_WITH {from, to, current, amount, description}]->(b:Entity) — a recorded business relationship outside federal awards",
+    "LOBBIES": "(e:Entity)-[:LOBBIES {from, to, current}]->(body:Entity) — lobbying of a government body",
+    "DONATED_TO": "(donor:Entity)-[:DONATED_TO {from, to, amount}]->(recipient:Entity) — grants, sponsorships and political giving",
     "PROVIDES": "(e:Entity)-[:PROVIDES]->(c:Category)",
     "SUBCATEGORY_OF": "(c:Category)-[:SUBCATEGORY_OF]->(parent:Category)",
     "INCORPORATED_IN": "(e:Entity)-[:INCORPORATED_IN]->(l:Location)",
@@ -153,7 +157,8 @@ def schema_prompt() -> str:
     for k, v in RELS.items():
         lines.append(f"  {v}")
     lines.append("COMMON PROPERTIES: every node has id (string, e.g. 'ent_…', 'per_…', 'cat_…', 'loc_…', 'art_…', 'clm_…') and name. "
-                 "Entity: uei, cage, lei, kind, aliases, registration_status, public (bool), ticker, summary, simulated (bool). "
+                 "Entity: uei, cage, lei, kind ∈ {organization, program, agency}, aliases, registration_status, public (bool), ticker, summary, simulated (bool), "
+                 "revenue, lda_registrant_id, org_types, federal (bool, agencies). Person: person_types, public_official (bool). "
                  "Location: code (ISO2 country / 'US-TX'), kind. Category: kind ∈ {goods, services}. "
                  "Edges carry an id property and provenance: " + ", ".join(PROVENANCE_FIELDS) + ".")
     lines.append("CATEGORY TAXONOMY (id → name, kind):")

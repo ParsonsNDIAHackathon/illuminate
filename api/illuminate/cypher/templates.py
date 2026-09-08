@@ -230,7 +230,15 @@ def _neighbourhood(p):
     d = _depth(p.get("depth", 2))
     membership_depth = MAX_DEPTH
     layers = p.get("layers") or {}
-    rel_filter = ["SUPPLIES", "OWNS", "ULTIMATE_PARENT_OF"]
+    rel_filter = [
+        "SUPPLIES",
+        "OWNS",
+        "ULTIMATE_PARENT_OF",
+        "MEMBER_OF",
+        "TRANSACTS_WITH",
+        "LOBBIES",
+        "DONATED_TO",
+    ]
     # A focused program first establishes membership through supply paths only.
     # Context then expands in one safe direction from those members so a shared
     # country, category, person, or artifact cannot bridge into another program.
@@ -254,6 +262,7 @@ def _neighbourhood(p):
     rel_filter = list(dict.fromkeys(rel_filter))
     rf = "|".join(rel_filter)
     context_rf = "|".join(dict.fromkeys(context_filter))
+    affiliation_rf = "MEMBER_OF|TRANSACTS_WITH|LOBBIES|DONATED_TO"
     bound = {
         "id": p["entity_id"],
         "limit": _subgraph_limit(p.get("limit", 400)),
@@ -268,10 +277,16 @@ def _neighbourhood(p):
             "UNWIND members AS member\n"
             f"CALL apoc.path.subgraphAll(member, {{maxLevel:{d}, relationshipFilter:'{context_rf}', limit:$limit}}) "
             "YIELD nodes AS contextNodes, relationships AS contextRelationships\n"
+            f"OPTIONAL MATCH (member)-[affiliationRelationship:{affiliation_rf}]-(affiliationNode:Entity)\n"
+            "WHERE affiliationNode.kind IS NULL OR affiliationNode.kind <> 'program' OR affiliationNode.id = $program\n"
             "WITH members, supplyRelationships, collect(contextNodes) AS contextNodeLists, "
-            "collect(contextRelationships) AS contextRelationshipLists\n"
-            "WITH apoc.coll.toSet(members + apoc.coll.flatten(contextNodeLists)) AS allowed, "
-            "apoc.coll.toSet(supplyRelationships + apoc.coll.flatten(contextRelationshipLists)) AS allowedRelationships\n"
+            "collect(contextRelationships) AS contextRelationshipLists, "
+            "collect(affiliationNode) AS affiliationNodes, "
+            "collect(affiliationRelationship) AS affiliationRelationships\n"
+            "WITH apoc.coll.toSet(members + apoc.coll.flatten(contextNodeLists) + "
+            "[node IN affiliationNodes WHERE node IS NOT NULL]) AS allowed, "
+            "apoc.coll.toSet(supplyRelationships + apoc.coll.flatten(contextRelationshipLists) + "
+            "[relationship IN affiliationRelationships WHERE relationship IS NOT NULL]) AS allowedRelationships\n"
             "MATCH (root {id:$id}) WHERE root IN allowed\n"
             f"CALL apoc.path.subgraphAll(root, {{maxLevel:{d}, relationshipFilter:'{rf}', limit:$limit, whitelistNodes:allowed}}) "
             "YIELD nodes, relationships\n"

@@ -20,10 +20,15 @@ from ..ids import artifact_id, claim_id, edge_id
 from ..schema import RELS
 from ..connectors.registry import source_metadata
 
-REL_PREDICATES = set(RELS) - {"EVIDENCES", "ASSERTS", "TARGETS", "ABOUT"}
+REL_PREDICATES = set(RELS) - {
+    "EVIDENCES", "ASSERTS", "TARGETS", "ABOUT", "DECISION_FOR",
+    "REVIEW_OF", "DECISION_PROGRAM", "DECISION_EVIDENCE",
+}
 ATTR_ALLOWLIST = {"uei", "cage", "lei", "registration_status", "public", "ticker", "cik", "legal_name", "employees", "website",
                   "board_size", "flagged", "littlesis_id", "opencorporates_id", "duns", "business_types", "naics_codes", "sam_registered",
-                  "incorporation_date", "entity_status", "market_cap", "last_price", "price_change_12m", "registration_expires", "organization_structure"}
+                  "incorporation_date", "entity_status", "market_cap", "last_price", "price_change_12m", "registration_expires", "organization_structure",
+                  # LittleSis org record and person markers
+                  "revenue", "lda_registrant_id", "fedspending_id", "aliases_text", "blurb", "org_types", "littlesis_tags", "public_official"}
 SCREEN_PREDICATES = {
     "sanctions_screen", "exclusion_screen", "financial_screen", "adverse_media_screen", "registry_screen",
     # Contextual adapters record dated source observations rather than overwrite a

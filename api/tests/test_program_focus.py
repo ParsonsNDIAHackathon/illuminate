@@ -42,7 +42,28 @@ def test_focused_membership_depth_is_independent_of_local_expansion_depth():
     assert "maxLevel:1, relationshipFilter:'SUPPLIES|OWNS|ULTIMATE_PARENT_OF|" in cypher
     assert params["membership_limit"] > params["limit"]
 
+def test_focused_neighbourhood_includes_only_one_hop_of_member_affiliations():
+    cypher, _ = TEMPLATES["neighbourhood"].build({
+        "entity_id": "ent_prime",
+        "program_id": "ent_program",
+        "depth": 2,
+    })
 
+    affiliations = "MEMBER_OF|TRANSACTS_WITH|LOBBIES|DONATED_TO"
+    assert (
+        f"OPTIONAL MATCH (member)-[affiliationRelationship:{affiliations}]"
+        "-(affiliationNode:Entity)"
+        in cypher
+    )
+    assert (
+        "affiliationNode.kind <> 'program' OR affiliationNode.id = $program"
+        in cypher
+    )
+    context_walk = next(
+        line for line in cypher.splitlines()
+        if "CALL apoc.path.subgraphAll(member" in line
+    )
+    assert all(relationship not in context_walk for relationship in affiliations.split("|"))
 @pytest.fixture
 def client():
     from illuminate.main import app
@@ -182,8 +203,7 @@ async def test_seed_entry_completes_without_mutating_workspace_consumer(monkeypa
     assert metadata["root_id"] == "program-a"
     assert metadata["status"] == "complete"
 
-
-async def test_focused_neighbourhood_does_not_cross_a_shared_country():
+async def test_focused_neighbourhood_does_not_cross_shared_context_or_foreign_program_affiliation():
     await db.close_driver()
     try:
         await db.read("RETURN 1 AS x")
@@ -203,6 +223,7 @@ async def test_focused_neighbourhood_does_not_cross_a_shared_country():
             MERGE (sb)-[rb:SUPPLIES]->(b) SET rb.id='rel_focus_supply_b'
             MERGE (sa)-[rca:INCORPORATED_IN]->(country) SET rca.id='rel_focus_country_a'
             MERGE (sb)-[rcb:INCORPORATED_IN]->(country) SET rcb.id='rel_focus_country_b'
+            MERGE (sa)-[rab:MEMBER_OF]->(b) SET rab.id='rel_focus_affiliated_program'
             """
         )
         cypher, params = TEMPLATES["neighbourhood"].build({
@@ -220,8 +241,6 @@ async def test_focused_neighbourhood_does_not_cross_a_shared_country():
     finally:
         await db.write("MATCH (n) WHERE n.id IN $ids DETACH DELETE n", {"ids": ids})
         await db.close_driver()
-
-
 async def test_focused_local_expansion_can_reach_deeper_program_suppliers():
     await db.close_driver()
     try:

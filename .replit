@@ -5,6 +5,16 @@ channel = "stable-25_05"
 packages = ["cargo", "jdk21", "libiconv", "libxcrypt", "neo4j", "openssl", "pkg-config", "rapidfuzz-cpp", "rustc", "taskflow"]
 
 [[ports]]
+localPort = 7474
+externalPort = 3002
+exposeLocalhost = true
+
+[[ports]]
+localPort = 7687
+externalPort = 3001
+exposeLocalhost = true
+
+[[ports]]
 localPort = 8000
 externalPort = 80
 

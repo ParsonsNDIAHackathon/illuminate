@@ -62,6 +62,37 @@ test('a focused program accepts an evidence chain connected to an existing suppl
   assert.equal(result.edges.length, 2)
 })
 
+test('a focused program keeps a direct affiliation of an established supplier', () => {
+  const result = restrictDeltaToFocus(
+    {
+      nodes: [supplier('prime-a'), supplier('trade-council')],
+      edges: [edge('membership-a', 'prime-a', 'trade-council', 'MEMBER_OF')],
+    },
+    canvas,
+    'program-a',
+  )
+
+  assert.deepEqual(result.nodes.map(node => node.id), ['prime-a', 'trade-council'])
+  assert.deepEqual(result.edges.map(item => item.id), ['membership-a'])
+})
+
+test('a shared affiliation cannot pull another supplier into a focused program', () => {
+  const result = restrictDeltaToFocus(
+    {
+      nodes: [supplier('prime-a'), supplier('trade-council'), supplier('supplier-b')],
+      edges: [
+        edge('membership-a', 'prime-a', 'trade-council', 'MEMBER_OF'),
+        edge('membership-b', 'supplier-b', 'trade-council', 'MEMBER_OF'),
+      ],
+    },
+    canvas,
+    'program-a',
+  )
+
+  assert.deepEqual(result.nodes.map(node => node.id), ['prime-a', 'trade-council'])
+  assert.deepEqual(result.edges.map(item => item.id), ['membership-a'])
+})
+
 test('a shared country cannot admit another program supplier', () => {
   const country = { id: 'country-us', label: 'Location', props: {} }
   const result = restrictDeltaToFocus(

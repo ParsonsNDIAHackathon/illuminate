@@ -90,6 +90,14 @@ make test-sync-main # exercise the policy against disposable local repositories
 Both sync modes fetch `origin/main` first and require a clean, checked-out
 `main` whose upstream is `origin/main`. Their behavior is:
 
+In Replit, these commands automatically use the existing `GITHUB_KEY` secret for
+HTTPS GitHub authentication through a temporary, non-interactive credential
+bridge that is removed on exit. Agents must use `make sync-pre` before work and
+`make sync-publish` after reviewed merges; never print, inspect, copy, or embed
+the secret in a command, remote URL, file, or persistent Git configuration.
+Outside Replit, the commands leave normal local Git credential helpers in
+control.
+
 - **Equal:** report the shared commit; rerunning is safe.
 - **Remote ahead:** fast-forward local `main` without creating a merge commit.
 - **Local ahead:** `sync-pre` reports that publishing remains; `sync-publish`
@@ -101,9 +109,10 @@ Both sync modes fetch `origin/main` first and require a clean, checked-out
 - **Dirty tree or wrong branch:** stop. Commit intended task work on its isolated
   branch or stash it; do not let synchronization absorb unrelated files.
 - **Fetch/authentication failure:** stop without changing history. In Replit,
-  make sure GitHub access is authorized for this repository; locally, use your
-  normal GitHub credential helper or SSH setup. Never put a token in the remote
-  URL or commit credentials.
+  make sure the existing `GITHUB_KEY` secret is available and authorized for
+  this repository; do not retrieve or copy its value. Locally, use your normal
+  GitHub credential helper or SSH setup. Never put a token in the remote URL or
+  commit credentials.
 - **Rejected push:** preserve the local commits. Branch protection, required
   reviews, or required checks may prohibit direct updates; use the repository's
   pull-request workflow and rerun the check after GitHub accepts the change.
@@ -117,7 +126,7 @@ path, then run `make sync-publish` from Replit `main`.
 Verify agreement at any time with:
 
 ```bash
-git fetch origin main
+make sync-pre
 test "$(git rev-parse main)" = "$(git rev-parse origin/main)"
 git status --short --branch
 ```

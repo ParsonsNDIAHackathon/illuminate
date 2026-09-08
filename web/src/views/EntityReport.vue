@@ -15,7 +15,7 @@
       · {{ rep.identity.public ? `public${rep.identity.ticker ? ' (' + rep.identity.ticker + ')' : ''}` : 'private' }}<span v-if="rep.control.ultimate_parents?.length">, subsidiary of {{ rep.control.ultimate_parents[0].name }}</span>
       <span v-if="rep.identity.registration_status"> · {{ rep.identity.registration_status }}</span>
     </div>
-    <v-tabs v-model="tab" density="compact"><v-tab value="overview">Overview</v-tab><v-tab value="people">People</v-tab><v-tab value="risk">Risk</v-tab><v-tab value="artifacts">Artifacts</v-tab><v-tab value="graph">Graph</v-tab></v-tabs>
+    <v-tabs v-model="tab" density="compact"><v-tab value="overview">Overview</v-tab><v-tab value="people">People</v-tab><v-tab value="affiliations">Affiliations<v-badge v-if="rep.affiliations?.count" :content="rep.affiliations.count" inline /></v-tab><v-tab value="risk">Risk</v-tab><v-tab value="artifacts">Artifacts</v-tab><v-tab value="graph">Graph</v-tab></v-tabs>
     <v-window v-model="tab" class="mt-3">
       <v-window-item value="overview">
         <v-row>
@@ -83,6 +83,7 @@
                 <dt>Incorporated</dt><dd>{{ rep.geography.incorporated?.code || '—' }}</dd>
                 <dt>Manufactures</dt><dd>{{ rep.geography.manufactures?.map((m:any) => m.code).join(', ') || '—' }}</dd>
                 <dt>Employees</dt><dd>{{ rep.entity.employees || '—' }}</dd>
+                <dt>Revenue</dt><dd>{{ rep.identity.revenue ? '$' + Number(rep.identity.revenue).toLocaleString() : '—' }}</dd>
                 <dt>Awards</dt><dd>{{ rep.supply.awards.count }} on record</dd>
                 <dt>Tier</dt><dd>{{ rep.supply.tier_from_root != null ? `${rep.supply.tier_from_root} from ${graph.focusLabel || 'the focused program'}` : '—' }}</dd>
               </dl>
@@ -104,7 +105,7 @@
         <v-list density="compact" lines="two">
           <v-list-subheader>Current</v-list-subheader>
           <v-list-item v-for="p in rep.people.current" :key="p.edge_id" :title="`${p.name} — ${p.title || ''}`" :subtitle="`${p.role_type || ''} · since ${p.from || '?'}${p.elsewhere.length ? ' · also: ' + p.elsewhere.map((x:any) => x.entity + (x.current ? '' : ' (former)')).join(', ') : ''}`">
-            <template #append><v-chip v-if="p.interlock" size="x-small" color="secondary" variant="tonal">Interlock</v-chip><v-chip v-if="p.elsewhere.some((x:any) => x.flagged)" size="x-small" color="error" variant="tonal" class="ml-1">Linked to flagged</v-chip><a v-if="p.source_url" :href="p.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ p.source }}</a></template>
+            <template #append><v-chip v-if="p.interlock" size="x-small" color="secondary" variant="tonal">Interlock</v-chip><v-chip v-if="p.concurrent_government" size="x-small" color="warning" variant="tonal" class="ml-1">Government post</v-chip><v-chip v-else-if="p.former_government" size="x-small" color="secondary" variant="tonal" class="ml-1">Ex-government</v-chip><v-chip v-if="p.public_official" size="x-small" color="secondary" variant="tonal" class="ml-1">Public official</v-chip><v-chip v-if="p.elsewhere.some((x:any) => x.flagged)" size="x-small" color="error" variant="tonal" class="ml-1">Linked to flagged</v-chip><a v-if="p.source_url" :href="p.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ p.source }}</a></template>
           </v-list-item>
           <v-list-subheader>Former</v-list-subheader>
           <v-list-item v-for="p in rep.people.former" :key="p.edge_id" :title="`${p.name} — ${p.title || ''}`" :subtitle="`${p.role_type || ''} · ${p.from || '?'} – ${p.to || '?'}${p.elsewhere.length ? ' · now: ' + p.elsewhere.filter((x:any) => x.current).map((x:any) => x.entity).join(', ') : ''}`">
@@ -112,6 +113,19 @@
           </v-list-item>
           <v-list-item v-if="!rep.people.current.length && !rep.people.former.length" subtitle="No officers or directors resolved. LittleSis and EDGAR coverage is strongest for large listed firms." />
         </v-list>
+      </v-window-item>
+      <v-window-item value="affiliations">
+        <p class="text-caption mb-2" style="opacity:.7">Ties recorded beyond supply and ownership: memberships, business relationships, lobbying and giving. Counterparties need not be suppliers. A foreign flag comes from a resolved jurisdiction; a name hint is unverified.</p>
+        <template v-for="sec in [['Subsidiaries', 'subsidiaries'], ['Memberships', 'memberships'], ['Business relationships', 'transactions'], ['Lobbying', 'lobbying'], ['Donations', 'donations']]" :key="sec[1]">
+          <v-list-subheader>{{ sec[0] }} ({{ rep.affiliations[sec[1]].length }})</v-list-subheader>
+          <v-list density="compact" lines="two">
+            <v-list-item v-for="t in rep.affiliations[sec[1]]" :key="t.edge_id" :subtitle="`${t.kind === 'agency' ? (t.federal ? 'federal body' : 'government body') : (t.org_types || []).filter((x:string) => x !== 'Organization').join(', ') || 'organization'}${t.from || t.to ? ' · ' + (t.from || '?') + ' – ' + (t.current ? 'present' : t.to || '?') : ''}${t.amount ? ' · $' + Number(t.amount).toLocaleString() : ''}`">
+              <template #title><router-link :to="{ path: `/entities/${t.entity_id}`, query: { root_id: reportRoot || undefined } }">{{ t.entity }}</router-link><span v-if="!t.outbound" class="text-caption ml-1" style="opacity:.7">(inbound)</span></template>
+              <template #append><v-chip v-if="t.flagged" size="x-small" color="error" variant="tonal">Flagged</v-chip><v-chip v-else-if="t.foreign" size="x-small" color="warning" variant="tonal">Foreign · {{ t.incorporated || t.parent_seat }}</v-chip><v-chip v-else-if="t.foreign_hint" size="x-small" color="secondary" variant="tonal">Foreign? (name)</v-chip><a v-if="t.source_url" :href="t.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ t.source }}</a></template>
+            </v-list-item>
+            <v-list-item v-if="!rep.affiliations[sec[1]].length" subtitle="None on record." />
+          </v-list>
+        </template>
       </v-window-item>
       <v-window-item value="risk">
         <v-alert v-if="rep.identity.simulated || rep.risk.indicators.some((i:any) => i.simulated)" type="warning" variant="tonal" density="compact" class="mb-2">
