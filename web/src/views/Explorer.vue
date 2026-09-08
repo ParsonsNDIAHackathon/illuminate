@@ -33,6 +33,14 @@
           </div>
         </div>
       </div>
+      <div v-if="graphError" class="graph-error" role="alert">
+        <div><strong>Graph context is partially unavailable.</strong><span>{{ graphError }}</span></div>
+        <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="reload">Retry graph</v-btn>
+      </div>
+      <div v-else-if="presetRunning" class="mission-progress" role="status">
+        <v-progress-circular indeterminate size="18" width="2" />
+        Running {{ route.query.mission || 'guided' }} analysis…
+      </div>
       <div class="notes">
         <span v-if="graph.truncated" class="warn">graph capped — narrow to one program or turn layers off</span>
         <details v-if="graph.lastCypher"><summary>last query</summary><CypherBlock :statement="graph.lastCypher.statement" :params="graph.lastCypher.params" /></details>
@@ -49,7 +57,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, qs } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
@@ -63,11 +71,20 @@ import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 const graph = useGraph(); const ws = useWorkspace()
 const route = useRoute()
-const q = ref(''); const hits = ref<any[]>([]); const searching = ref(false); const open = ref(false)
+const q = ref(''); const hits = ref<any[]>([]); const searching = ref(false); const open = ref(false); const graphError = ref('')
 // The programs the canvas can be narrowed to. The store keeps this current from live
 // deltas, so a program added while this view is open shows up here without a reload.
 const focusItems = computed(() => [{ id: null, name: 'Everything' }, ...graph.programs])
+const hasSimulation = computed(() => graph.nodeList.some(n => n.props?.simulated) || graph.edgeList.some(e => e.props?.simulated))
+const presetRunning = ref(false)
 let t: any
+let lastMissionPreset = ''
+const missionTemplates: Record<string, () => Record<string, string | number>> = {
+  manufactures_in: () => ({ root_id: missionRootId(), country: String(route.query.country || 'CN'), min_tier: Number(route.query.min_tier || 2) }),
+  foreign_parent: () => ({ root_id: missionRootId(), home_country: String(route.query.home_country || 'US') }),
+  sole_source: () => ({ root_id: missionRootId() }),
+}
+function missionRootId() { return String(route.query.root_id || graph.focusId || '') }
 // A plain text field, not an autocomplete: the typed text — and the canvas filter it drives — must survive blur.
 watch(q, (v) => {
   graph.setFilter(v && v.length >= 2 ? v : '')
@@ -82,35 +99,72 @@ async function onPick(id: string) {
   graph.select(id)
 }
 async function setFocus(id: string | null) {
-  if (id) await graph.focus(id, graph.programs.find(p => p.id === id)?.name || null, ws.depth, ws.ws.layers)
-  else await graph.loadAll(ws.ws.layers)
+  graphError.value = ''
+  try {
+    if (id) await graph.focus(id, graph.programs.find(p => p.id === id)?.name || null, ws.depth, ws.ws.layers)
+    else await graph.loadAll(ws.ws.layers)
+  } catch (cause) {
+    graphError.value = cause instanceof Error ? cause.message : 'The selected program graph could not be loaded.'
+  }
 }
 async function reload() {
-  if (graph.focusId) await graph.focus(graph.focusId, graph.focusLabel, ws.depth, ws.ws.layers)
-  else await graph.loadAll(ws.ws.layers)
+  graphError.value = ''
+  try {
+    if (graph.focusId) await graph.focus(graph.focusId, graph.focusLabel, ws.depth, ws.ws.layers)
+    else await graph.loadAll(ws.ws.layers)
+  } catch (cause) {
+    graphError.value = cause instanceof Error ? cause.message : 'The graph could not be loaded.'
+  }
 }
 async function expand(id: string) { await graph.loadNeighbourhood(id, 1, ws.ws.layers) }
 async function applyRouteFocus() {
   if (!ws.loaded) await ws.load()
   const ids = String(route.query.focus || '').split(',').filter(Boolean)
   const vendor = String(route.query.vendor || '')
+  const missionRoot = String(route.query.root_id || '')
   if (vendor) {
     if (graph.focusId && !graph.nodes.has(graph.focusId)) await graph.loadNeighbourhood(graph.focusId, ws.depth, ws.ws.layers)
     // A report trace may reference people, locations, or evidence hidden by the normal workspace
     // layers. Merge those elements for the trace without changing the user's layer preferences.
-    await graph.loadNeighbourhood(vendor, Math.max(2, ws.depth), {
-      ...ws.ws.layers,
-      people: true,
-      countries: true,
-      artifacts: true,
-      categories: true,
-      sources: true,
-      claims: true,
-    })
+    try {
+      await graph.loadNeighbourhood(vendor, Math.max(2, ws.depth), {
+        ...ws.ws.layers,
+        people: true,
+        countries: true,
+        artifacts: true,
+        categories: true,
+        sources: true,
+        claims: true,
+      })
+    } catch (cause) {
+      graphError.value = cause instanceof Error ? cause.message : 'The report trace could not be loaded.'
+    }
     graph.setFocus(ids, String(route.query.finding || 'Selected risk indicator'), vendor, String(route.query.family || ''))
   } else {
     graph.clearFocus()
-    if (!graph.nodes.size) await reload()
+    if (missionRoot && (graph.focusId !== missionRoot || !graph.nodes.size)) {
+      try { await graph.focus(missionRoot, graph.programs.find(program => program.id === missionRoot)?.name || null, ws.depth, ws.ws.layers) }
+      catch (cause) { graphError.value = cause instanceof Error ? cause.message : 'The mission program graph could not be loaded.' }
+    } else if (!graph.nodes.size) await reload()
+  }
+  const template = String(route.query.template || '')
+  const missionKey = `${route.query.mission || ''}:${template}:${JSON.stringify(route.query)}`
+  if (missionTemplates[template] && lastMissionPreset !== missionKey) {
+    lastMissionPreset = missionKey
+    if (!missionRootId()) {
+      graphError.value = 'Select a mission program before running this analysis.'
+      return
+    }
+    presetRunning.value = true
+    await nextTick()
+    try {
+      const result = await graph.runTemplate(template, missionTemplates[template]())
+      if (!result.ok) graphError.value = result.data?.error || `${route.query.mission || 'Guided'} analysis could not be completed.`
+    } catch (cause) {
+      graphError.value = cause instanceof Error ? cause.message : `${route.query.mission || 'Guided'} analysis could not be completed.`
+    } finally {
+      presetRunning.value = false
+    }
   }
 }
 onMounted(async () => { await applyRouteFocus(); graph.loadPrograms() })
@@ -142,6 +196,10 @@ watch(() => ws.depth, () => { if (graph.focusId) reload() })
 .notes { position: absolute; right: 56px; bottom: 12px; max-width: 520px; font-size: 12px; text-align: right; }
 .notes summary { cursor: pointer; opacity: .6; }
 .warn { color: #f59e0b; }
+.graph-error { position:absolute;left:12px;top:104px;z-index:7;max-width:520px;display:flex;align-items:center;gap:12px;padding:9px 12px;border-left:4px solid #c04b2d;background:#fae6d8;color:#5b281b;box-shadow:0 2px 10px rgba(45,25,20,.16);font-size:11px; }
+.graph-error div,.graph-error strong,.graph-error span { display:block; }
+.graph-error span { margin-top:2px;opacity:.8; }
+.mission-progress { position:absolute;left:12px;top:104px;z-index:7;display:flex;align-items:center;gap:9px;padding:9px 12px;border-left:4px solid #006b62;background:rgba(225,239,234,.96);color:#173b37;box-shadow:0 2px 10px rgba(25,45,40,.12);font-size:12px;font-weight:700; }
 @media (max-width: 900px) {
   .explorer { display: grid; grid-template-columns: 1fr; grid-template-rows: minmax(420px, 58dvh) minmax(480px, 72dvh); height: auto; min-height: calc(100dvh - 48px); }
   .side { grid-template-rows: minmax(160px, 40%) minmax(280px, 1fr); border-left: 0; border-top: 1px solid rgba(128,128,128,.25); }

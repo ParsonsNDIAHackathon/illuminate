@@ -93,7 +93,11 @@ async def test_claim_decisions_explain_missing_and_invalid_transitions(
     async def fail(*args, **kwargs):
         raise error
 
+    async def no_endpoints(*_args, **_kwargs):
+        return []
+
     monkeypatch.setattr(claims_router.claims, action, fail)
+    monkeypatch.setattr(claims_router.claims, "endpoints", no_endpoints)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(f"/api/claims/clm_1/{action}", json={})
     assert response.status_code == expected_status

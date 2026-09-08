@@ -3,7 +3,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', name: 'graph', component: () => import('./views/Explorer.vue') },
+    { path: '/', name: 'mission', component: () => import('./views/MissionEntry.vue') },
+    { path: '/explorer', name: 'graph', component: () => import('./views/Explorer.vue') },
     { path: '/entities', name: 'entities', component: () => import('./views/Entities.vue') },
     { path: '/programs', name: 'programs', component: () => import('./views/Programs.vue') },
     { path: '/portfolio', name: 'portfolio', component: () => import('./views/Portfolio.vue') },

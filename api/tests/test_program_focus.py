@@ -9,8 +9,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from illuminate import db, events
-from illuminate.cypher.templates import TEMPLATES
+from illuminate.cypher.templates import MAX_DEPTH, TEMPLATES
 from illuminate.cypher.validator import validate
+from illuminate.graphio import subgraph_from_graph
 from illuminate.tools.permissions import PermissionGate
 
 
@@ -21,9 +22,25 @@ def test_neighbourhood_confines_the_walk_only_when_a_program_is_given():
     assert "program" not in open_params
 
     confined_cy, confined_params = t.build({"entity_id": "ent_x", "depth": 2, "program_id": "ent_x"})
-    assert "blacklistNodes:blocked" in confined_cy
+    assert "relationshipFilter:'<SUPPLIES'" in confined_cy
+    assert "whitelistNodes:allowed" in confined_cy
     assert confined_params["program"] == "ent_x"
     assert validate(confined_cy, params=confined_params).classification == "READ"
+
+
+def test_focused_membership_depth_is_independent_of_local_expansion_depth():
+    cypher, params = TEMPLATES["neighbourhood"].build({
+        "entity_id": "ent_prime",
+        "program_id": "ent_program",
+        "depth": 1,
+    })
+
+    assert (
+        f"maxLevel:{MAX_DEPTH}, relationshipFilter:'<SUPPLIES', limit:$membership_limit"
+        in cypher
+    )
+    assert "maxLevel:1, relationshipFilter:'SUPPLIES|OWNS|ULTIMATE_PARENT_OF|" in cypher
+    assert params["membership_limit"] > params["limit"]
 
 
 @pytest.fixture
@@ -161,3 +178,97 @@ async def test_seed_entry_completes_without_mutating_workspace_consumer(monkeypa
     metadata = next(params for query, params in writes if "SeedMetadata" in query)
     assert metadata["root_id"] == "program-a"
     assert metadata["status"] == "complete"
+
+
+async def test_focused_neighbourhood_does_not_cross_a_shared_country():
+    await db.close_driver()
+    try:
+        await db.read("RETURN 1 AS x")
+    except Exception:
+        pytest.skip("neo4j not reachable")
+
+    ids = ["ent_focus_a", "ent_focus_b", "ent_supplier_a", "ent_supplier_b", "loc_focus_shared"]
+    try:
+        await db.write(
+            """
+            MERGE (a:Entity {id:'ent_focus_a'}) SET a.name='Focus A', a.kind='program'
+            MERGE (b:Entity {id:'ent_focus_b'}) SET b.name='Focus B', b.kind='program'
+            MERGE (sa:Entity {id:'ent_supplier_a'}) SET sa.name='Supplier A', sa.kind='organization'
+            MERGE (sb:Entity {id:'ent_supplier_b'}) SET sb.name='Supplier B', sb.kind='organization'
+            MERGE (country:Location {id:'loc_focus_shared'}) SET country.name='Shared Country'
+            MERGE (sa)-[ra:SUPPLIES]->(a) SET ra.id='rel_focus_supply_a'
+            MERGE (sb)-[rb:SUPPLIES]->(b) SET rb.id='rel_focus_supply_b'
+            MERGE (sa)-[rca:INCORPORATED_IN]->(country) SET rca.id='rel_focus_country_a'
+            MERGE (sb)-[rcb:INCORPORATED_IN]->(country) SET rcb.id='rel_focus_country_b'
+            """
+        )
+        cypher, params = TEMPLATES["neighbourhood"].build({
+            "entity_id": "ent_focus_a",
+            "program_id": "ent_focus_a",
+            "depth": 3,
+            "layers": {"people": False, "countries": True},
+        })
+        _, graph, _ = await db.read_graph(cypher, params)
+        subgraph = subgraph_from_graph(graph)
+        visible = {node["id"] for node in subgraph["nodes"]}
+        assert {"ent_focus_a", "ent_supplier_a", "loc_focus_shared"} <= visible
+        assert "ent_focus_b" not in visible
+        assert "ent_supplier_b" not in visible
+    finally:
+        await db.write("MATCH (n) WHERE n.id IN $ids DETACH DELETE n", {"ids": ids})
+        await db.close_driver()
+
+
+async def test_focused_local_expansion_can_reach_deeper_program_suppliers():
+    await db.close_driver()
+    try:
+        await db.read("RETURN 1 AS x")
+    except Exception:
+        pytest.skip("neo4j not reachable")
+
+    ids = [
+        "ent_expand_program",
+        "ent_expand_prime",
+        "ent_expand_tier2",
+        "ent_expand_tier3",
+    ]
+    try:
+        await db.write(
+            """
+            MERGE (program:Entity {id:'ent_expand_program'})
+              SET program.name='Expansion Program', program.kind='program'
+            MERGE (prime:Entity {id:'ent_expand_prime'})
+              SET prime.name='Expansion Prime', prime.kind='organization'
+            MERGE (tier2:Entity {id:'ent_expand_tier2'})
+              SET tier2.name='Expansion Tier 2', tier2.kind='organization'
+            MERGE (tier3:Entity {id:'ent_expand_tier3'})
+              SET tier3.name='Expansion Tier 3', tier3.kind='organization'
+            MERGE (prime)-[r1:SUPPLIES]->(program) SET r1.id='rel_expand_prime'
+            MERGE (tier2)-[r2:SUPPLIES]->(prime) SET r2.id='rel_expand_tier2'
+            MERGE (tier3)-[r3:SUPPLIES]->(tier2) SET r3.id='rel_expand_tier3'
+            """
+        )
+
+        async def visible_from(entity_id):
+            cypher, params = TEMPLATES["neighbourhood"].build({
+                "entity_id": entity_id,
+                "program_id": "ent_expand_program",
+                "depth": 1,
+                "layers": {"people": False},
+            })
+            _, graph, _ = await db.read_graph(cypher, params)
+            return {node["id"] for node in subgraph_from_graph(graph)["nodes"]}
+
+        assert {
+            "ent_expand_program",
+            "ent_expand_prime",
+            "ent_expand_tier2",
+        } <= await visible_from("ent_expand_prime")
+        assert {
+            "ent_expand_prime",
+            "ent_expand_tier2",
+            "ent_expand_tier3",
+        } <= await visible_from("ent_expand_tier2")
+    finally:
+        await db.write("MATCH (n) WHERE n.id IN $ids DETACH DELETE n", {"ids": ids})
+        await db.close_driver()

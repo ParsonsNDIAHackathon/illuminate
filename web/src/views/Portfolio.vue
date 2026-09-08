@@ -103,14 +103,16 @@
 
 <script setup lang="ts">
 import { computed, defineComponent, h, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { api, type EntityListResponse, type EntityReportContract, type EntityRiskContract, type EntitySummary } from '../api/client'
 
 type Row = { entity: EntitySummary; contract: EntityRiskContract | null; pending?: boolean; error?: string }
+const route = useRoute()
 const rows = ref<Row[]>([]); const portfolioTotal = ref(0); const loading = ref(true); const reportsLoading = ref(false); const fatalError = ref('')
 const search = ref(''); const tier = ref<string | number | null>(null); const category = ref<string | null>(null); const severity = ref<string | null>(null)
-const simulation = ref('all'); const sort = ref('risk'); const confidenceFloor = ref(0); const completenessFloor = ref(0); const freshness = ref('all')
+const simulation = ref(String(route.query.simulation || 'all')); const sort = ref(String(route.query.sort || 'risk')); const confidenceFloor = ref(Number(route.query.confidence || 0)); const completenessFloor = ref(Number(route.query.completeness || 0)); const freshness = ref(String(route.query.freshness || 'all'))
 const simulationOptions = [{ title: 'All data', value: 'all' }, { title: 'Observed only', value: 'observed' }, { title: 'Simulated only', value: 'simulated' }]
-const sortOptions = [{ title: 'Highest risk', value: 'risk' }, { title: 'Lowest confidence', value: 'confidence' }, { title: 'Least complete', value: 'completeness' }, { title: 'Stalest evidence', value: 'freshness' }, { title: 'Vendor name', value: 'name' }]
+const sortOptions = [{ title: 'Highest risk', value: 'risk' }, { title: 'Strongest evidence', value: 'trustworthy' }, { title: 'Lowest confidence', value: 'confidence' }, { title: 'Least complete', value: 'completeness' }, { title: 'Stalest evidence', value: 'freshness' }, { title: 'Vendor name', value: 'name' }]
 const freshnessOptions = [{ title: 'Any freshness', value: 'all' }, { title: 'Current evidence', value: 'current' }, { title: 'Diligence required', value: 'diligence_required' }, { title: 'Contains stale evidence', value: 'stale' }, { title: 'Contains missing evidence', value: 'missing' }]
 const severityOptions = [{ title: 'Critical', value: 'critical' }, { title: 'High', value: 'high' }, { title: 'Moderate', value: 'moderate' }, { title: 'Medium category', value: 'medium' }, { title: 'Low', value: 'low' }, { title: 'Clear category', value: 'clear' }, { title: 'Not assessed', value: 'not_assessed' }]
 const loadedCount = computed(() => rows.value.filter(r => r.contract).length)
@@ -186,7 +188,7 @@ const filtered = computed(() => rows.value.filter(r => {
     && (simulation.value === 'all' || r.entity.simulated === (simulation.value === 'simulated'))
     && meetsFloor(r.contract?.confidence, confidenceFloor.value) && meetsFloor(r.contract?.completeness, completenessFloor.value)
     && matchesFreshness(r)
-}).sort((a, b) => sort.value === 'name' ? a.entity.name.localeCompare(b.entity.name) : sort.value === 'confidence' ? (percent(a.contract?.confidence) ?? -1) - (percent(b.contract?.confidence) ?? -1) : sort.value === 'completeness' ? (percent(a.contract?.completeness) ?? -1) - (percent(b.contract?.completeness) ?? -1) : sort.value === 'freshness' ? Number(hasStaleEvidence(b)) - Number(hasStaleEvidence(a)) || Number(hasMissingEvidence(b)) - Number(hasMissingEvidence(a)) : (b.contract?.score ?? -1) - (a.contract?.score ?? -1)))
+}).sort((a, b) => sort.value === 'name' ? a.entity.name.localeCompare(b.entity.name) : sort.value === 'trustworthy' ? (percent(b.contract?.confidence) ?? -1) - (percent(a.contract?.confidence) ?? -1) || (percent(b.contract?.completeness) ?? -1) - (percent(a.contract?.completeness) ?? -1) || (a.contract?.score ?? Infinity) - (b.contract?.score ?? Infinity) : sort.value === 'confidence' ? (percent(a.contract?.confidence) ?? -1) - (percent(b.contract?.confidence) ?? -1) : sort.value === 'completeness' ? (percent(a.contract?.completeness) ?? -1) - (percent(b.contract?.completeness) ?? -1) : sort.value === 'freshness' ? Number(hasStaleEvidence(b)) - Number(hasStaleEvidence(a)) || Number(hasMissingEvidence(b)) - Number(hasMissingEvidence(a)) : (b.contract?.score ?? -1) - (a.contract?.score ?? -1)))
 function resetFilters() { search.value = ''; tier.value = null; category.value = null; severity.value = null; simulation.value = 'all'; confidenceFloor.value = 0; completenessFloor.value = 0; freshness.value = 'all' }
 onMounted(load)
 </script>

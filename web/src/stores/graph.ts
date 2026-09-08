@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { api, qs } from '../api/client'
 import type { StyleOp, LegendItem } from '../styles/styleOps'
 import { deriveLegend } from '../styles/styleOps'
-import { filterFocusedDelta } from './graphDelta'
+import { restrictDeltaToFocus } from './graphDelta'
 
 export interface GNode { id: string; label: string; labels?: string[]; layer?: string | null; name: string; props: Record<string, any> }
 export interface GEdge { id: string; source: string; target: string; type: string; props: Record<string, any> }
@@ -66,7 +66,8 @@ export const useGraph = defineStore('graph', {
       if (!sub?.nodes?.length) return
       this.notePrograms(sub.nodes)
       if (this.focusId) {
-        sub = filterFocusedDelta(sub, new Set(this.nodes.keys()), this.focusId)
+        sub = restrictDeltaToFocus(sub, { nodes: this.nodeList, edges: this.edgeList }, this.focusId)
+        if (!sub.nodes.length) return
       }
       const newNodes = sub.nodes.filter(n => !this.nodes.has(n.id)).map(n => n.id)
       const newEdges = (sub.edges || []).filter(e => !this.edges.has(e.id)).map(e => e.id)

@@ -16,7 +16,7 @@
     </v-app-bar>
     <v-navigation-drawer v-model="drawer" :rail="!narrow" :temporary="narrow" :permanent="!narrow" border>
       <v-list density="compact" nav>
-        <v-list-item v-for="n in nav" :key="n.to" :to="n.to" :prepend-icon="n.icon" :title="n.title" :value="n.to">
+        <v-list-item v-for="n in nav" :key="n.to" :to="n.external ? undefined : n.to" :href="n.external ? n.to : undefined" :prepend-icon="n.icon" :title="n.title" :value="n.to">
           <template #append v-if="n.badge"><v-badge :content="n.badge" color="warning" inline /></template>
         </v-list-item>
       </v-list>
@@ -51,12 +51,16 @@ const drawer = ref(!narrow.value)
 const staged = ref(0); const snack = ref(false); const snackText = ref('')
 const hasSimulation = computed(() => graph.nodeList.some(n => n.props?.simulated) || graph.edgeList.some(e => e.props?.simulated))
 const nav = computed(() => [
-  { to: '/', icon: 'mdi-graph', title: 'Graph' },
+  { to: '/', icon: 'mdi-target', title: 'Mission' },
+  { to: '/explorer', icon: 'mdi-graph', title: 'Graph' },
+  { to: '/portfolio', icon: 'mdi-view-dashboard-outline', title: 'Triage' },
+  { to: '/compare/vendors', icon: 'mdi-compare-horizontal', title: 'Compare' },
   { to: '/entities', icon: 'mdi-domain', title: 'Entities' },
   { to: '/programs', icon: 'mdi-clipboard-text-outline', title: 'Programs' },
   { to: '/people', icon: 'mdi-account-tie', title: 'People' },
   { to: '/artifacts', icon: 'mdi-file-document-multiple', title: 'Artifacts' },
   { to: '/claims', icon: 'mdi-check-decagram', title: 'Claims', badge: staged.value || undefined },
+  { to: '/api/exports/v1/findings?format=csv', icon: 'mdi-download-outline', title: 'Export', external: true },
   { to: '/connectors', icon: 'mdi-power-plug', title: 'Connectors' },
   { to: '/settings', icon: 'mdi-cog', title: 'Settings' },
 ])

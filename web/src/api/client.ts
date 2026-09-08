@@ -33,6 +33,22 @@ export interface ConnectorTestResult {
   detail: string
   diagnostics?: Record<string, boolean | number | string>
 }
+export interface ReadinessContract {
+  ok: boolean
+  status: 'ready' | 'degraded' | 'unavailable'
+  primary_workflow_ready: boolean
+  message: string
+  graph_counts: { nodes: number; relationships: number }
+  required: {
+    seed: {
+      status: string
+      action: string | null
+      coverage: { status: string; root_exists: boolean; primes: number; subcontractors: number }
+    }
+  }
+  source_coverage: Array<{ source: string; nodes: number; relationships: number; records: number; latest_retrieved_at: string | null }>
+  freshness: { status: 'current' | 'stale' | 'unknown' | 'empty'; latest_retrieved_at: string | null; age_hours: number | null; action?: string | null }
+}
 export const qs = (o: Record<string, any>) =>
   Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&')
 

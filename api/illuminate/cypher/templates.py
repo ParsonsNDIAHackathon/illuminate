@@ -228,33 +228,53 @@ def _as_of_board(p):
 
 def _neighbourhood(p):
     d = _depth(p.get("depth", 2))
+    membership_depth = MAX_DEPTH
     layers = p.get("layers") or {}
     rel_filter = ["SUPPLIES", "OWNS", "ULTIMATE_PARENT_OF"]
+    # A focused program first establishes membership through supply paths only.
+    # Context then expands in one safe direction from those members so a shared
+    # country, category, person, or artifact cannot bridge into another program.
+    context_filter = ["<OWNS", "<ULTIMATE_PARENT_OF"]
     if layers.get("categories", False):
         rel_filter += ["PROVIDES", "SUBCATEGORY_OF"]
+        context_filter += ["PROVIDES>", "SUBCATEGORY_OF>"]
     if layers.get("people", True):
         rel_filter += ["HELD_ROLE", "BENEFICIAL_OWNER_OF"]
+        context_filter += ["<HELD_ROLE", "<BENEFICIAL_OWNER_OF"]
     if layers.get("countries", False):
         rel_filter += ["INCORPORATED_IN", "OPERATES_IN", "MANUFACTURES_IN", "PARENT_SEATED_IN"]
+        context_filter += ["INCORPORATED_IN>", "OPERATES_IN>", "MANUFACTURES_IN>", "PARENT_SEATED_IN>"]
     # Artifacts and sources share a label and its edges; the canvas hides whichever kind is off.
     if layers.get("artifacts", False) or layers.get("sources", False):
         rel_filter += ["EVIDENCES", "ABOUT"]
+        context_filter += ["<ABOUT"]
     if layers.get("claims", False):
         rel_filter += ["ASSERTS", "TARGETS", "EVIDENCES"]
+        context_filter += ["<ASSERTS", "<TARGETS", "<EVIDENCES"]
     rel_filter = list(dict.fromkeys(rel_filter))
     rf = "|".join(rel_filter)
-    bound = {"id": p["entity_id"], "limit": _subgraph_limit(p.get("limit", 400))}
+    context_rf = "|".join(dict.fromkeys(context_filter))
+    bound = {
+        "id": p["entity_id"],
+        "limit": _subgraph_limit(p.get("limit", 400)),
+    }
     if p.get("program_id"):
-        # Keep the walk inside one program. Suppliers sell to several programs, so an
-        # unconstrained walk hops supplier -> another program -> that program's own
-        # suppliers, and the single-program view quietly becomes the whole graph again.
-        # Blacklisting every other program cuts those paths at the crossing point.
         bound["program"] = p["program_id"]
+        bound["membership_limit"] = MAX_SUBGRAPH_NODES
         cy = (
-            "MATCH (root:Entity {id:$id})\n"
-            "OPTIONAL MATCH (other:Entity) WHERE other.kind = 'program' AND other.id <> $program\n"
-            "WITH root, collect(other) AS blocked\n"
-            f"CALL apoc.path.subgraphAll(root, {{maxLevel:{d}, relationshipFilter:'{rf}', limit:$limit, blacklistNodes:blocked}}) YIELD nodes, relationships\n"
+            "MATCH (program:Entity {id:$program})\n"
+            f"CALL apoc.path.subgraphAll(program, {{maxLevel:{membership_depth}, relationshipFilter:'<SUPPLIES', limit:$membership_limit}}) "
+            "YIELD nodes AS members, relationships AS supplyRelationships\n"
+            "UNWIND members AS member\n"
+            f"CALL apoc.path.subgraphAll(member, {{maxLevel:{d}, relationshipFilter:'{context_rf}', limit:$limit}}) "
+            "YIELD nodes AS contextNodes, relationships AS contextRelationships\n"
+            "WITH members, supplyRelationships, collect(contextNodes) AS contextNodeLists, "
+            "collect(contextRelationships) AS contextRelationshipLists\n"
+            "WITH apoc.coll.toSet(members + apoc.coll.flatten(contextNodeLists)) AS allowed, "
+            "apoc.coll.toSet(supplyRelationships + apoc.coll.flatten(contextRelationshipLists)) AS allowedRelationships\n"
+            "MATCH (root {id:$id}) WHERE root IN allowed\n"
+            f"CALL apoc.path.subgraphAll(root, {{maxLevel:{d}, relationshipFilter:'{rf}', limit:$limit, whitelistNodes:allowed}}) "
+            "YIELD nodes, relationships\n"
             "RETURN nodes, relationships LIMIT 1"
         )
         return cy, bound
