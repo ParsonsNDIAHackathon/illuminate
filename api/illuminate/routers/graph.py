@@ -26,9 +26,9 @@ async def search(q: str, kind: str = "any", limit: int = 10, user: str = Depends
 
 
 @router.get("/graph/subgraph")
-async def subgraph(entity_id: str, depth: int = 2, people: bool = True, countries: bool = False, artifacts: bool = False, user: str = Depends(user_id)):
+async def subgraph(entity_id: str, depth: int = 2, people: bool = True, countries: bool = False, artifacts: bool = False, categories: bool = False, user: str = Depends(user_id)):
     ctx = ToolContext.from_workspace(source="ui", user=user)
-    r = await expand_subgraph(ctx, entity_id, depth, {"people": people, "countries": countries, "artifacts": artifacts})
+    r = await expand_subgraph(ctx, entity_id, depth, {"people": people, "countries": countries, "artifacts": artifacts, "categories": categories})
     return {"subgraph": r.subgraph, "cypher": r.cypher, "params": r.params}
 
 

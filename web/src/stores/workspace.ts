@@ -5,7 +5,7 @@ export interface Workspace { root_id: string | null; root_label: string | null; 
 
 export const useWorkspace = defineStore('workspace', {
   state: () => ({
-    ws: { root_id: null, root_label: null, permission_mode: 'ask_always', model_strong: null, model_fast: null, openai_base_url: null, layers: { entities: true, people: true, countries: false, artifacts: false } } as Workspace,
+    ws: { root_id: null, root_label: null, permission_mode: 'ask_always', model_strong: null, model_fast: null, openai_base_url: null, layers: { entities: true, people: true, countries: false, artifacts: false, categories: false } } as Workspace,
     theme: (localStorage.getItem('illuminate.theme') as 'light' | 'dark') || 'dark',
     depth: Number(localStorage.getItem('illuminate.depth') || 2),
     modelKey: false,

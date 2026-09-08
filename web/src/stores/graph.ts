@@ -11,6 +11,7 @@ export const useGraph = defineStore('graph', {
     nodes: new Map<string, GNode>(),
     edges: new Map<string, GEdge>(),
     selectedId: null as string | null,
+    selectedEdgeId: null as string | null,
     styleOps: [] as StyleOp[],
     legend: [] as LegendItem[],
     lastCypher: null as { statement: string; params?: any } | null,
@@ -21,6 +22,7 @@ export const useGraph = defineStore('graph', {
   }),
   getters: {
     selected: (s) => (s.selectedId ? s.nodes.get(s.selectedId) || null : null),
+    selectedEdge: (s) => (s.selectedEdgeId ? s.edges.get(s.selectedEdgeId) || null : null),
     nodeList: (s) => [...s.nodes.values()],
     edgeList: (s) => [...s.edges.values()],
   },
@@ -32,8 +34,9 @@ export const useGraph = defineStore('graph', {
       this.version++
     },
     replace(sub: { nodes: GNode[]; edges: GEdge[] } | null | undefined) { this.nodes = new Map(); this.edges = new Map(); this.merge(sub) },
-    clear() { this.nodes = new Map(); this.edges = new Map(); this.selectedId = null; this.version++ },
-    select(id: string | null) { this.selectedId = id },
+    clear() { this.nodes = new Map(); this.edges = new Map(); this.selectedId = null; this.selectedEdgeId = null; this.version++ },
+    select(id: string | null) { this.selectedId = id; if (id) this.selectedEdgeId = null },
+    selectEdge(id: string | null) { this.selectedEdgeId = id; if (id) this.selectedId = null },
     applyStyleOps(ops: StyleOp[], append = false) {
       this.styleOps = append ? [...this.styleOps, ...ops] : ops
       this.legend = deriveLegend(this.styleOps)
@@ -43,7 +46,7 @@ export const useGraph = defineStore('graph', {
     async loadNeighbourhood(entityId: string, depth: number, layers: Record<string, boolean>, replace = false) {
       this.loading = true
       try {
-        const r = await api.get(`/api/graph/subgraph?${qs({ entity_id: entityId, depth, people: !!layers.people, countries: !!layers.countries, artifacts: !!layers.artifacts })}`)
+        const r = await api.get(`/api/graph/subgraph?${qs({ entity_id: entityId, depth, people: !!layers.people, countries: !!layers.countries, artifacts: !!layers.artifacts, categories: !!layers.categories })}`)
         replace ? this.replace(r.subgraph) : this.merge(r.subgraph)
         this.lastCypher = { statement: r.cypher, params: r.params }
       } finally { this.loading = false }

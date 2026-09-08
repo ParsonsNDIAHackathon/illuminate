@@ -18,7 +18,11 @@
       </div>
     </div>
     <div class="side">
-      <div class="inspector-pane"><Inspector v-if="graph.selected" @expand="expand" /><div v-else class="hint">Select a node to inspect it. Double-click to expand.</div></div>
+      <div class="inspector-pane">
+        <Inspector v-if="graph.selected" @expand="expand" />
+        <EdgeInspector v-else-if="graph.selectedEdge" />
+        <div v-else class="hint">Select a node or an edge to inspect it. Double-click a node to expand.</div>
+      </div>
       <div class="chat-pane"><ChatRail /></div>
     </div>
   </div>
@@ -28,6 +32,7 @@ import { onMounted, ref, watch } from 'vue'
 import { api, qs } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
 import Inspector from '../components/Inspector.vue'
+import EdgeInspector from '../components/EdgeInspector.vue'
 import ChatRail from '../components/ChatRail.vue'
 import Legend from '../components/Legend.vue'
 import LayerToggles from '../components/LayerToggles.vue'

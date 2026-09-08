@@ -59,7 +59,7 @@ class WorkspaceSettings(BaseModel):
     model_strong: str | None = None
     model_fast: str | None = None
     openai_base_url: str | None = None
-    layers: dict[str, bool] = {"entities": True, "people": True, "countries": False, "artifacts": False}
+    layers: dict[str, bool] = {"entities": True, "people": True, "countries": False, "artifacts": False, "categories": False}
 
 
 def _ws_path() -> Path:

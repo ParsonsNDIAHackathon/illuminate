@@ -59,6 +59,7 @@ function styleSheet(): any[] {
     { selector: 'edge[type = "HELD_ROLE"]', style: { 'line-style': 'dashed' } },
     { selector: 'edge[?simulated]', style: { 'line-style': 'dotted' } },
     { selector: 'node:selected', style: { 'border-width': 4, 'border-color': dark ? '#f472b6' : '#be185d' } },
+    { selector: 'edge:selected', style: { width: 3.5, 'line-color': dark ? '#f472b6' : '#be185d', 'target-arrow-color': dark ? '#f472b6' : '#be185d', 'z-index': 20 } },
     // style ops
     { selector: '.op-fill', style: { 'background-color': 'data(opFill)' } },
     { selector: 'node.op-stroke', style: { 'border-color': 'data(opStroke)', 'border-width': 4 } },
@@ -105,19 +106,58 @@ function layout(fit = true) {
 }
 function fit() { cy?.fit(undefined, 40) }
 
+// Dragging: the graph is not frozen around the grabbed node. While it moves, its neighbours
+// follow with damping (1 hop at 55 %, 2 hops at 20 %); on release the local neighbourhood
+// re-settles with fcose, the dropped node pinned where the user left it.
+const FOLLOW_1 = 0.55, FOLLOW_2 = 0.2
+let dragPrev: { x: number; y: number } | null = null
+function onGrab(ev: any) { const p = ev.target.position(); dragPrev = { x: p.x, y: p.y } }
+function onDrag(ev: any) {
+  const n = ev.target
+  if (!dragPrev || !cy) return
+  const p = n.position(); const dx = p.x - dragPrev.x, dy = p.y - dragPrev.y
+  dragPrev = { x: p.x, y: p.y }
+  if (!dx && !dy) return
+  const moving = cy.nodes(':grabbed')                       // the dragged node plus any co-selected ones
+  const hop1 = n.neighborhood('node').difference(moving)
+  const hop2 = hop1.neighborhood('node').difference(hop1).difference(moving)
+  hop1.shift({ x: dx * FOLLOW_1, y: dy * FOLLOW_1 })
+  hop2.shift({ x: dx * FOLLOW_2, y: dy * FOLLOW_2 })
+}
+function onFree(ev: any) {
+  dragPrev = null
+  if (!cy) return
+  const n = ev.target
+  const local = n.closedNeighborhood().closedNeighborhood()
+  if (local.nodes().length < 3) return
+  const pos = n.position()
+  local.layout({ name: 'fcose', animate: true, animationDuration: 250, randomize: false, fit: false, quality: 'draft',
+    nodeRepulsion: () => 9000, idealEdgeLength: () => 90,
+    fixedNodeConstraint: [{ nodeId: n.id(), position: { x: pos.x, y: pos.y } }] } as any).run()
+}
+
 onMounted(() => {
   cy = cytoscape({ container: el.value!, style: styleSheet(), wheelSensitivity: 0.25, minZoom: 0.1, maxZoom: 4 })
   ;(window as any).__cy = cy
   cy.on('tap', 'node', (ev) => graph.select(ev.target.id()))
-  cy.on('tap', (ev) => { if (ev.target === cy) graph.select(null) })
+  cy.on('tap', 'edge', (ev) => graph.selectEdge(ev.target.id()))
+  cy.on('tap', (ev) => { if (ev.target === cy) { graph.select(null); graph.selectEdge(null) } })
   cy.on('dbltap', 'node', (ev) => { const n = graph.nodes.get(ev.target.id()); if (n && (n.label === 'Entity' || n.label === 'Person')) emit('expand', ev.target.id()) })
+  cy.on('grab', 'node', onGrab)
+  cy.on('drag', 'node', onDrag)
+  cy.on('free', 'node', onFree)
   sync()
 })
 onBeforeUnmount(() => cy?.destroy())
 watch(() => graph.version, sync)
 watch(() => graph.styleVersion, restyle)
 watch(() => ws.theme, () => { cy?.style(styleSheet() as any); sync() })
-watch(() => graph.selectedId, (id) => { if (!cy) return; cy.elements().unselect(); if (id) cy.getElementById(id).select() })
+watch(() => [graph.selectedId, graph.selectedEdgeId], ([id, eid]) => {
+  if (!cy) return
+  cy.elements().unselect()
+  if (id) cy.getElementById(id).select()
+  else if (eid) cy.getElementById(eid).select()
+})
 defineExpose({ fit, layout })
 </script>
 

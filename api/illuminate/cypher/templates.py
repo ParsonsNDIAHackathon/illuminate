@@ -220,7 +220,9 @@ def _as_of_board(p):
 def _neighbourhood(p):
     d = _depth(p.get("depth", 2))
     layers = p.get("layers") or {}
-    rel_filter = ["SUPPLIES", "OWNS", "ULTIMATE_PARENT_OF", "PROVIDES", "SUBCATEGORY_OF"]
+    rel_filter = ["SUPPLIES", "OWNS", "ULTIMATE_PARENT_OF"]
+    if layers.get("categories", False):
+        rel_filter += ["PROVIDES", "SUBCATEGORY_OF"]
     if layers.get("people", True):
         rel_filter += ["HELD_ROLE", "BENEFICIAL_OWNER_OF"]
     if layers.get("countries", False):
