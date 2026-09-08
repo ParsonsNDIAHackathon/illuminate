@@ -19,6 +19,12 @@
           {{ family.label }}
         </span>
       </div>
+      <div v-if="tiersDrawn" class="tier-key" title="Suppliers are drawn by tier: primes largest, each tier down the chain smaller">
+        <strong>Supplier tier</strong>
+        <span v-for="t in TIER_SIZES" :key="t.tier" class="tier">
+          <i :style="{ width: `${t.size * TIER_KEY_SCALE}px`, height: `${t.size * TIER_KEY_SCALE}px`, background: organizationColor() }"></i>T{{ t.tier }}{{ t.tier === TIER_SIZES[TIER_SIZES.length - 1].tier ? '+' : '' }}
+        </span>
+      </div>
       <div class="simulation-key" :style="{ '--simulation-color': simulationColor() }"><i></i><b>SIM</b><span>Simulated / scenario data</span></div>
       <div v-if="graph.focusIds.length" class="focus-legend">
         <span class="path-line"></span><strong>Critical path</strong>
@@ -40,6 +46,7 @@ import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 import { resolveSwatch } from '../styles/palette'
 import { RELATIONSHIP_FAMILIES, type RelationshipFamily } from '../styles/relationshipFamilies'
+import { TIER_SIZES, supplierTiers } from '../styles/nodeSize'
 import { NODE_TYPES, nodeType, type NodeType } from '../styles/nodeTypes'
 const graph = useGraph(); const ws = useWorkspace()
 const STORAGE_KEY = 'illuminate.legend.minimized'
@@ -50,6 +57,10 @@ const types = computed(() => {
   const present = new Set(graph.nodeList.map(nodeType))
   return (Object.keys(NODE_TYPES) as NodeType[]).filter(k => present.has(k)).map(k => ({ key: k, label: NODE_TYPES[k].label, shape: NODE_TYPES[k].shape, fill: NODE_TYPES[k].fill[ws.theme] }))
 })
+const TIER_KEY_SCALE = 0.4   // canvas px → legend px, so a T1 disc fits a 12px line
+/** The tier key is only worth its line when something on the canvas is actually tiered. */
+const tiersDrawn = computed(() => supplierTiers(graph.edgeList, graph.nodeList).size > 0)
+function organizationColor() { return NODE_TYPES.Organization.fill[ws.theme] }
 function familyColor(family: RelationshipFamily) { return ws.theme === 'dark' ? family.darkColor : family.color }
 function simulationColor() { return ws.theme === 'dark' ? '#f6c453' : '#b77900' }
 </script>
@@ -74,6 +85,10 @@ function simulationColor() { return ws.theme === 'dark' ? '#f6c453' : '#b77900' 
 .family i { width: 25px; flex: none; border-top: 3px solid var(--family-color); }
 .family .line-dashed { border-top-style: dashed; }
 .family .line-dotted { border-top-style: dotted; }
+.tier-key { display: flex; align-items: center; gap: 10px; }
+.tier-key strong { font-size: 10px; letter-spacing: .035em; text-transform: uppercase; opacity: .75; }
+.tier-key .tier { display: inline-flex; align-items: center; gap: 4px; }
+.tier-key .tier i { display: inline-block; border-radius: 50%; opacity: .85; }
 .simulation-key { display: flex; align-items: center; gap: 7px; color: var(--simulation-color); font-weight: 700; }
 .simulation-key i { width: 25px; border-top: 4px dotted var(--simulation-color); }
 .simulation-key b { padding: 0 3px; border: 1px dashed var(--simulation-color); font-size: 9px; line-height: 14px; }
