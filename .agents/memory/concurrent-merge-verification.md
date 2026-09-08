@@ -6,6 +6,8 @@ description: Final verification needed when parallel project tasks modify shared
 Parallel task merges can change shared application entry points after a feature
 has already passed live verification. Re-check the current integration wiring
 immediately before completion, not only after the feature's initial restart.
+Also treat a conflict-free rebase as structurally complete, not semantically
+validated: an automatic content merge can still produce invalid source.
 
 **Why:** A concurrent task merge preserved an import but dropped a router from
 the application registration tuple after its endpoints had already passed live
@@ -14,7 +16,9 @@ checks. Internal tests did not detect the integration loss.
 **How to apply:** For work that registers routes, workers, or schemas in shared
 files, include an HTTP-level test against the real application object and
 confirm the current shared file plus live endpoint immediately before marking
-the task complete.
+the task complete. After any rebase or conflict-resolution sequence, run at
+least a parser/type check plus the affected test suite even when Git reports a
+clean result.
 
 Completion review evaluates the integrated base-to-head result, not only the
 files changed by the current task.
