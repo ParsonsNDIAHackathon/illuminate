@@ -24,6 +24,9 @@ If the graph is empty (first run), seed the demo program from committed fixtures
 make seed        # V-22 Osprey (PMA-275) from cached public data, ~1 min
 ```
 
+Seeding runs inside the api container when the stack is up, so it needs no host Python;
+under `make dev` it uses the host venv instead.
+
 Other addresses: API and docs at http://localhost:8000/docs, Neo4j browser at
 http://localhost:7474 (`neo4j` / `illuminate-dev`). `make down` stops everything and keeps
 the data. `make dev` runs Neo4j in Docker with the API and web on the host with hot reload
