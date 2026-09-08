@@ -5,6 +5,10 @@
     <div class="canvas-tools">
       <v-btn icon="mdi-fit-to-screen" variant="text" title="Fit" @click="fit" />
       <v-btn icon="mdi-graph-outline" variant="text" title="Re-layout" @click="layout" />
+      <v-btn :icon="ws.mergeSameName ? 'mdi-vector-union' : 'mdi-vector-difference'" variant="text"
+             :color="ws.mergeSameName ? 'primary' : undefined"
+             :title="ws.mergeSameName ? 'Merging same-name records when zoomed out — click to keep them separate' : 'Keeping same-name records separate — click to merge them when zoomed out'"
+             @click="ws.setMergeSameName(!ws.mergeSameName)" />
       <v-btn icon="mdi-format-color-fill" variant="text" title="Clear findings focus and styles" @click="clearVisualFocus" />
       <v-btn icon="mdi-broom" variant="text" title="Clear canvas" @click="graph.clear()" />
     </div>
@@ -50,7 +54,10 @@ function badgeFor(n: any) {
 /** Case-, accent- and punctuation-insensitive form: "Société L-3 Harris" → "societe l 3 harris". */
 function fold(s: string) { return s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim() }
 
+/** Every set of records the merge option would stack together — empty while the option is off,
+ *  which is what keeps the layout hints and the collapse out of the canvas entirely. */
 function sameNameCollapsedGroups() {
+  if (!ws.mergeSameName) return []
   const beneficialOwnerIds = new Set(
     graph.edgeList.filter(e => e.type === 'BENEFICIAL_OWNER_OF').map(e => e.source),
   )
@@ -292,7 +299,7 @@ function seedNearNeighbours(ids: string[]) {
 
 function applyZoomGrouping(force = false) {
   if (!cy) return
-  const collapse = cy.zoom() < SAME_NAME_COLLAPSE_ZOOM
+  const collapse = ws.mergeSameName && cy.zoom() < SAME_NAME_COLLAPSE_ZOOM
   if (!force && collapse === sameNameCollapsed) return
   const wasCollapsed = sameNameCollapsed
   sameNameCollapsed = collapse
@@ -451,6 +458,9 @@ watch(() => graph.styleVersion, restyle)
 watch(() => graph.filter, applyFilter)
 watch(() => ws.ws.layers, applyLayers, { deep: true })
 watch(() => ws.theme, () => { cy?.style(styleSheet() as any); sync() })
+// Turning the option off has to reach the canvas even at a zoom that never collapses: it also
+// drops the invisible same-name layout edges, which only sync() adds and removes.
+watch(() => ws.mergeSameName, sync)
 watch(() => [graph.selectedId, graph.selectedEdgeId], ([id, eid]) => {
   if (!cy) return
   cy.elements().unselect()

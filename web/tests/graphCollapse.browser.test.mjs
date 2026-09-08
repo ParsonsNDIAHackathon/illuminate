@@ -1,6 +1,6 @@
-// The canvas collapses same-name entities when it is zoomed out. That grouping used to lock every
-// member, which also froze the one node still painted: the user could no longer drag the merged
-// organisation. These tests drive the real canvas over CDP and check the group still moves.
+// Merging same-name entities when the canvas is zoomed out is an opt-in canvas option, and the
+// grouping it applies used to lock every member — which froze the one node still painted, so the
+// merged organisation could not be dragged. These tests drive the real canvas over CDP.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import test, { after, before } from 'node:test'
@@ -51,6 +51,19 @@ async function setZoom(zoom) {
   }, `zoom ${zoom}`)
   await sleep(100)
 }
+
+/** Click the canvas toolbar's merge toggle and let the canvas re-sync. */
+async function toggleMerge() {
+  const clicked = await evaluate(`(() => {
+    const button = [...document.querySelectorAll('.canvas-tools button')].find(b => /same-name/.test(b.title || ''));
+    if (!button) return false;
+    button.click();
+    return true;
+  })()`)
+  assert.ok(clicked, 'the canvas toolbar offers a same-name merge toggle')
+  await sleep(300)
+}
+const merging = () => evaluate("localStorage.getItem('illuminate.mergeSameName') === '1'")
 
 before(async () => {
   vite = spawn('npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port)], { stdio: 'ignore' })
@@ -114,6 +127,9 @@ before(async () => {
   // The first visit warms Vite's dependency optimiser (cytoscape and its layout plugins); that
   // pass reloads the page and can drop the view's dynamic import, so the visit is retried.
   await open('/explorer')
+  // The option is remembered per browser; every run starts from the shipped default.
+  await evaluate("(() => { localStorage.removeItem('illuminate.mergeSameName'); return true })()")
+  await open('/explorer')
   await waitFor(async () => {
     if (await evaluate('!!window.__cy')) return true
     await open('/explorer')
@@ -130,7 +146,18 @@ after(() => {
   vite?.kill()
 })
 
-test('the painted node of a collapsed same-name group stays draggable', async () => {
+test('same-name records stay separate until merging is switched on', async () => {
+  assert.equal(await merging(), false, 'merging is off until the analyst asks for it')
+  await setZoom(0.5)
+  assert.equal(await evaluate('window.__cy.getElementById("ray-2").locked()'), false)
+  assert.equal(await evaluate('window.__cy.getElementById("ray-2").hasClass("same-name-duplicate")'), false)
+  assert.equal(await evaluate('window.__cy.edges().filter(e => e.data("sameName")).length'), 0,
+    'the invisible same-name layout links stay off the canvas too')
+})
+
+test('the painted node of a merged same-name group stays draggable', async () => {
+  await toggleMerge()
+  assert.equal(await merging(), true, 'the choice is remembered for this browser')
   await setZoom(0.5)
   assert.equal(await evaluate('window.__cy.getElementById("ray-1").locked()'), false, 'anchor must stay unlocked')
   assert.equal(await evaluate('window.__cy.getElementById("ray-2").locked()'), true, 'duplicate stays pinned')
@@ -155,4 +182,14 @@ test('zooming back in releases every member of the group', async () => {
   assert.equal(await evaluate('window.__cy.getElementById("ray-1").locked()'), false)
   assert.equal(await evaluate('window.__cy.getElementById("ray-2").locked()'), false)
   assert.equal(await evaluate('window.__cy.getElementById("ray-2").hasClass("same-name-duplicate")'), false)
+})
+
+test('switching merging off while zoomed out releases the group immediately', async () => {
+  await setZoom(0.5)
+  assert.equal(await evaluate('window.__cy.getElementById("ray-2").locked()'), true)
+  await toggleMerge()
+  assert.equal(await merging(), false)
+  assert.equal(await evaluate('window.__cy.getElementById("ray-2").locked()'), false)
+  assert.equal(await evaluate('window.__cy.getElementById("ray-2").hasClass("same-name-duplicate")'), false)
+  assert.equal(await evaluate('window.__cy.edges().filter(e => e.data("sameName")).length'), 0)
 })

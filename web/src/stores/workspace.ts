@@ -10,6 +10,9 @@ export const useWorkspace = defineStore('workspace', {
     ws: { root_id: null, root_label: null, permission_mode: 'ask_always', model_strong: null, model_fast: null, openai_base_url: null, layers: { entities: true, people: true, countries: false, categories: false, artifacts: false, sources: false, claims: false } } as Workspace,
     theme: (localStorage.getItem('illuminate.theme') as 'light' | 'dark') || 'dark',
     depth: Number(localStorage.getItem('illuminate.depth') || 2),
+    // Stacking same-name entities behind one node when the canvas is zoomed out. Off by default:
+    // it hides records the analyst may be looking for, so it is opted into per browser.
+    mergeSameName: localStorage.getItem('illuminate.mergeSameName') === '1',
     modelKey: false,
     loaded: false,
   }),
@@ -19,5 +22,6 @@ export const useWorkspace = defineStore('workspace', {
     setLayer(k: string, v: boolean) { this.ws.layers = { ...this.ws.layers, [k]: v }; this.save({ layers: this.ws.layers }) },
     setTheme(t: 'light' | 'dark') { this.theme = t; localStorage.setItem('illuminate.theme', t) },
     setDepth(d: number) { this.depth = d; localStorage.setItem('illuminate.depth', String(d)) },
+    setMergeSameName(v: boolean) { this.mergeSameName = v; localStorage.setItem('illuminate.mergeSameName', v ? '1' : '0') },
   },
 })
