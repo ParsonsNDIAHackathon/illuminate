@@ -82,6 +82,10 @@ configures the host-side API under `make dev`. Both secrets are required and hav
 defaults — `make up` stops with a named variable rather than booting insecurely. `.env`
 is gitignored.
 
+The default development startup is fixture-driven and does not require a fetch-cache
+authority. Live connector retrieval fails closed until this environment has its own
+`ILLUMINATE_FETCH_CACHE_URL`; do not point development at the production authority.
+
 Open http://localhost:8080. Then **Settings › Connectors** → paste an OpenAI key to enable
 chat and Cypher generation. Without a key the app still browses the graph and answers
 template questions.

@@ -6,7 +6,7 @@ NAME    ?=
 export HOST_UID := $(shell id -u)
 export HOST_GID := $(shell id -g)
 
-.PHONY: help up down dev seed backup restore backups sync-pre sync-publish test-sync-main validate-bom generate-bom test
+.PHONY: help up down dev seed backup restore backups sync-pre sync-publish test-sync-main test-compose-config validate-bom generate-bom test
 
 help:
 	@echo "make up                 start everything in containers (web :8080, api :8000, neo4j :7474)"
@@ -19,6 +19,7 @@ help:
 	@echo "make sync-pre           fetch and safely fast-forward canonical main; never push"
 	@echo "make sync-publish       fetch, reconcile, and publish reviewed canonical main"
 	@echo "make test-sync-main     test synchronization using disposable local repositories"
+	@echo "make test-compose-config verify fixture-mode Compose configuration"
 	@echo "make validate-bom       verify data, dependencies, images, fixtures, and curated BOM metadata"
 	@echo "make generate-bom       regenerate the readable BOM after reviewing docs/bom.json"
 	@echo "make test               run repository contract checks"
@@ -67,11 +68,14 @@ sync-publish:
 test-sync-main:
 	@scripts/test-sync-main.sh
 
+test-compose-config:
+	@scripts/test-compose-config.sh
+
 validate-bom:
 	@python scripts/bom.py
 
 generate-bom:
 	@python scripts/bom.py --generate
 
-test: validate-bom
+test: validate-bom test-compose-config
 	@python -m unittest scripts/test_bom.py
