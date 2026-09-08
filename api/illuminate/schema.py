@@ -16,15 +16,17 @@ LABELS: dict[str, str] = {
     "Artifact": "Evidence: filing, award record, registry record, news article, web page. Never a raw blob. kind ∈ {award, registry, filing, news, web, document, record}.",
     "Claim": "Reified assertion (subject, predicate, object) with source, method, confidence, status ∈ {staged, committed, rejected}.",
     "SourceRecord": "A normalized source retrieval or connector attempt, including catalog identity, coverage limits, status, and any non-secret error.",
+    "AnalystDecision": "Append-only human disposition event for a vendor; advisory and distinct from recommendation and claim truth.",
+    "ClaimReview": "Append-only human or system claim truth transition event.",
 }
 
 # --- Relationship types ----------------------------------------------------------
 RELS: dict[str, str] = {
-    "SUPPLIES": "(supplier:Entity)-[:SUPPLIES {tier, sole_source, contract_ref, amount, psc, naics}]->(consumer:Entity)",
-    "OWNS": "(parent:Entity)-[:OWNS {pct}]->(child:Entity) — direct ownership",
-    "ULTIMATE_PARENT_OF": "(ultimate:Entity)-[:ULTIMATE_PARENT_OF]->(child:Entity)",
+    "SUPPLIES": "(supplier:Entity)-[:SUPPLIES {tier, sole_source, contract_ref, amount, psc, naics, claim_id}]->(consumer:Entity); scored sole-source values require a committed Claim evidenced by the exact award Artifact",
+    "OWNS": "(parent:Entity)-[:OWNS {pct, effective_date, as_of_date}]->(child:Entity) — direct ownership",
+    "ULTIMATE_PARENT_OF": "(ultimate:Entity)-[:ULTIMATE_PARENT_OF {effective_date, as_of_date}]->(child:Entity)",
     "HELD_ROLE": "(p:Person)-[:HELD_ROLE {title, role_type ∈ {executive, board, both, position}, from, to, current}]->(e:Entity) — one edge per tenure; the entity may be an agency (kind='agency') for a government post",
-    "BENEFICIAL_OWNER_OF": "(p:Person)-[:BENEFICIAL_OWNER_OF {pct}]->(e:Entity)",
+    "BENEFICIAL_OWNER_OF": "(p:Person)-[:BENEFICIAL_OWNER_OF {pct, effective_date, as_of_date}]->(e:Entity)",
     "MEMBER_OF": "(e:Entity)-[:MEMBER_OF {from, to, current}]->(org:Entity) — trade council, association or consortium membership",
     "TRANSACTS_WITH": "(a:Entity)-[:TRANSACTS_WITH {from, to, current, amount, description}]->(b:Entity) — a recorded business relationship outside federal awards (customer, partner, foreign buyer)",
     "LOBBIES": "(e:Entity)-[:LOBBIES {from, to, current}]->(body:Entity) — lobbying of a government body",
@@ -39,12 +41,19 @@ RELS: dict[str, str] = {
     "ASSERTS": "(c:Claim)-[:ASSERTS]->(subject) — the claim's subject; predicate is a property on the Claim",
     "TARGETS": "(c:Claim)-[:TARGETS]->(object) — the claim's object node, when the object is a node",
     "ABOUT": "(a:Artifact)-[:ABOUT]->(e:Entity) — an artifact that mentions an entity without a specific claim",
+    "DECISION_FOR": "(d:AnalystDecision)-[:DECISION_FOR]->(e:Entity)",
+    "REVIEW_OF": "(r:ClaimReview)-[:REVIEW_OF]->(c:Claim)",
+    "DECISION_PROGRAM": "(d:AnalystDecision)-[:DECISION_PROGRAM]->(program:Entity)",
+    "DECISION_EVIDENCE": "(d:AnalystDecision)-[:DECISION_EVIDENCE]->(claim_or_artifact)",
 }
 
 # Artifact kinds that are a pointer at a data source (a LittleSis org page, a registry entry, a
 # sanctions list, a quote) rather than a document in their own right. The canvas draws these on the
 # "sources" layer and the remaining kinds (filing, news, award, web, document) on "artifacts".
 SOURCE_KINDS = ("record", "registry")
+
+# One mission-scoping bound shared by portfolio membership, reports, and analyst decisions.
+SUPPLY_SCOPE_MAX_DEPTH = 6
 
 # Provenance every node and edge written by the system carries (Entity metadata table).
 PROVENANCE_FIELDS = [
@@ -107,6 +116,8 @@ CONSTRAINTS = [
     "CREATE CONSTRAINT artifact_id IF NOT EXISTS FOR (n:Artifact) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT claim_id IF NOT EXISTS FOR (n:Claim) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT source_record_id IF NOT EXISTS FOR (n:SourceRecord) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT analyst_decision_id IF NOT EXISTS FOR (n:AnalystDecision) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT claim_review_id IF NOT EXISTS FOR (n:ClaimReview) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT export_state_key IF NOT EXISTS FOR (n:InsightExportState) REQUIRE (n.version, n.finding_id) IS UNIQUE",
     "CREATE CONSTRAINT export_event_key IF NOT EXISTS FOR (n:InsightExportEvent) REQUIRE (n.version, n.revision) IS UNIQUE",
     "CREATE CONSTRAINT export_counter_version IF NOT EXISTS FOR (n:InsightExportCounter) REQUIRE n.version IS UNIQUE",

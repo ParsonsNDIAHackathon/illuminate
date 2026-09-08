@@ -384,6 +384,38 @@ async def propose_entity(ctx: ToolContext, name: str, kind: str = "organization"
         data = {"entity_id": eid, "counters": decision.result["counters"], "resolved_existing": existing.__dict__ if existing else None}
         if cands:
             data["possible_duplicates"] = cands
+        if kind == "program":
+            # Enqueueing only performs bounded local queue work; the live
+            # contextual retrieval happens in the worker after this create
+            # response has returned.
+            from ..enrichment.worker import worker
+            refresh_connectors = [
+                *(["usaspending"] if kws else []),
+                "gdelt", "openstreetmap", "far", "epss",
+            ]
+            try:
+                job = await worker.enqueue(
+                    eid,
+                    connectors=refresh_connectors,
+                    user=ctx.user,
+                    requested_by=ctx.source,
+                )
+                data["contextual_refresh"] = {
+                    "status": "queued", "job_id": job.id, "connectors": job.connectors,
+                    "note": "Bounded live contextual refresh continues in the background.",
+                }
+                if not kws:
+                    data["contextual_refresh"]["not_applicable"] = {
+                        "usaspending": "Program procurement discovery requires at least one award-search keyword."
+                    }
+            except Exception:
+                # The program creation succeeded independently. Do not claim a
+                # refresh was queued when local queue/database recovery failed.
+                data["contextual_refresh"] = {
+                    "status": "unavailable",
+                    "action": "Retry enrichment from the program inspector.",
+                    "reason": "contextual refresh could not be queued",
+                }
         sub = None
         try:
             r = await expand_subgraph(ctx, eid, depth=1)

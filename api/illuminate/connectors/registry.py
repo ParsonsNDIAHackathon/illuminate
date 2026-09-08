@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from .base import Connector
+import json
+from types import MethodType
+
+from .base import Connector, DiagnosticAuthenticationError
+from .contextual import EPSSConnector, FARConnector, OpenStreetMapConnector
 from .edgar import EDGARConnector
 from .gdelt import GDELTConnector
 from .gleif import GLEIFConnector
@@ -13,7 +17,11 @@ from .sam_exclusions import SAMExclusionsConnector
 from .un_sanctions import UNSanctionsConnector
 from .usaspending import USAspendingConnector
 from .websearch import WebSearchConnector
-from ..llm.client import check_key
+from .source_contract import coverage_contract, coverage_for_adapter
+from .http import probe_source
+from ..config import load_workspace, settings
+from ..llm.client import models
+from ..vault import vault
 
 
 # Stable, downstream-safe source descriptions.  Connector labels are presentation
@@ -116,33 +124,165 @@ class OpenAIPseudoConnector(Connector):
         return []
 
     async def check_connectivity(self, user: str) -> dict:
-        result = await check_key(user)
-        if not result["ok"]:
-            if result.get("error") == "no key":
-                from .base import diagnostic_failure
-                return diagnostic_failure("missing_credentials")
-            raise result["error"]
-        return {
+        from .base import diagnostic_failure
+
+        key = vault().get(user, self.key_name)
+        if not key:
+            return diagnostic_failure("missing_credentials")
+        workspace = load_workspace()
+        base_url = workspace.openai_base_url or settings.openai_base_url or "https://api.openai.com/v1"
+        response = await probe_source(
+            f"{base_url.rstrip('/')}/models",
+            headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+            timeout=8,
+            max_bytes=65536,
+        )
+        _validate_openai(self, response)
+        result = {
             "ok": True,
             "status": "available",
             "detail": "OpenAI is available",
-            "diagnostics": {
-                "models": result["models"],
-                "strong_available": result["strong_available"],
-                "fast_available": result["fast_available"],
-            },
         }
+        diagnostics = _openai_diagnostics(response, user)
+        if diagnostics:
+            result["diagnostics"] = diagnostics
+        return result
+
+
+def _probe_text(response) -> str:
+    try:
+        return response.body.decode("utf-8", errors="ignore").lower()
+    except (AttributeError, TypeError):
+        return ""
+
+
+def _reject_message(response, *markers: str) -> None:
+    text = _probe_text(response)
+    if any(marker in text for marker in markers):
+        raise DiagnosticAuthenticationError
+
+
+def _json_probe(response) -> dict:
+    try:
+        payload = json.loads(response.body)
+    except (AttributeError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        raise RuntimeError("unrecognized connector diagnostic response") from None
+    if not isinstance(payload, dict):
+        raise RuntimeError("unrecognized connector diagnostic response")
+    return payload
+
+
+_SAM_DIAGNOSTIC_UEI = "JHFZTG8ZC9V2"
+
+
+def _validate_sam(self, response) -> None:
+    _reject_message(
+        response,
+        "api key invalid",
+        "invalid api key",
+        "invalid apikey",
+        "invalid api_key",
+        "api_key_invalid",
+        "api key is not valid",
+    )
+    payload = _json_probe(response)
+    total = payload.get("totalRecords")
+    entities = payload.get("entityData")
+    if not isinstance(total, int) or isinstance(total, bool) or not isinstance(entities, list):
+        raise RuntimeError("unrecognized SAM diagnostic response")
+    accepted = any(
+        isinstance(entity, dict)
+        and isinstance(entity.get("entityRegistration"), dict)
+        and entity["entityRegistration"].get("ueiSAM") == _SAM_DIAGNOSTIC_UEI
+        for entity in entities
+    )
+    if total < 1 or not accepted:
+        # SAM can answer a rejected key with a nominally valid empty result. The
+        # diagnostic queries a stable public UEI specifically so an empty result
+        # is a credential rejection rather than proof of connectivity.
+        raise DiagnosticAuthenticationError
+
+
+def _validate_finnhub(self, response) -> None:
+    _reject_message(response, "invalid api key", "invalid token", "api key is not valid")
+    payload = _json_probe(response)
+    price = payload.get("c")
+    timestamp = payload.get("t")
+    if (
+        not isinstance(price, (int, float))
+        or isinstance(price, bool)
+        or not isinstance(timestamp, (int, float))
+        or isinstance(timestamp, bool)
+    ):
+        raise RuntimeError("unrecognized Finnhub diagnostic response")
+
+
+def _validate_opencorporates(self, response) -> None:
+    _reject_message(
+        response,
+        "invalid api token",
+        "invalid api_token",
+        "invalid token",
+        "authentication failed",
+        "unauthorized",
+    )
+    payload = _json_probe(response)
+    results = payload.get("results")
+    if not isinstance(results, dict) or not isinstance(results.get("companies"), list):
+        raise RuntimeError("unrecognized OpenCorporates diagnostic response")
+
+
+def _validate_openai(self, response) -> None:
+    _reject_message(
+        response,
+        "incorrect api key",
+        "invalid api key",
+        "invalid_api_key",
+        "invalid bearer",
+        "invalid token",
+        "authentication",
+        "unauthorized",
+    )
+    payload = _json_probe(response)
+    if payload.get("object") != "list" or not isinstance(payload.get("data"), list):
+        raise RuntimeError("unrecognized OpenAI diagnostic response")
+
+
+def _openai_diagnostics(response, user: str) -> dict:
+    """Preserve model hints only when the bounded response contains complete JSON."""
+    try:
+        payload = json.loads(response.body)
+        ids = [
+            item["id"] for item in payload.get("data", [])[:200]
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        ]
+    except (AttributeError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    strong, fast = models(user)
+    return {
+        "models": len(ids),
+        "strong_available": strong in ids or not ids,
+        "fast_available": fast in ids or not ids,
+    }
 
 
 REGISTRY: list[Connector] = [
     SAMConnector(), SAMExclusionsConnector(), USAspendingConnector(), GLEIFConnector(), LittleSisConnector(), EDGARConnector(), GDELTConnector(),
-    OFACConnector(), UNSanctionsConnector(), MarketConnector(), OpenCorporatesConnector(), WebSearchConnector(), OpenAIPseudoConnector(),
+    OFACConnector(), UNSanctionsConnector(), MarketConnector(), OpenCorporatesConnector(), OpenStreetMapConnector(), FARConnector(),
+    EPSSConnector(), WebSearchConnector(), OpenAIPseudoConnector(),
 ]
 
 # Explicit, non-mutating probes. Parameters are intentionally minimal and never
 # include user/entity data. "$credential" is substituted inside the connector.
 _DIAGNOSTICS = {
-    "sam": ("https://api.sam.gov/entity-information/v3/entities", {"api_key": "$credential", "registrationStatus": "A", "legalBusinessName": "a"}),
+    "sam": (
+        "https://api.sam.gov/entity-information/v3/entities",
+        {
+            "api_key": "$credential",
+            "ueiSAM": _SAM_DIAGNOSTIC_UEI,
+            "includeSections": "entityRegistration",
+        },
+    ),
     "sam_exclusions": ("https://sam.gov/api/prod/fileextractservices/v1/api/listfiles", {"domain": "Exclusions/Public V2", "privacy": "Public"}),
     "usaspending": ("https://api.usaspending.gov/api/v2/references/toptier_agencies/", {}),
     "gleif": ("https://api.gleif.org/api/v1/lei-records", {"page[size]": "1"}),
@@ -152,11 +292,26 @@ _DIAGNOSTICS = {
     "ofac": ("https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV", {}),
     "un_sanctions": ("https://scsanctions.un.org/resources/xml/en/consolidated.xml", {}),
     "market": ("https://finnhub.io/api/v1/quote", {"symbol": "AAPL", "token": "$credential"}),
-    "opencorporates": ("https://api.opencorporates.com/v0.4/companies/search", {"q": "a", "api_token": "$credential", "per_page": "1"}),
+    "opencorporates": ("https://api.opencorporates.com/v0.4/companies/search", {"q": "__illuminate_connectivity_probe_no_match__", "api_token": "$credential", "per_page": "1"}),
+    "openstreetmap": ("https://nominatim.openstreetmap.org/status", {"format": "json"}),
+    "far": ("https://www.ecfr.gov/current/title-48/chapter-1/subchapter-H/part-52", {}),
+    "epss": ("https://api.first.org/data/v1/epss", {"cve": "CVE-2021-44228"}),
+}
+_DIAGNOSTIC_VALIDATORS = {
+    "sam": _validate_sam,
+    "market": _validate_finnhub,
+    "opencorporates": _validate_opencorporates,
 }
 for _connector in REGISTRY:
     if _connector.name in _DIAGNOSTICS:
         _connector.diagnostic_url, _connector.diagnostic_params = _DIAGNOSTICS[_connector.name]
+    if _connector.name == "sam":
+        _connector.diagnostic_max_bytes = 65536
+        # SAM's entity API returns 404 for a rejected key on this diagnostic,
+        # rather than the conventional 401/403 used by the other providers.
+        _connector.diagnostic_auth_statuses = (401, 403, 404)
+    if _connector.name in _DIAGNOSTIC_VALIDATORS:
+        _connector.validate_diagnostic = MethodType(_DIAGNOSTIC_VALIDATORS[_connector.name], _connector)
 for _connector in REGISTRY:
     if _connector.name == "websearch":
         # Web search uses the same user-owned OpenAI capability.
@@ -174,13 +329,28 @@ def connector_names() -> list[str]:
 def source_metadata(name: str) -> dict:
     """Return a fresh normalized metadata mapping for a connector source."""
     meta = SOURCE_METADATA.get(name, {})
+    contract = coverage_for_adapter(name) or {}
     return {
-        "source_id": meta.get("source_id", name),
-        "catalog_ids": list(meta.get("catalog_ids", [])),
-        "usage_note": meta.get("usage_note"),
-        "quality_note": meta.get("quality_note"),
-        "supports": meta.get("supports"),
-        "unknowns": meta.get("unknowns"),
+        "source_id": meta.get("source_id") or contract.get("source_id") or name,
+        "catalog_ids": list(meta.get("catalog_ids") or contract.get("catalog_ids", [])),
+        "usage_note": meta.get("usage_note") or (
+            f"{contract.get('access')}; preserve upstream attribution and terms."
+            if contract else None
+        ),
+        "quality_note": meta.get("quality_note") or contract.get("limitations"),
+        "supports": meta.get("supports") or (
+            ", ".join(contract.get("categories", [])) + " evidence"
+            if contract.get("categories") else None
+        ),
+        "unknowns": meta.get("unknowns") or contract.get("limitations"),
+        "endpoint": contract.get("endpoint"),
+        "access": contract.get("access"),
+        "credentials": contract.get("credentials"),
+        "freshness": contract.get("freshness"),
+        "entity_kinds": list(contract.get("entity_kinds", [])),
+        "categories": list(contract.get("categories", [])),
+        "policy_status": contract.get("policy_status"),
+        "limitations": contract.get("limitations"),
     }
 def capability_kind(name: str) -> str:
     """All registry capabilities are optional to the deterministic judged path."""

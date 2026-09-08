@@ -5,23 +5,44 @@ export interface EntitySummary {
   name: string
   tier: number | string | null
   simulated: boolean
+  uei?: string | null
+  cage?: string | null
+  lei?: string | null
+  kind?: string
+  source?: string | null
 }
-async function request<T = any>(method: string, path: string, body?: any, headers?: Record<string, string>): Promise<T> {
+
+export interface OwnershipArtifact {
+  id: string
+  title?: string
+  url?: string
+  kind?: string
+  source?: string
+  retrieved_at?: string
+  source_status?: string
+  simulated?: boolean
+  evidence_id?: string
+  evidence_simulated?: boolean
+}
+async function request<T = any>(method: string, path: string, body?: any, headers?: Record<string, string>, signal?: AbortSignal): Promise<T> {
   const r = await fetch(path, {
     method,
     headers: { 'Content-Type': 'application/json', 'X-User': USER, ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   })
   if (!r.ok) {
     let detail = r.statusText
     try { detail = (await r.json()).detail ?? detail } catch {}
-    throw new Error(`${method} ${path}: ${detail}`)
+    const safePath = path.split('?')[0]
+    const safeDetail = String(detail).replace(/https?:\/\/\S+/gi, '[remote service]').slice(0, 300)
+    throw new Error(`${method} ${safePath}: ${safeDetail}`)
   }
   return r.json()
 }
 
 export const api = {
-  get: <T = any>(p: string) => request<T>('GET', p),
+  get: <T = any>(p: string, options?: { signal?: AbortSignal }) => request<T>('GET', p, undefined, undefined, options?.signal),
   post: <T = any>(p: string, b?: any, headers?: Record<string, string>) => request<T>('POST', p, b ?? {}, headers),
   put: <T = any>(p: string, b?: any) => request<T>('PUT', p, b ?? {}),
   del: <T = any>(p: string) => request<T>('DELETE', p),
@@ -33,6 +54,8 @@ export interface ConnectorTestResult {
   detail: string
   diagnostics?: Record<string, boolean | number | string>
 }
+
+export type SourceRefreshState = 'connected' | 'refreshing' | 'current' | 'stale-fallback' | 'unavailable' | 'not-applicable' | 'credential-required'
 export interface ReadinessContract {
   ok: boolean
   status: 'ready' | 'degraded' | 'unavailable'
@@ -77,6 +100,8 @@ export type RiskEvidence = {
   method?: string
   detail?: string
   retrieved_at?: string
+  first_retrieved_at?: string
+  latest_retrieved_at?: string
   confidence?: number
   status?: string
   truth_status?: string
@@ -96,6 +121,11 @@ export type RiskFactor = {
   evidence?: RiskEvidence[]
   explanation?: string
   provenance?: RiskEvidence
+  graph_path?: {
+    relationship_id?: string
+    supplier_id?: string
+    consumer_id?: string
+  }
 }
 
 export type RiskCategory = {
@@ -120,6 +150,10 @@ export type VendorRiskProfile = {
   id: string
   name: string
   simulated: boolean
+  uei?: string | null
+  cage?: string | null
+  lei?: string | null
+  tier?: number | string | null
   sourceMode: 'live' | 'frozen'
   contract_version: string
   score: number | null
@@ -132,8 +166,75 @@ export type VendorRiskProfile = {
   diligence_flags: RiskDiligenceFlag[]
 }
 
-export async function getVendorRiskProfile(id: string, suppliedReport?: any): Promise<VendorRiskProfile> {
-  const report = suppliedReport || await api.get<any>(`/api/entities/${encodeURIComponent(id)}/report`)
+export type AnalystDispositionAction =
+  | 'investigate'
+  | 'monitor'
+  | 'seek_alternate_source'
+  | 'accept_with_rationale'
+  | 'close_no_action'
+
+export interface AnalystDecisionEvent {
+  id: string
+  kind: 'analyst_decision'
+  entity_id: string
+  disposition: AnalystDispositionAction
+  rationale: string
+  owner: string
+  due_date?: string | null
+  actor: string
+  decided_at: string
+  program_id?: string | null
+  finding_ids: string[]
+  evidence_refs: string[]
+  version: number
+  simulated: boolean
+}
+
+export interface ClaimReviewEvent {
+  id: string
+  kind: 'claim_review'
+  claim_id: string
+  from_status: 'staged'
+  to_status: 'committed' | 'rejected'
+  rationale?: string | null
+  actor: string
+  decided_at: string
+  version: number
+  simulated: boolean
+}
+
+export interface DecisionHistory {
+  current: AnalystDecisionEvent | null
+  events: Array<AnalystDecisionEvent | ClaimReviewEvent>
+}
+
+export interface AnalystDecisionInput {
+  disposition: AnalystDispositionAction
+  rationale: string
+  owner: string
+  due_date?: string | null
+  program_id?: string | null
+  finding_ids: string[]
+  evidence_refs: string[]
+  expected_version: number
+}
+
+export function supportedDecisionEvidenceRefs(refs: string[]): string[] {
+  return [...new Set(refs.filter(ref => ref.startsWith('clm_') || ref.startsWith('art_')))].sort()
+}
+
+function safeEvidenceUrl(value?: string): string | undefined {
+  if (!value) return undefined
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && !url.username && !url.password ? url.toString() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export async function getVendorRiskProfile(id: string, suppliedReport?: any, rootId?: string): Promise<VendorRiskProfile> {
+  const report = suppliedReport || await api.get<any>(`/api/entities/${encodeURIComponent(id)}/report?${qs({ root_id: rootId })}`)
   const risk = report.risk || {}
   const evidenceByRef = new Map<string, RiskEvidence>()
   for (const evidence of report.screen_evidence || []) {
@@ -143,8 +244,8 @@ export async function getVendorRiskProfile(id: string, suppliedReport?: any): Pr
       source: evidence.source,
       detail: evidence.detail,
       method: evidence.method,
-      source_url: evidence.source_url || evidence.artifact?.url,
-      retrieved_at: evidence.retrieved_at,
+      source_url: safeEvidenceUrl(evidence.source_url || evidence.artifact?.url),
+      retrieved_at: evidence.latest_retrieved_at || evidence.retrieved_at,
       confidence: evidence.confidence,
       status: evidence.status,
       truth_status: evidence.status,
@@ -152,6 +253,26 @@ export async function getVendorRiskProfile(id: string, suppliedReport?: any): Pr
     }
     for (const ref of [evidence.claim_id, evidence.artifact?.id, ...(evidence.artifacts || []).map((a: any) => a.id)]) {
       if (ref) evidenceByRef.set(ref, normalized)
+    }
+  }
+  for (const evidence of report.supply?.risk_evidence || []) {
+    for (const artifact of evidence.artifacts || []) {
+      const normalized: RiskEvidence = {
+        id: artifact.id,
+        claim_id: evidence.claim_id,
+        source: artifact.source || evidence.source,
+        detail: evidence.contract_ref ? `Award ${evidence.contract_ref}` : undefined,
+        method: artifact.method || evidence.method,
+        source_url: safeEvidenceUrl(artifact.url),
+        retrieved_at: artifact.latest_retrieved_at || artifact.retrieved_at || evidence.latest_retrieved_at || evidence.retrieved_at,
+        confidence: artifact.confidence ?? evidence.confidence,
+        status: evidence.claim_status,
+        truth_status: evidence.claim_status,
+        simulated: Boolean(evidence.simulated || evidence.claim_simulated || artifact.simulated || artifact.evidence_simulated),
+      }
+      for (const ref of [evidence.claim_id, evidence.evidence_id, artifact.id]) {
+        if (ref) evidenceByRef.set(ref, normalized)
+      }
     }
   }
   const categories: RiskCategory[] = (risk.categories || []).map((category: RiskCategory) => ({
@@ -176,6 +297,10 @@ export async function getVendorRiskProfile(id: string, suppliedReport?: any): Pr
     id: report.identity?.id || id,
     name: report.identity?.name || id,
     simulated: Boolean(report.identity?.simulated),
+    uei: report.identity?.uei,
+    cage: report.identity?.cage,
+    lei: report.identity?.lei,
+    tier: report.identity?.tier,
     sourceMode: 'live',
     contract_version: risk.contract_version || 'unavailable',
     score: risk.score ?? null,
@@ -191,6 +316,11 @@ export async function getVendorRiskProfile(id: string, suppliedReport?: any): Pr
 
 export interface EntityReportContract {
   identity: EntitySummary & Record<string, unknown>
+  control?: {
+    direct_parents?: Record<string, unknown>[]
+    ultimate_parents?: Record<string, unknown>[]
+    ownership?: OwnershipRecord[]
+  }
   risk_contract?: EntityRiskContract
   risk?: (Partial<EntityRiskContract> & Record<string, unknown>)
   [key: string]: unknown
@@ -292,4 +422,51 @@ export interface CatalogContributionResult {
   idempotent: boolean
   submitted_at: string | null
   metadata: CatalogDatasetMetadata
+}
+
+export interface EnrichmentJob {
+  id: string
+  entity_id: string
+  entity_name?: string | null
+  status: string
+  created_at: number
+  results: Record<string, ConnectorRefreshResult | string>
+}
+export interface OwnershipRecord {
+  owner: { id?: string; name: string; kind: string }
+  relationship_type: 'direct' | 'ultimate_parent' | 'beneficial_owner' | 'unknown'
+  predicate: string
+  percentage: number | null
+  effective_date: string | null
+  as_of_date: string | null
+  relationship: { id?: string; present: boolean }
+  claim: {
+    id: string
+    status: string
+    source?: string
+    retrieved_at?: string
+    method?: string
+    confidence?: number
+  } | null
+  artifacts: OwnershipArtifact[]
+  truth_status: string
+  freshness: 'current' | 'stale' | 'unavailable'
+  conflicting: boolean
+  current: boolean
+  evidence_present: boolean
+  simulated: boolean
+}
+
+export interface ConnectorRefreshResult {
+  status: SourceRefreshState | 'succeeded' | 'empty' | 'partial' | 'failed' | 'timed_out'
+  queried: boolean
+  applicable: boolean
+  availability?: SourceRefreshState
+  refresh_state?: SourceRefreshState
+  reason?: string | null
+  action?: string | null
+  last_success_at?: string | null
+  facts?: number
+  cache?: boolean
+  simulated?: boolean
 }

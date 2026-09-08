@@ -13,7 +13,7 @@
       <template #item.status="{ item }"><TruthBadge :value="item.claim.simulated ? 'simulated' : item.claim.status" /><div v-if="item.claim.simulated" class="simulation-note">Training scenario; not an allegation</div></template>
       <template #item.source="{ item }"><b>{{ item.claim.source || 'Unavailable' }}</b><div class="text-caption">Method {{ item.claim.method || 'Unavailable' }}<span v-if="item.claim.model"> · {{ item.claim.model }}</span></div><div class="text-caption">Confidence {{ confidence(item.claim.confidence) }} · {{ item.claim.trust || 'trust unknown' }}</div></template>
       <template #item.artifacts="{ item }"><span v-for="a in item.artifacts" :key="a.id" class="mr-2 text-no-wrap"><TruthBadge v-if="a.simulated" value="simulated" /><SourceLink :href="a.url" :artifact-id="a.id">{{ a.kind }}</SourceLink><v-btn icon="mdi-text-box-search-outline" size="x-small" variant="text" density="compact" title="View contents" @click="rawId = a.id" /></span><span v-if="!item.artifacts.length" class="text-caption">Missing</span></template>
-      <template #item.when="{ item }">{{ date(item.claim.retrieved_at) }}</template>
+      <template #item.when="{ item }">{{ date(item.claim.latest_retrieved_at || item.claim.retrieved_at) }}</template>
       <template #item.actions="{ item }">
         <template v-if="item.claim.status === 'staged'">
           <v-btn size="x-small" color="success" @click="act(item.claim.id, 'commit')">Commit</v-btn>
@@ -35,8 +35,9 @@ import { useRoute } from 'vue-router'
 const route = useRoute()
 const requestedStatus = String(route.query.status || '')
 const status = ref(['staged', 'committed', 'rejected'].includes(requestedStatus) ? requestedStatus : 'staged'); const items = ref<any[]>([]); const loading = ref(false); const rawId = ref<string | null>(null)
+const claimId = String(route.query.claim_id || '')
 const headers = [{ title: 'Assertion', key: 'assertion', width: 360 }, { title: 'Truth status', key: 'status', width: 120 }, { title: 'Source lineage', key: 'source', width: 220 }, { title: 'Evidence', key: 'artifacts', width: 140 }, { title: 'Retrieved', key: 'when', width: 140 }, { title: '', key: 'actions', width: 170 }]
-async function load() { loading.value = true; try { const entity = String(route.query.entity_id || ''); items.value = await api.get(`/api/claims?status=${status.value}${entity ? `&entity_id=${encodeURIComponent(entity)}` : ''}&limit=500`) } finally { loading.value = false } }
+async function load() { loading.value = true; try { const entity = String(route.query.entity_id || ''); items.value = await api.get(`/api/claims?status=${status.value}${entity ? `&entity_id=${encodeURIComponent(entity)}` : ''}${claimId ? `&claim_id=${encodeURIComponent(claimId)}` : ''}&limit=500`) } finally { loading.value = false } }
 async function act(id: string, what: 'commit' | 'reject') { await api.post(`/api/claims/${id}/${what}`, {}); load() }
 function confidence(value: unknown) { const n = Number(value); return Number.isFinite(n) ? `${Math.round(n * 100)}%` : 'Unavailable' }
 function date(value: unknown) { return value ? new Date(String(value)).toLocaleString() : 'Unavailable' }

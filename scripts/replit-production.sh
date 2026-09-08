@@ -60,8 +60,10 @@ fi
 
 NEO4J_PID=""
 API_PID=""
+BOOTSTRAP_PID=""
 cleanup() {
   trap - EXIT INT TERM
+  [ -z "$BOOTSTRAP_PID" ] || kill "$BOOTSTRAP_PID" 2>/dev/null || true
   [ -z "$API_PID" ] || kill "$API_PID" 2>/dev/null || true
   [ -z "$NEO4J_PID" ] || kill "$NEO4J_PID" 2>/dev/null || true
   wait 2>/dev/null || true
@@ -114,14 +116,6 @@ then
   exit 1
 fi
 
-echo "Preparing deterministic mission dataset..."
-remaining="$(remaining_seconds)"
-if ! (cd api && timeout --foreground --signal=TERM --kill-after=5 "${remaining}s" \
-  "$PYTHON" -m illuminate.seed.seed --offline --scenario --skip-enrich); then
-  echo "Mission dataset preparation failed or exceeded the startup deadline." >&2
-  exit 1
-fi
-
 [ -f "$ROOT/web/dist/index.html" ] || {
   echo "Production frontend build is missing; run the configured deployment build command." >&2
   exit 1
@@ -134,7 +128,7 @@ API_PID=$!
 while true; do
   health_json="$(curl --max-time 5 -fsS "http://127.0.0.1:$PORT/api/health?refresh=true" 2>/dev/null || true)"
   if [ -n "$health_json" ] && "$PYTHON" -c \
-    'import json,sys; h=json.load(sys.stdin); raise SystemExit(0 if h.get("ok") and h.get("primary_workflow_ready") else 1)' \
+    'import json,sys; h=json.load(sys.stdin); raise SystemExit(0 if h.get("ok") and h.get("neo4j") else 1)' \
     <<<"$health_json"; then
     break
   fi
@@ -142,6 +136,19 @@ while true; do
   [ "$SECONDS" -lt "$deadline" ] || { echo "Illuminate readiness timed out after ${STARTUP_TIMEOUT}s." >&2; exit 1; }
   sleep 1
 done
+
+# Production is live-first. Populate an empty graph from live sources without
+# delaying API/SPA/MCP readiness; committed offline fixtures remain an explicit
+# operator/test choice via scripts/seed.sh or illuminate.seed.seed --offline.
+if "$PYTHON" -c \
+  'import json,sys; h=json.load(sys.stdin); raise SystemExit(0 if h.get("operational_refresh_required", True) else 1)' \
+  <<<"$health_json"; then
+  echo "Starting non-blocking live source bootstrap..."
+  (cd api && exec "$PYTHON" -m illuminate.seed.seed --bootstrap --skip-enrich) &
+  BOOTSTRAP_PID=$!
+else
+  echo "Existing graph found; live bootstrap is not required."
+fi
 
 remaining="$(remaining_seconds)"
 probe_timeout=$((remaining < 5 ? remaining : 5))

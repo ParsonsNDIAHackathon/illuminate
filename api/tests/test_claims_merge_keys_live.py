@@ -40,6 +40,11 @@ async def graph():
         pytest.skip("neo4j not reachable")
     yield
     await db.write(f"MATCH (n) WHERE n.id CONTAINS '{MARK}' DETACH DELETE n")
+    await db.write(
+        f"MATCH (r:ClaimReview)-[:REVIEW_OF]->(c:Claim) "
+        f"WHERE c.subject_id CONTAINS '{MARK}' OR c.object_id CONTAINS '{MARK}' "
+        "DETACH DELETE r"
+    )
     await db.write(f"MATCH (c:Claim) WHERE c.subject_id CONTAINS '{MARK}' OR c.object_id CONTAINS '{MARK}' DETACH DELETE c")
     await db.close_driver()
 

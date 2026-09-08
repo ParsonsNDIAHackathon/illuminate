@@ -7,7 +7,7 @@
         <p>Start with a deterministic mission lens, inspect the graph and ranked vendor findings, verify the supporting evidence, then export findings with their review status intact.</p>
         <div class="hero-actions">
           <v-btn color="secondary" size="large" prepend-icon="mdi-radar" :disabled="!missionProgramId" :to="missionProgramId ? presetLink(presets[0]) : undefined">Find supply exposure</v-btn>
-          <v-btn size="large" variant="outlined" to="/portfolio">Open vendor triage</v-btn>
+          <v-btn size="large" variant="outlined" :disabled="!missionProgramId" :to="missionProgramId ? scopedLink('/portfolio') : undefined">Open vendor triage</v-btn>
         </div>
         <small class="speed">Fast path: the first actionable graph finding is one click away.</small>
       </div>
@@ -63,8 +63,8 @@
     <section aria-labelledby="workflow-title">
       <div class="section-title"><div><span>03 / DECISION WORKFLOW</span><h2 id="workflow-title">Trace every conclusion to reviewable evidence.</h2></div></div>
       <div class="workflow">
-        <router-link to="/portfolio"><b>1</b><span><strong>Triage vendors</strong>Rank risk separately from evidence quality.</span></router-link>
-        <router-link to="/compare/vendors"><b>2</b><span><strong>Compare</strong>Align trustworthy and risky vendor profiles.</span></router-link>
+        <router-link :to="scopedLink('/portfolio')"><b>1</b><span><strong>Triage vendors</strong>Rank risk separately from evidence quality.</span></router-link>
+        <router-link :to="scopedLink('/compare/vendors')"><b>2</b><span><strong>Compare</strong>Align trustworthy and risky vendor profiles.</span></router-link>
         <router-link to="/claims"><b>3</b><span><strong>Review evidence</strong>Accept or reject staged claims before release.</span></router-link>
         <a href="/api/exports/v1/findings?format=csv"><b>4</b><span><strong>Export with review status</strong>Download the versioned finding contract for controlled downstream review.</span></a>
       </div>
@@ -108,7 +108,12 @@ const freshnessDetail = computed(() => {
   return fresh.latest_retrieved_at || 'No retrieval timestamp reported'
 })
 function presetLink(preset: any) {
-  return preset.to || { path: '/explorer', query: { mission: preset.title, template: preset.template, root_id: missionProgramId.value, ...preset.params } }
+  if (preset.to) return scopedLink(preset.to)
+  return { path: '/explorer', query: { mission: preset.title, template: preset.template, root_id: missionProgramId.value, ...preset.params } }
+}
+function scopedLink(target: string) {
+  const [path, search = ''] = target.split('?')
+  return { path, query: { ...Object.fromEntries(new URLSearchParams(search)), root_id: missionProgramId.value || undefined } }
 }
 async function load(refresh = false) {
   status.value = 'loading'; error.value = ''; programError.value = ''

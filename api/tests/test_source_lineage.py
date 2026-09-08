@@ -101,6 +101,26 @@ def test_report_queries_require_committed_screens():
     assert 's for s in scr if s.get("status") == "committed" and not _screen_simulated(s)' in report
     assert '"screen_evidence": scr' in report
 
+def test_exact_claim_lookup_bypasses_list_pagination():
+    original_read = claims.db.read
+    captured = {}
+
+    async def fake_read(query, params=None):
+        captured["query"] = query
+        captured["params"] = params
+        return []
+
+    async def check():
+        claims.db.read = fake_read
+        try:
+            await claims.list_claims("committed", "ent_1", 500, "clm_exact")
+        finally:
+            claims.db.read = original_read
+
+    asyncio.run(check())
+    assert "c.id = $claim_id" in captured["query"]
+    assert captured["params"]["claim_id"] == "clm_exact"
+    assert captured["params"]["limit"] == 1
 def test_connector_errors_never_persist_exception_messages():
     secret = "synthetic-secret-must-not-survive"
     error = HttpError(403, f"https://example.test/path?api_token={secret}", f"body {secret}")
@@ -262,11 +282,12 @@ def test_shared_artifact_lineage_is_not_rewritten():
     source = (Path(__file__).parents[1] / "illuminate" / "enrichment" / "claims.py").read_text()
     artifact_clause = source.split('"MERGE (a:Artifact {id:$aid})', 1)[1].split('"MERGE (a)-[re:EVIDENCES]', 1)[0]
     assert "ON CREATE SET" in artifact_clause
-    assert '"SET a +=' not in artifact_clause
+    assert artifact_clause.count("SET") == 1
     evidence_clause = source.split('"MERGE (a)-[re:EVIDENCES]', 1)[1].split('"MERGE (a)-[rb:ABOUT]', 1)[0]
     assert "re.source=$source" in evidence_clause
     assert "re.simulated=$simulated" in evidence_clause
     assert "re += $source_meta" in evidence_clause
+    assert "re += $aprops" in evidence_clause
 
 def test_seed_ingests_cached_gdelt_evidence():
     seed = (Path(__file__).parents[1] / "illuminate" / "seed" / "seed.py").read_text()

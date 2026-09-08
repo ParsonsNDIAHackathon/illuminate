@@ -39,8 +39,8 @@ The first three stages are implemented in the current graph and claim pipeline. 
 5. **Materialize the graph fact.** A committed claim writes the direct relationship or property used for fast traversal. That fact carries `claim_id`, so a user can traverse back to the claim and its artifact.
 6. **Derive, do not invent.** Analytics traverse committed graph facts to identify patterns such as sole-source paths, foreign-parent paths, shared people, or screening observations. A finding should retain its typed path and contributing claim IDs.
 7. **Score deterministically.** Risk families, weights, thresholds, rule-set version, and data completeness belong in the score output. Optional AI may summarize the structured result, but must not create evidence, alter the score, or silently promote a claim.
-8. **Recommend for review.** Recommendations are explainable decision support—investigate, monitor, seek an alternate source—not autonomous eligibility or award decisions.
-9. **Publish safely.** A versioned export is the machine-readable data product. Catalog metadata describes that product, its owner, update cadence, usage constraints, quality, schema version, and access path; it does not duplicate the graph or evidence.
+8. **Recommend for review.** Recommendations are explainable system output, not autonomous eligibility or award decisions. Analysts separately record a bounded disposition, rationale, owner, and due date; each change is an attributable, append-only event. Decision versions are scoped to vendor and program so one program cannot block another; a separate entity-wide sequence preserves chronology.
+9. **Publish safely.** A versioned export is the machine-readable data product. It exposes the current bounded disposition and safe audit metadata, but not free-form analyst rationale. Catalog metadata describes that product, its owner, update cadence, usage constraints, quality, schema version, and access path; it does not duplicate the graph or evidence.
 
 ## Trust boundaries and control points
 
@@ -59,6 +59,7 @@ The first three stages are implemented in the current graph and claim pipeline. 
 
 - Open-source assertions that lack independent corroboration stay `staged`.
 - Reviewers can commit or reject a claim; the lifecycle is not erased.
+- Claim reviews and vendor dispositions are separate append-only histories. A human disposition never changes claim truth or the deterministic recommendation.
 - A graph interlock or fuzzy entity match is a lead, not an accusation. Resolution method and confidence remain visible.
 - Write requests are previewed in a rolled-back transaction and held for approval. Destructive requests require explicit acknowledgement and are never silently approved.
 

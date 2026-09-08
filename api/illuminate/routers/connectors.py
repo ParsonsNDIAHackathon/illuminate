@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from ..connectors import REGISTRY, get_connector
 from ..connectors.base import diagnostic_failure
 from ..connectors.http import HttpError
+from ..connectors.source_contract import coverage_contract
 from ..vault import vault
 from .deps import user_id
 
@@ -26,6 +27,12 @@ async def list_connectors(user: str = Depends(user_id)):
         st = await c.status(user)
         out.append({**c.to_dict(), **st})
     return out
+
+
+@router.get("/coverage")
+async def list_source_coverage():
+    """Complete approved-source inventory, including sources without an adapter."""
+    return coverage_contract()
 
 
 @router.put("/{name}/credential")

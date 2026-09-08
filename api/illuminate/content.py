@@ -450,7 +450,7 @@ def summarize(props: dict, raw: list[dict]) -> dict:
                 sole, why = is_sole_source(body)
                 for sec in payload:
                     if sec["title"] == "Competition":
-                        sec["fields"].insert(0, {"label": "Sole source", "value": "yes" if sole else "no",
+                        sec["fields"].insert(0, {"label": "Sole source", "value": "unavailable" if sole is None else ("yes" if sole else "no"),
                                                  "emphasis": "warn" if sole else None})
                         if why:
                             sec["note"] = why

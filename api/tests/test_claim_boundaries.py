@@ -64,8 +64,8 @@ async def test_claim_list_boundaries_reject_invalid_requests(path):
 async def test_claim_list_accepts_bounded_filters(monkeypatch):
     received = {}
 
-    async def list_claims(status, entity_id, limit):
-        received.update(status=status, entity_id=entity_id, limit=limit)
+    async def list_claims(status, entity_id, limit, claim_id):
+        received.update(status=status, entity_id=entity_id, limit=limit, claim_id=claim_id)
         return []
 
     monkeypatch.setattr(claims_router.claims, "list_claims", list_claims)
@@ -75,7 +75,12 @@ async def test_claim_list_accepts_bounded_filters(monkeypatch):
             params={"status": "staged", "entity_id": "ent_1", "limit": claims_router.MAX_PAGE_LIMIT},
         )
     assert response.status_code == 200
-    assert received == {"status": "staged", "entity_id": "ent_1", "limit": claims_router.MAX_PAGE_LIMIT}
+    assert received == {
+        "status": "staged",
+        "entity_id": "ent_1",
+        "limit": claims_router.MAX_PAGE_LIMIT,
+        "claim_id": None,
+    }
 
 
 @pytest.mark.parametrize(
@@ -126,6 +131,10 @@ async def test_reject_staged_claim_and_repeat_is_idempotent(monkeypatch):
     assert await claims.reject("clm_1", "retry") == "rejected"
     assert state["status"] == "rejected"
     assert sum("c.status='rejected'" in query for query, _params in queries) == 1
+    assert sum("c.decision_version=coalesce" in query for query, _params in queries) == 1
+    event_writes = [(query, params) for query, params in queries if "CREATE (review:ClaimReview" in query]
+    assert len(event_writes) == 1
+    assert event_writes[0][1]["actor"] == "system"
 
 
 @pytest.mark.parametrize("status", ["committed", "unexpected"])
@@ -206,3 +215,88 @@ async def test_concurrent_commit_and_reject_have_one_terminal_winner(monkeypatch
     with pytest.raises(ValueError, match="cannot be rejected"):
         await reject_task
     assert state == {"status": "committed", "direct_fact_written": False}
+
+async def test_committed_observation_refreshes_materialized_fact_without_new_decision(monkeypatch):
+    materialized = []
+    claim_updates = []
+
+    async def handle(query, params):
+        if "RETURN c{.*} AS c" in query:
+            return [{
+                "c": {
+                    "status": "committed",
+                    "predicate": "SUPPLIES",
+                    "source": "usaspending",
+                    "retrieval_status": "live",
+                    "retrieval_mode": "operational_live",
+                    "latest_retrieved_at": "2026-09-08T12:00:00Z",
+                    "rel_props": '{"amount": 2500000, "award_count": 4, "sole_source": true}',
+                    "merge_keys": "[]",
+                    "decision_version": 3,
+                    "decision_note": "approved previously",
+                },
+                "sid": "supplier",
+                "oid": "program",
+            }]
+        if "RETURN a.url AS url" in query:
+            return []
+        if "MERGE (s)-[r:SUPPLIES" in query:
+            materialized.append(params)
+        if "MATCH (c:Claim {id:$id}) SET" in query:
+            claim_updates.append((query, params))
+        return []
+
+    monkeypatch.setattr(claims.db, "transactional_write", _transaction_runner(handle))
+
+    assert await claims.commit("stable-observation", refresh_materialization=True) == "committed"
+    assert materialized[0]["rp"]["amount"] == 2500000
+    assert materialized[0]["rp"]["award_count"] == 4
+    assert materialized[0]["rp"]["sole_source"] is True
+    assert materialized[0]["prov"]["retrieval_status"] == "live"
+    assert materialized[0]["prov"]["retrieval_mode"] == "operational_live"
+    assert len(claim_updates) == 1
+    assert "decision_version" not in claim_updates[0][0]
+    assert "decision_note" not in claim_updates[0][0]
+
+
+async def test_retrying_old_attribute_claim_cannot_undo_newer_commit(monkeypatch):
+    records = {
+        "claim-a": {
+            "status": "staged", "predicate": "attr:legal_name",
+            "object_value": "Old name", "source": "test",
+        },
+        "claim-b": {
+            "status": "staged", "predicate": "attr:legal_name",
+            "object_value": "New name", "source": "test",
+        },
+    }
+    entity = {"legal_name": None, "legal_name_claim_id": None}
+    reviews = []
+
+    async def handle(query, params):
+        if "RETURN c{.*} AS c" in query:
+            claim = records[params["id"]]
+            return [{"c": dict(claim), "sid": "ent-1", "oid": None}]
+        if "RETURN a.url AS url" in query:
+            return []
+        if "SET s.legal_name" in query:
+            guarded = (
+                "WHERE s.legal_name_claim_id IS NULL "
+                "OR s.legal_name_claim_id=$cid"
+            ) in query
+            if not guarded or entity["legal_name_claim_id"] in {None, params["cid"]}:
+                entity["legal_name"] = params["v"]
+                entity["legal_name_claim_id"] = params["cid"]
+        if "SET c.status='committed'" in query:
+            records[params["id"]]["status"] = "committed"
+            reviews.append(params["id"])
+        return []
+
+    monkeypatch.setattr(claims.db, "transactional_write", _transaction_runner(handle))
+
+    assert await claims.commit("claim-a") == "committed"
+    assert await claims.commit("claim-b") == "committed"
+    assert await claims.commit("claim-a") == "committed"
+    assert await claims.commit("claim-a", refresh_materialization=True) == "committed"
+    assert entity == {"legal_name": "New name", "legal_name_claim_id": "claim-b"}
+    assert reviews == ["claim-a", "claim-b"]

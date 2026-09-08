@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__, db, events
 from .config import settings
 from .enrichment.worker import worker
-from .readiness import build_readiness
+from .readiness import build_readiness, invalidate_cache
 from .routers.deps import user_id
 from .routers import settings as settings_router
 from .schema import ensure_schema
@@ -41,6 +41,7 @@ _mcp_mount = _MCPMount()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    invalidate_cache()
     try:
         await ensure_schema()
     except Exception as e:  # Neo4j may still be starting; endpoints will report via /api/health
@@ -48,6 +49,7 @@ async def lifespan(app: FastAPI):
     gate.add_listener(chat.manager.broadcast)
     worker.add_listener(chat.manager.broadcast)
     events.add_listener(chat.manager.broadcast)
+    await worker.recover_interrupted()
     worker.start()
     # MCP over streamable HTTP, same handlers (D1). Its session manager has its own lifespan; run it inside ours.
     server = build_server()

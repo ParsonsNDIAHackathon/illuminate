@@ -16,3 +16,15 @@ graph relationship or property written by the competing decision.
 must join the existing claim-scoped transaction. Verify both possible winners
 under real database contention, including final review status and materialized
 fact consistency.
+
+Repeating a terminal analyst/API commit must be a no-op. Connector-driven
+projection refresh is a separate, explicit operation and may update a fact only
+while that projection still identifies the same backing claim.
+
+**Why:** Replaying accepted claim A after a newer conflicting claim B can
+otherwise restore A without a review event, silently reversing the authoritative
+decision history.
+
+**How to apply:** Keep public commit retries idempotent. For ingestion refreshes,
+guard relationship and attribute writes by current claim ownership, and test the
+sequence A commit → B commit → A retry for both normal and refresh paths.

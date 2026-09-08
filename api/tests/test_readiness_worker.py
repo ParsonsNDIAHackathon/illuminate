@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -366,8 +367,9 @@ async def test_readiness_requires_complete_seed_and_caches_per_user(monkeypatch)
     alice = await readiness.build_readiness("alice")
     bob = await readiness.build_readiness("bob")
     assert alice["primary_workflow_ready"] is True
-    assert alice["optional_services"][0]["status"] == "available"
-    assert bob["optional_services"][0]["status"] == "unavailable"
+    assert alice["optional_services"][0]["status"] == "connected"
+    assert alice["optional_services"][0]["queried"] is True
+    assert bob["optional_services"][0]["status"] == "credential-required"
 
 
 async def _result(value):
@@ -438,6 +440,159 @@ async def test_stale_sources_degrade_status_without_disabling_primary_workflow(m
     assert payload["status"] == "degraded"
     assert payload["freshness"]["status"] == "stale"
     assert payload["freshness"]["action"]
+
+
+async def test_readiness_ignores_error_and_fixture_ingestion_for_freshness(monkeypatch):
+    from illuminate import readiness
+    probe = {
+        "status": "ready", "reachable": True, "counts": {"nodes": 3, "relationships": 1},
+        "seed_version": "v1", "seed_status": "complete", "seed_root_id": "root",
+        "seed_completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    seen = []
+
+    async def evidence(query, *args, **kwargs):
+        seen.append(query)
+        # A cached record has no safe live-success timestamp.
+        return [{"source": "gdelt", "nodes": 2, "relationships": 0, "latest": "",
+                 "cached_records": 2}]
+
+    monkeypatch.setattr(readiness, "REGISTRY", [])
+    monkeypatch.setattr(readiness.db, "probe", lambda *args: _result(probe))
+    monkeypatch.setattr(readiness.db, "seed_coverage", lambda *args: _result(
+        {"status": "validated", "root_exists": True, "primes": 1, "subs": 1}))
+    monkeypatch.setattr(readiness.db, "read", evidence)
+    readiness._cache.clear()
+    payload = await readiness.build_readiness(refresh=True)
+    source = payload["source_coverage"][0]
+    assert source["status"] == "stale-fallback"
+    assert source["last_success_at"] is None
+    assert source["cache"] is True
+    assert "NOT n:SourceRecord" in seen[0]
+    assert "retrieval_mode" in seen[0]
+
+
+async def test_readiness_never_treats_missing_retrieval_status_as_live(monkeypatch):
+    from illuminate import readiness
+    probe = {
+        "status": "ready", "reachable": True, "counts": {"nodes": 1, "relationships": 0},
+        "seed_version": "v1", "seed_status": "complete", "seed_root_id": "root",
+        "seed_completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    async def unclassified(*args, **kwargs):
+        return [{"source": "usaspending", "nodes": 1, "relationships": 0,
+                 "latest": "", "cached_records": 0, "unknown_records": 1}]
+
+    monkeypatch.setattr(readiness, "REGISTRY", [])
+    monkeypatch.setattr(readiness.db, "probe", lambda *args: _result(probe))
+    monkeypatch.setattr(readiness.db, "seed_coverage", lambda *args: _result(
+        {"status": "validated", "root_exists": True, "primes": 1, "subs": 1}))
+    monkeypatch.setattr(readiness.db, "read", unclassified)
+    readiness._cache.clear()
+    payload = await readiness.build_readiness(refresh=True)
+    source = payload["source_coverage"][0]
+    assert source["status"] == "unknown"
+    assert source["latest_retrieved_at"] is None
+    assert source["unknown_records"] == 1
+
+
+def test_production_entrypoint_uses_live_recovery_not_fixtures():
+    script = (Path(__file__).parents[2] / "scripts" / "replit-production.sh").read_text()
+    assert "illuminate.seed.seed --bootstrap --skip-enrich" in script
+    assert "--offline --scenario" not in script
+    assert 'h.get("operational_refresh_required", True)' in script
+
+
+def test_development_entrypoint_recovers_and_verifies_retained_credentials():
+    script = (Path(__file__).parents[2] / "scripts" / "replit-dev.sh").read_text()
+    recovery = script.index("write_neo4j_config false")
+    rotate = script.index("ALTER USER neo4j SET PLAINTEXT PASSWORD")
+    verify = script.index("driver.verify_connectivity()", rotate + 1)
+    persist = script.index('mv "$PASSWORD_TMP" "$PASSWORD_FILE"')
+
+    assert recovery < rotate < verify < persist
+    assert "timeout --foreground" in script
+    assert "Old password and new password cannot be the same" in script
+    assert "wait_for_neo4j_http" in script
+    assert "stop_process" in script
+    assert "kill -KILL" in script
+    assert "curl --max-time 2 -sf http://127.0.0.1:8000/api/health" in script
+    assert "API readiness timed out" in script
+
+
+async def test_operational_graph_without_seed_metadata_does_not_require_bootstrap(monkeypatch):
+    from illuminate import readiness
+    now = datetime.now(timezone.utc).isoformat()
+
+    async def live_procurement(*args, **kwargs):
+        query = args[0] if args else ""
+        if ":SUPPLIES" in query:
+            return [{"records": 3, "live_records": 3, "latest": now}]
+        return [{"source": "usaspending", "nodes": 2, "relationships": 3,
+                 "latest": now, "cached_records": 0, "unknown_records": 0}]
+
+    monkeypatch.setattr(readiness, "REGISTRY", [])
+    monkeypatch.setattr(readiness.db, "probe", lambda *args: _result({
+        "status": "ready", "reachable": True, "counts": {"nodes": 4, "relationships": 3},
+    }))
+    monkeypatch.setattr(readiness.db, "read", live_procurement)
+    readiness._cache.clear()
+    payload = await readiness.build_readiness(refresh=True)
+
+    assert payload["primary_workflow_ready"] is False
+    assert payload["operational_live_ready"] is True
+    assert payload["operational_refresh_required"] is False
+    assert payload["operational_coverage"]["live_supplier_paths"] == 3
+
+
+async def test_fresh_award_evidence_without_supplier_path_requires_bootstrap(monkeypatch):
+    from illuminate import readiness
+    now = datetime.now(timezone.utc).isoformat()
+
+    async def award_evidence_only(*args, **kwargs):
+        query = args[0] if args else ""
+        if ":SUPPLIES" in query:
+            return [{"records": 0, "live_records": 0, "latest": ""}]
+        return [{"source": "usaspending", "nodes": 1, "relationships": 2,
+                 "latest": now, "cached_records": 0, "unknown_records": 0}]
+
+    monkeypatch.setattr(readiness, "REGISTRY", [])
+    monkeypatch.setattr(readiness.db, "probe", lambda *args: _result({
+        "status": "ready", "reachable": True, "counts": {"nodes": 3, "relationships": 2},
+    }))
+    monkeypatch.setattr(readiness.db, "read", award_evidence_only)
+    readiness._cache.clear()
+    payload = await readiness.build_readiness(refresh=True)
+
+    assert payload["source_coverage"][0]["status"] == "current"
+    assert payload["operational_live_ready"] is False
+    assert payload["operational_refresh_required"] is True
+    assert payload["operational_coverage"]["supplier_paths"] == 0
+
+
+async def test_complete_offline_scenario_still_requires_operational_refresh(monkeypatch):
+    from illuminate import readiness
+
+    monkeypatch.setattr(readiness, "REGISTRY", [])
+    monkeypatch.setattr(readiness.db, "probe", lambda *args: _result({
+        "status": "ready", "reachable": True, "counts": {"nodes": 20, "relationships": 10},
+        "seed_version": "v1", "seed_status": "complete", "seed_root_id": "root",
+        "seed_completed_at": datetime.now(timezone.utc).isoformat(),
+        "seed_offline": True, "seed_scenario": True,
+    }))
+    monkeypatch.setattr(readiness.db, "seed_coverage", lambda *args: _result({
+        "status": "validated", "root_exists": True, "primes": 2, "subs": 3,
+    }))
+    monkeypatch.setattr(readiness.db, "read", _empty_coverage)
+    readiness._cache.clear()
+    payload = await readiness.build_readiness(refresh=True)
+
+    assert payload["primary_workflow_ready"] is True
+    assert payload["required"]["seed"]["offline"] is True
+    assert payload["required"]["seed"]["scenario"] is True
+    assert payload["operational_live_ready"] is False
+    assert payload["operational_refresh_required"] is True
 async def _health_response(monkeypatch, probe: dict, seeded: bool = False,
                            coverage: dict | None = None) -> dict:
     from illuminate import readiness

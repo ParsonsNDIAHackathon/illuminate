@@ -42,7 +42,6 @@ def test_focused_membership_depth_is_independent_of_local_expansion_depth():
     assert "maxLevel:1, relationshipFilter:'SUPPLIES|OWNS|ULTIMATE_PARENT_OF|" in cypher
     assert params["membership_limit"] > params["limit"]
 
-
 def test_focused_neighbourhood_includes_only_one_hop_of_member_affiliations():
     cypher, _ = TEMPLATES["neighbourhood"].build({
         "entity_id": "ent_prime",
@@ -199,7 +198,10 @@ async def test_seed_entry_completes_without_mutating_workspace_consumer(monkeypa
 
     await seed.main_async(args)
 
-    metadata = next(params for query, params in writes if "SeedMetadata" in query)
+    metadata = next(
+        params for query, params in writes
+        if "SeedMetadata" in query and "m.root_id=$root_id" in query
+    )
     assert metadata["root_id"] == "program-a"
     assert metadata["status"] == "complete"
 
@@ -242,8 +244,6 @@ async def test_focused_neighbourhood_does_not_cross_shared_context_or_foreign_pr
     finally:
         await db.write("MATCH (n) WHERE n.id IN $ids DETACH DELETE n", {"ids": ids})
         await db.close_driver()
-
-
 async def test_focused_local_expansion_can_reach_deeper_program_suppliers():
     await db.close_driver()
     try:

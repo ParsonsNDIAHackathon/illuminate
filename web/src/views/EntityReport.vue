@@ -6,7 +6,7 @@
       <v-chip v-if="rep.identity.simulated" size="x-small" color="warning" variant="tonal">SIMULATED</v-chip>
       <v-chip v-if="rep.entity.flagged" size="x-small" color="error" variant="tonal">flagged</v-chip>
       <v-spacer />
-      <v-btn prepend-icon="mdi-compare-horizontal" :to="`/compare/vendors?left=${encodeURIComponent(props.id)}`">Compare</v-btn>
+      <v-btn prepend-icon="mdi-compare-horizontal" :to="{ path: '/compare/vendors', query: { left: props.id, root_id: reportRoot || undefined } }">Compare</v-btn>
       <v-btn prepend-icon="mdi-graph" @click="openInGraph">Open in graph</v-btn>
       <v-btn prepend-icon="mdi-auto-fix" @click="enrich" :loading="enriching">Enrich</v-btn>
     </div>
@@ -34,11 +34,42 @@
               <div v-if="!rep.news.length" class="text-body-2" style="opacity:.6">No news artifacts. Run enrichment with GDELT to fetch recent coverage.</div>
               <div v-for="n in rep.news" :key="n.id" class="text-body-2 my-1"><a :href="n.url" target="_blank" rel="noopener">{{ n.title }}</a> <span class="text-caption" style="opacity:.7">{{ n.domain }} · {{ n.published_at }}<span v-if="n.sentiment"> · sentiment {{ n.sentiment }}</span></span></div>
             </v-card-text></v-card>
+            <v-card variant="outlined" class="mb-3"><v-card-text>
+              <div class="d-flex align-center ga-2 mb-2"><span class="section">Ownership</span><v-spacer /><span class="text-caption">{{ rep.control.ownership?.length || 0 }} records</span></div>
+              <div v-if="!rep.control.ownership?.length" class="missing-copy">Ownership unavailable. No ownership relationships or claims are on record.</div>
+              <div class="ownership-grid">
+                <article v-for="o in rep.control.ownership || []" :key="o.claim?.id || o.relationship.id" class="ownership-record" :class="{ 'finding-simulated': o.simulated }">
+                  <div class="d-flex align-center flex-wrap ga-2">
+                    <strong><router-link v-if="o.owner.id && o.owner.kind !== 'Person'" :to="`/entities/${o.owner.id}`">{{ o.owner.name }}</router-link><span v-else>{{ o.owner.name }}</span></strong>
+                    <v-chip size="x-small" variant="outlined">{{ ownershipLabel(o.relationship_type) }}</v-chip>
+                    <TruthBadge :value="o.simulated ? 'simulated' : o.truth_status" />
+                    <TruthBadge :value="o.freshness" />
+                  </div>
+                  <dl class="ownership-details">
+                    <dt>Percentage</dt><dd>{{ formatOwnershipPercentage(o.percentage) }}</dd>
+                    <dt>Effective</dt><dd>{{ o.effective_date || 'Unavailable' }}</dd>
+                    <dt>As of</dt><dd>{{ o.as_of_date || 'Unavailable' }}</dd>
+                    <dt>Claim</dt><dd><TruthBadge :value="o.claim?.status || 'unavailable'" /></dd>
+                    <dt>Source</dt><dd>{{ o.claim?.source || 'Unavailable' }}</dd>
+                    <dt>Retrieved</dt><dd>{{ formatDate(o.claim?.retrieved_at) }}</dd>
+                    <dt>Method</dt><dd>{{ o.claim?.method || 'Unavailable' }}</dd>
+                    <dt>Confidence</dt><dd>{{ formatConfidence(o.claim?.confidence) }}</dd>
+                  </dl>
+                  <div v-if="o.simulated" class="simulation-copy">Training scenario only — not verified ownership.</div>
+                  <div class="deep-links">
+                    <v-btn v-if="o.claim?.id" size="x-small" variant="text" prepend-icon="mdi-check-decagram" :to="{ path: '/claims', query: { entity_id: props.id, status: o.claim.status, claim_id: o.claim.id } }">Inspect claim</v-btn>
+                    <span v-else class="evidence-unavailable">No backing claim — unsupported</span>
+                    <v-btn v-for="a in o.artifacts" :key="a.id" size="x-small" variant="text" prepend-icon="mdi-file-document-outline" @click="rawId = a.id">{{ a.title || 'Inspect artifact' }}</v-btn>
+                    <span v-if="o.claim && !o.artifacts.length" class="evidence-unavailable">No backing artifact available</span>
+                  </div>
+                </article>
+              </div>
+            </v-card-text></v-card>
             <v-card variant="outlined"><v-card-text>
               <span class="section">Supply relationships</span>
               <v-table density="compact"><thead><tr><th>Supplies</th><th>Tier</th><th>PSC</th><th>Sole source</th><th>Amount</th><th>Contract</th><th>Source</th></tr></thead>
                 <tbody><template v-for="s in rep.supply.supplies" :key="s.edge_id || s.id + s.contract_ref"><tr><td><router-link :to="`/entities/${s.id}`">{{ s.name }}</router-link></td><td>{{ s.tier }}</td><td>{{ s.psc }}</td><td>{{ formatSoleSource(s.sole_source) }}</td><td>{{ s.amount ? '$' + Number(s.amount).toLocaleString() : '—' }}</td><td>{{ s.contract_ref || '—' }}</td><td><a v-if="s.source_url" :href="s.source_url" target="_blank" rel="noopener">{{ s.source }}</a><span v-else>{{ s.source || 'Unavailable' }}</span></td></tr>
-                  <tr class="lineage-row"><td colspan="7"><div class="lineage"><TruthBadge :value="supplyTruthStatus(s)" /><span>Retrieved {{ formatDate(supplyEvidence(s)?.retrieved_at) }}</span><span>Method {{ supplyEvidence(s)?.method || 'Unavailable' }}</span><span>Rule <span class="mono">{{ supplyFactor(s)?.rule_id || 'Unavailable' }}</span></span><span>Confidence {{ formatConfidence(supplyEvidence(s)?.confidence) }}</span><span>Freshness <TruthBadge :value="supplyFactor(s)?.freshness || 'unavailable'" /></span><span v-if="supplySimulated(s)" class="simulation-copy">Training scenario only — not a real allegation.</span><router-link v-if="supplyEvidence(s)?.claim_id" :to="{ path: '/claims', query: { entity_id: props.id, status: supplyEvidence(s)?.claim_status || 'committed' } }">Review claim</router-link><span v-else>No backing claim available</span></div></td></tr>
+                  <tr class="lineage-row"><td colspan="7"><div class="lineage"><TruthBadge :value="supplyTruthStatus(s)" /><span>Retrieved {{ formatDate(supplyEvidence(s)?.retrieved_at) }}</span><span>Method {{ supplyEvidence(s)?.method || 'Unavailable' }}</span><span>Rule <span class="mono">{{ supplyFactor(s)?.rule_id || 'Unavailable' }}</span></span><span>Confidence {{ formatConfidence(supplyEvidence(s)?.confidence) }}</span><span>Freshness <TruthBadge :value="supplyFactor(s)?.freshness || 'unavailable'" /></span><span v-if="supplySimulated(s)" class="simulation-copy">Training scenario only — not a real allegation.</span><router-link v-if="supplyEvidence(s)?.claim_id" :to="{ path: '/claims', query: { entity_id: props.id, program_id: reportRoot || undefined, status: supplyEvidence(s)?.claim_status || 'committed' } }">Review claim</router-link><span v-else>No backing claim available</span></div></td></tr>
                 </template></tbody></v-table>
             </v-card-text></v-card>
           </v-col>
@@ -89,7 +120,7 @@
           <v-list-subheader>{{ sec[0] }} ({{ rep.affiliations[sec[1]].length }})</v-list-subheader>
           <v-list density="compact" lines="two">
             <v-list-item v-for="t in rep.affiliations[sec[1]]" :key="t.edge_id" :subtitle="`${t.kind === 'agency' ? (t.federal ? 'federal body' : 'government body') : (t.org_types || []).filter((x:string) => x !== 'Organization').join(', ') || 'organization'}${t.from || t.to ? ' · ' + (t.from || '?') + ' – ' + (t.current ? 'present' : t.to || '?') : ''}${t.amount ? ' · $' + Number(t.amount).toLocaleString() : ''}`">
-              <template #title><router-link :to="`/entities/${t.entity_id}`">{{ t.entity }}</router-link><span v-if="!t.outbound" class="text-caption ml-1" style="opacity:.7">(inbound)</span></template>
+              <template #title><router-link :to="{ path: `/entities/${t.entity_id}`, query: { root_id: reportRoot || undefined } }">{{ t.entity }}</router-link><span v-if="!t.outbound" class="text-caption ml-1" style="opacity:.7">(inbound)</span></template>
               <template #append><v-chip v-if="t.flagged" size="x-small" color="error" variant="tonal">Flagged</v-chip><v-chip v-else-if="t.foreign" size="x-small" color="warning" variant="tonal">Foreign · {{ t.incorporated || t.parent_seat }}</v-chip><v-chip v-else-if="t.foreign_hint" size="x-small" color="secondary" variant="tonal">Foreign? (name)</v-chip><a v-if="t.source_url" :href="t.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ t.source }}</a></template>
             </v-list-item>
             <v-list-item v-if="!rep.affiliations[sec[1]].length" subtitle="None on record." />
@@ -110,7 +141,40 @@
                 <span v-if="flag.excluded_truth_statuses?.length" class="text-caption">Excluded: <TruthBadge v-for="state in flag.excluded_truth_statuses" :key="state" :value="state" /></span>
               </div>
             </div>
-            <div class="deep-links mt-2"><v-btn size="small" variant="text" prepend-icon="mdi-check-decagram" :to="{ path: '/claims', query: { entity_id: props.id, status: 'committed' } }">Review claims</v-btn><v-btn size="small" variant="text" prepend-icon="mdi-file-document-multiple" :to="{ path: '/artifacts', query: { entity_id: props.id } }">Inspect artifacts</v-btn></div>
+            <div class="deep-links mt-2"><v-btn size="small" variant="text" prepend-icon="mdi-check-decagram" :to="{ path: '/claims', query: { entity_id: props.id, program_id: reportRoot || undefined, status: 'committed' } }">Review claims</v-btn><v-btn size="small" variant="text" prepend-icon="mdi-file-document-multiple" :to="{ path: '/artifacts', query: { entity_id: props.id, root_id: reportRoot || undefined } }">Inspect artifacts</v-btn></div>
+          </v-card-text>
+        </v-card>
+        <v-card variant="outlined" class="mb-3 decision-card">
+          <v-card-text>
+            <div class="d-flex align-center flex-wrap ga-2">
+              <span class="section">Analyst disposition</span>
+              <v-chip v-if="decisionHistory.current" size="small" color="primary" variant="tonal">{{ labelize(decisionHistory.current.disposition) }}</v-chip>
+              <span v-else class="text-body-2">No human disposition recorded</span>
+              <v-spacer />
+              <v-btn size="small" color="primary" prepend-icon="mdi-account-check-outline" @click="openDecision">{{ decisionHistory.current ? 'Update disposition' : 'Record disposition' }}</v-btn>
+            </div>
+            <p class="decision-boundary">Human advisory action — separate from the deterministic recommendation above and from claim truth.</p>
+            <dl v-if="decisionHistory.current" class="decision-details">
+              <dt>Owner</dt><dd>{{ decisionHistory.current.owner }}</dd>
+              <dt>Due</dt><dd>{{ decisionHistory.current.due_date || 'No due date' }}</dd>
+              <dt>Rationale</dt><dd>{{ decisionHistory.current.rationale }}</dd>
+              <dt>Recorded</dt><dd>{{ formatDate(decisionHistory.current.decided_at) }} by {{ decisionHistory.current.actor }}</dd>
+            </dl>
+            <v-expansion-panels v-if="decisionHistory.events.length" variant="accordion" class="mt-3">
+              <v-expansion-panel>
+                <v-expansion-panel-title>Accountability history · {{ decisionHistory.events.length }} events</v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <div v-for="event in decisionHistory.events" :key="event.id" class="history-event">
+                    <TruthBadge :value="event.simulated ? 'simulated' : event.kind === 'claim_review' ? event.to_status : 'derived'" />
+                    <div>
+                      <b>{{ event.kind === 'claim_review' ? `Claim ${event.to_status}` : labelize(event.disposition) }}</b>
+                      <div>{{ event.rationale || 'No rationale recorded' }}</div>
+                      <small>{{ formatDate(event.decided_at) }} · {{ event.actor }}<span v-if="event.kind === 'analyst_decision'"> · owner {{ event.owner }}</span></small>
+                    </div>
+                  </div>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+            </v-expansion-panels>
           </v-card-text>
         </v-card>
         <div class="factor-grid mb-3">
@@ -120,7 +184,8 @@
               <div v-if="!category.factors.length" class="missing-copy">No approved, non-simulated evidence. This gap is not treated as a clear result.</div>
               <div v-for="factor in category.factors" :key="factor.rule_id" class="factor">
                 <div class="d-flex align-center flex-wrap ga-1"><TruthBadge :value="factor.truth_status || 'derived'" /><TruthBadge v-if="factor.provenance?.simulated" value="simulated" /><b>{{ factor.explanation || labelize(factor.rule_id) }}</b></div>
-                <dl class="provenance-list"><dt>Claim</dt><dd><TruthBadge :value="factor.claim_status || 'unavailable'" /></dd><dt>Source</dt><dd>{{ factor.provenance?.source || factor.evidence?.[0]?.source || 'Unavailable' }}</dd><dt>Retrieved</dt><dd>{{ formatDate(factor.provenance?.retrieved_at || factor.evidence?.[0]?.retrieved_at) }}</dd><dt>Method</dt><dd>{{ factor.provenance?.method || factor.evidence?.[0]?.method || 'Unavailable' }}</dd><dt>Rule</dt><dd class="mono">{{ factor.rule_id }}</dd><dt>Confidence</dt><dd>{{ formatConfidence(factor.confidence) }}</dd><dt>Freshness</dt><dd><TruthBadge :value="factor.freshness || category.freshness" /></dd></dl>
+                <dl class="provenance-list"><dt>Claim</dt><dd><TruthBadge :value="factor.claim_status || 'unavailable'" /></dd><dt>Source</dt><dd>{{ factor.provenance?.source || factor.evidence?.[0]?.source || 'Unavailable' }}</dd><dt>Retrieved</dt><dd>{{ formatDate(factor.provenance?.retrieved_at || factor.evidence?.[0]?.retrieved_at) }}</dd><dt>Method</dt><dd>{{ factor.provenance?.method || factor.evidence?.[0]?.method || 'Unavailable' }}</dd><dt>Rule</dt><dd class="mono">{{ factor.rule_id }}</dd><dt>Confidence</dt><dd>{{ formatConfidence(factor.confidence) }}</dd><dt>Freshness</dt><dd><TruthBadge :value="factor.freshness || category.freshness" /></dd><template v-if="factor.graph_path?.relationship_id"><dt>Graph path</dt><dd class="mono">{{ factor.graph_path.supplier_id || 'supplier' }} → {{ factor.graph_path.relationship_id }} → {{ factor.graph_path.consumer_id || 'consumer' }}</dd></template></dl>
+                <div v-if="factor.evidence?.length" class="deep-links mt-1"><a v-for="evidence in uniqueEvidence(factor.evidence)" :key="evidence.id || evidence.source_url" :href="evidence.source_url" target="_blank" rel="noopener">Review {{ evidence.detail || evidence.id || 'source artifact' }}</a></div>
                 <div v-if="factor.provenance?.simulated || factor.evidence?.some((e:any) => e.simulated)" class="simulation-copy">Training scenario only — excluded from verified scoring and not a real allegation.</div>
               </div>
             </v-card-text>
@@ -148,20 +213,38 @@
       <v-window-item value="artifacts">
         <v-table density="compact"><thead><tr><th>Kind</th><th>Title</th><th>Source</th><th>Date</th><th>View</th></tr></thead>
           <tbody><tr v-for="a in rep.artifacts" :key="a.id" :class="{ 'finding-simulated': a.simulated }"><td>{{ a.kind }} <TruthBadge v-if="a.simulated" value="simulated" /></td><td><SourceLink :href="a.url" :artifact-id="a.id">{{ a.title }}</SourceLink><div v-if="a.simulated" class="simulation-copy">Training scenario only — not a real allegation.</div></td><td>{{ a.source }}</td><td>{{ a.published_at || (a.retrieved_at || '').slice(0, 10) }}</td><td><v-btn icon="mdi-text-box-search-outline" size="x-small" variant="text" title="View contents" @click="rawId = a.id" /></td></tr></tbody></v-table>
-        <ArtifactViewer :artifact-id="rawId" @close="rawId = null" />
         <p v-if="!rep.artifacts.length" class="text-body-2 mt-2" style="opacity:.6">No artifacts attached yet.</p>
       </v-window-item>
       <v-window-item value="graph">
         <div style="height: 60vh; position: relative"><GraphCanvas /></div>
       </v-window-item>
     </v-window>
+    <v-dialog v-model="decisionDialog" max-width="640">
+      <v-card>
+        <v-card-title>Record analyst disposition</v-card-title>
+        <v-card-text>
+          <v-alert type="info" variant="tonal" density="compact" class="mb-3">This records a human advisory action. It does not alter risk scoring, claim truth, eligibility, or award decisions.</v-alert>
+          <v-select v-model="decisionForm.disposition" label="Disposition" :items="decisionOptions" item-title="title" item-value="value" />
+          <v-select v-model="decisionForm.finding_ids" label="Finding scope" :items="decisionFindingOptions" item-title="title" item-value="value" multiple chips hint="Choose the findings or evidence gaps this action addresses." persistent-hint />
+          <v-text-field v-model="decisionForm.owner" label="Owner" maxlength="120" />
+          <v-text-field v-model="decisionForm.due_date" label="Due date (optional)" type="date" />
+          <v-textarea v-model="decisionForm.rationale" label="Rationale" maxlength="2000" counter rows="4" />
+          <v-alert v-if="decisionError" type="error" density="compact">{{ decisionError }}</v-alert>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer /><v-btn @click="decisionDialog = false">Cancel</v-btn>
+          <v-btn color="primary" :loading="decisionSaving" :disabled="!decisionForm.finding_ids.length || !decisionForm.owner.trim() || decisionForm.rationale.trim().length < 3" @click="saveDecision">Record event</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+    <ArtifactViewer :artifact-id="rawId" @close="rawId = null" />
   </v-container>
   <v-container v-else><v-progress-linear indeterminate /></v-container>
 </template>
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, getVendorRiskProfile, qs, type VendorRiskProfile } from '../api/client'
+import { api, getVendorRiskProfile, qs, supportedDecisionEvidenceRefs, type AnalystDecisionInput, type DecisionHistory, type VendorRiskProfile } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
 import ArtifactViewer from '../components/ArtifactViewer.vue'
 import SourceLink from '../components/SourceLink.vue'
@@ -170,18 +253,54 @@ import { useGraph } from '../stores/graph'
 const rawId = ref<string | null>(null)
 import { useJobs } from '../stores/jobs'
 import { useWorkspace } from '../stores/workspace'
+import { LatestRequest } from '../lib/latestRequest'
 const props = defineProps<{ id: string }>()
 const router = useRouter(); const route = useRoute(); const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace()
+const reportRoot = computed(() => String(route.query.root_id || graph.focusId || ''))
 const requestedTab = String(route.query.tab || '')
 const tab = ref(requestedTab === 'evidence' ? 'artifacts' : requestedTab || 'overview')
 const rep = ref<any>(null); const enriching = ref(false); const regen_busy = ref(false)
 const riskProfile = ref<VendorRiskProfile | null>(null)
+const decisionHistory = ref<DecisionHistory>({ current: null, events: [] })
+const decisionDialog = ref(false); const decisionSaving = ref(false); const decisionError = ref('')
+const reportRequest = new LatestRequest()
+const decisionOptions = [
+  { title: 'Investigate', value: 'investigate' },
+  { title: 'Monitor', value: 'monitor' },
+  { title: 'Seek an alternate source', value: 'seek_alternate_source' },
+  { title: 'Accept with rationale', value: 'accept_with_rationale' },
+  { title: 'Close with no action', value: 'close_no_action' },
+]
+const decisionFindingOptions = computed(() => (riskProfile.value?.categories || []).flatMap(category =>
+  category.factors.length
+    ? category.factors.map(factor => ({
+        title: `${category.label || labelize(category.id)} — ${factor.explanation || labelize(factor.rule_id)}`,
+        value: `finding:risk:${factor.rule_id}`,
+        evidenceRefs: factor.evidence_refs,
+      }))
+    : [{
+        title: `${category.label || labelize(category.id)} — evidence gap`,
+        value: `finding:risk:${category.id}:evidence_gap`,
+        evidenceRefs: [] as string[],
+      }],
+))
+const decisionForm = ref<AnalystDecisionInput>({ disposition: 'investigate', rationale: '', owner: 'Supply Risk Team', due_date: null, program_id: null, finding_ids: [], evidence_refs: [], expected_version: 0 })
 const selectedFinding = ref<string | null>(null)
 const activeFinding = computed(() => rep.value?.risk?.indicators?.find((i: any) => i.family === selectedFinding.value) || null)
 async function load() {
-  const report = await api.get(`/api/entities/${props.id}/report?${qs({ root_id: graph.focusId })}`)
+  const generation = reportRequest.begin()
+  const entityId = props.id
+  const rootId = reportRoot.value
+  rep.value = null
+  riskProfile.value = null
+  decisionHistory.value = { current: null, events: [] }
+  decisionDialog.value = false
+  const report = await api.get(`/api/entities/${entityId}/report?${qs({ root_id: rootId })}`)
+  const profile = await getVendorRiskProfile(entityId, report)
+  if (!reportRequest.isCurrent(generation)) return
   rep.value = report
-  riskProfile.value = await getVendorRiskProfile(props.id, report)
+  decisionHistory.value = report.analyst_decisions || { current: null, events: [] }
+  riskProfile.value = profile
 }
 const coveredCategories = computed(() => riskProfile.value?.categories.filter(category => category.factors.length > 0).length || 0)
 const recommendationLabel = computed(() => labelize(riskProfile.value?.disposition || 'Complete diligence'))
@@ -189,7 +308,12 @@ function labelize(value: string) { return value.replaceAll('_', ' ').replaceAll(
 function formatDate(value?: string) { return value ? new Date(value).toLocaleString() : 'Unavailable' }
 function formatConfidence(value?: number | null) { return value == null ? 'Unavailable' : `${Math.round(value * 100)}%` }
 function formatPercent(value?: number | null) { return value == null ? 'Unavailable' : `${Math.round(value * 100)}%` }
+function uniqueEvidence(evidence: any[]) {
+  return [...new Map(evidence.filter(item => item?.source_url).map(item => [item.id || item.source_url, item])).values()]
+}
 function formatSoleSource(value: unknown) { return value === true ? 'yes' : value === false ? 'no' : 'Unavailable' }
+function ownershipLabel(value: string) { return ({ direct: 'Direct owner', ultimate_parent: 'Ultimate parent', beneficial_owner: 'Beneficial owner' } as Record<string, string>)[value] || labelize(value) }
+function formatOwnershipPercentage(value?: number | null) { return value == null ? 'Unavailable' : `${Number(value).toLocaleString()}%` }
 function supplyEvidence(s: any) {
   if (!s.edge_id) return undefined
   return rep.value?.supply?.risk_evidence?.find((e: any) => e.evidence_id === s.edge_id)
@@ -213,14 +337,52 @@ function sevIcon(s: string | null) { return s === 'high' ? 'mdi-alert-octagon' :
 function sevColor(s: string | null) { return s === 'high' ? 'error' : s === 'medium' ? 'warning' : s === 'low' ? 'secondary' : s === 'clear' ? 'success' : undefined }
 async function enrich() { enriching.value = true; try { await jobs.enqueue(props.id) } finally { enriching.value = false } }
 async function regen() { regen_busy.value = true; try { await api.post(`/api/entities/${props.id}/summary`); await load() } catch (e: any) { alert(e.message) } finally { regen_busy.value = false } }
-async function openInGraph() { await graph.loadNeighbourhood(props.id, 2, ws.ws.layers); graph.select(props.id); router.push({ name: 'graph' }) }
+async function loadReportGraph() {
+  if (reportRoot.value && graph.focusId !== reportRoot.value) await graph.focus(reportRoot.value, null, 2, ws.ws.layers)
+  await graph.loadNeighbourhood(props.id, 2, { ...ws.ws.layers, people: true, countries: true }, true)
+  graph.select(props.id)
+}
+async function openInGraph() {
+  await loadReportGraph()
+  router.push({ name: 'graph', query: { root_id: reportRoot.value || undefined } })
+}
 function traceFinding(i: any) {
   const ids = [...new Set((i.element_ids || []).filter(Boolean))].sort()
-  router.push({ name: 'graph', query: { vendor: props.id, focus: ids.join(','), finding: i.label, family: i.family, evidence: i.source_url || undefined } })
+  router.push({ name: 'graph', query: { root_id: reportRoot.value || undefined, vendor: props.id, focus: ids.join(','), finding: i.label, family: i.family, evidence: i.source_url || undefined } })
 }
-watch(tab, async (t) => { if (t === 'graph') { await graph.loadNeighbourhood(props.id, 2, { ...ws.ws.layers, people: true, countries: true }, true); graph.select(props.id) } })
+function openDecision() {
+  const current = decisionHistory.value.current
+  decisionForm.value = {
+    disposition: current?.disposition || 'investigate',
+    rationale: '',
+    owner: current?.owner || 'Supply Risk Team',
+    due_date: current?.due_date || null,
+    program_id: reportRoot.value || null,
+    finding_ids: current?.finding_ids || [],
+    evidence_refs: current?.evidence_refs || [],
+    expected_version: current?.version || 0,
+  }
+  decisionError.value = ''
+  decisionDialog.value = true
+}
+async function saveDecision() {
+  decisionSaving.value = true; decisionError.value = ''
+  try {
+    decisionForm.value.evidence_refs = supportedDecisionEvidenceRefs(
+      decisionFindingOptions.value
+        .filter(option => decisionForm.value.finding_ids.includes(option.value))
+        .flatMap(option => option.evidenceRefs),
+    )
+    await api.post(`/api/claims/entities/${encodeURIComponent(props.id)}/decisions`, decisionForm.value)
+    decisionDialog.value = false
+    await load()
+  } catch (error: any) {
+    decisionError.value = error.message
+  } finally { decisionSaving.value = false }
+}
+watch(tab, async (t) => { if (t === 'graph') await loadReportGraph() })
 watch(() => jobs.jobs.filter(j => j.entity_id === props.id && ['succeeded', 'empty', 'partial', 'failed', 'timed_out'].includes(j.status)).length, load)
-onMounted(load); watch(() => props.id, load)
+watch([() => props.id, reportRoot], load, { immediate: true })
 </script>
 <style scoped>
 .section { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; }
@@ -244,7 +406,15 @@ dt { opacity: .6; } dd { margin: 0; }
 .gap-row { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 6px; font-size: 12px; }
 .gap-row .v-chip { margin-left: 3px; }
 .deep-links { display: flex; flex-wrap: wrap; }
+.ownership-grid { display: grid; gap: 10px; }
+.ownership-record { min-width: 0; padding: 10px; border: thin solid rgba(0,0,0,.12); border-radius: 5px; }
+.ownership-details { grid-template-columns: 90px minmax(0, 1fr); }
 .mono { font-family: ui-monospace, monospace; }
+.decision-boundary { margin-top: 8px; opacity: .72; font-size: 12px; }
+.decision-details { grid-template-columns: 80px 1fr; }
+.history-event { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 0; border-bottom: thin solid rgba(0,0,0,.12); font-size: 12px; }
+.history-event:last-child { border-bottom: 0; }
+.history-event small { opacity: .65; }
 @media (max-width: 767px) {
   .report > .d-flex:first-child { flex-wrap: wrap; }
   .report > .d-flex:first-child h2 { flex: 1 1 calc(100% - 60px); overflow-wrap: anywhere; }

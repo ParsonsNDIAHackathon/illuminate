@@ -57,6 +57,8 @@ class Connector:
     key_note: str | None = None
     diagnostic_url: str | None = None
     diagnostic_params: dict[str, Any] = {}
+    diagnostic_max_bytes: int = 4096
+    diagnostic_auth_statuses: tuple[int, ...] = (401, 403)
     # Entity kinds this source can say anything about. A registry, sanctions list or
     # officer database speaks about companies; screening a *program* name against the
     # SDN list only manufactures noise, so the default excludes them.
@@ -91,14 +93,30 @@ class Connector:
             name: (key if value == "$credential" else value)
             for name, value in self.diagnostic_params.items()
         }
-        await probe_source(self.diagnostic_url, params=params or None, timeout=8, max_bytes=4096)
+        try:
+            response = await probe_source(
+                self.diagnostic_url,
+                params=params or None,
+                timeout=8,
+                max_bytes=self.diagnostic_max_bytes,
+            )
+        except Exception as error:
+            status = getattr(error, "status", None)
+            if self.key_name and status in self.diagnostic_auth_statuses:
+                raise DiagnosticAuthenticationError from None
+            raise
+        self.validate_diagnostic(response)
         return {"ok": True, "status": "available", "detail": "Source is available"}
+
+    def validate_diagnostic(self, response: Any) -> None:
+        """Validate provider-specific success payloads. Keyless sources need no validation."""
 
     def to_dict(self) -> dict:
         # Local import avoids coupling connector implementations to the registry
         # while still exposing stable lineage metadata at the API boundary.
         from .registry import source_metadata
         return {"name": self.name, "label": self.label, "description": self.description, "trust": self.trust,
+                "kinds": list(self.kinds),
                 "key_name": self.key_name, "key_url": self.key_url, "key_note": self.key_note,
                 **source_metadata(self.name)}
 
@@ -113,3 +131,7 @@ _DIAGNOSTIC_DETAILS: dict[str, str] = {
 
 def diagnostic_failure(category: DiagnosticCategory) -> dict:
     return {"ok": False, "status": category, "detail": _DIAGNOSTIC_DETAILS[category]}
+
+class DiagnosticAuthenticationError(Exception):
+    """Provider accepted the request but rejected its credential."""
+    status_code = 401

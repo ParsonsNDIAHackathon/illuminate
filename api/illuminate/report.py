@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from . import db
 
@@ -135,7 +136,9 @@ async def entity_core(entity_id: str) -> dict | None:
         RETURN collect({
           id:coalesce(ps.id, elementId(ps)), claim_id:ps.claim_id,
           source:ps.source, source_url:ps.source_url,
-          retrieved_at:ps.retrieved_at, confidence:ps.confidence,
+          retrieved_at:coalesce(ps.latest_retrieved_at,ps.retrieved_at),
+          first_retrieved_at:ps.retrieved_at, latest_retrieved_at:ps.latest_retrieved_at,
+          confidence:ps.confidence,
           status:ps.status, simulated:coalesce(ps.simulated,false),
           seat_code:seat.code, seat_simulated:coalesce(seat.simulated,false),
           claim_status:pc.status, claim_method:pc.method, claim_simulated:coalesce(pc.simulated,false),
@@ -152,9 +155,27 @@ async def entity_core(entity_id: str) -> dict | None:
     r["parent_seat_evidence"] = [
         x for x in (ownership[0].get("evidence") if ownership else []) if x.get("id")
     ]
+    r["ownership"] = await ownership_records(entity_id)
     return r
 
 
+OWNERSHIP_TYPES = {
+    "OWNS": "direct",
+    "ULTIMATE_PARENT_OF": "ultimate_parent",
+    "BENEFICIAL_OWNER_OF": "beneficial_owner",
+}
+
+
+def _ownership_freshness(retrieved_at: str | None) -> str:
+    if not retrieved_at:
+        return "unavailable"
+    try:
+        observed = datetime.fromisoformat(retrieved_at.replace("Z", "+00:00"))
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return "unavailable"
+    return "stale" if (datetime.now(timezone.utc) - observed).days > 365 else "current"
 async def supply_position(entity_id: str, root_id: str | None) -> dict:
     out: dict = {"supplies": [], "suppliers_count": 0, "tier_from_root": None, "sole_source_edges": 0}
     rows = await db.read(
@@ -171,7 +192,9 @@ async def supply_position(entity_id: str, root_id: str | None) -> dict:
                 s.connector_error_type AS connector_error_type,
                 s.connector_error_status AS connector_error_status,
                 coalesce(s.id, elementId(s)) AS evidence_id, s.claim_id AS claim_id, s.status AS status,
-                s.retrieved_at AS retrieved_at, s.confidence AS confidence,
+                 coalesce(s.latest_retrieved_at,s.retrieved_at) AS retrieved_at,
+                 s.retrieved_at AS first_retrieved_at,
+                 s.latest_retrieved_at AS latest_retrieved_at, s.confidence AS confidence,
                 coalesce(s.simulated,false) OR coalesce(c.simulated,false) AS simulated
         ORDER BY coalesce(s.amount, 0) DESC LIMIT 50
         """,
@@ -185,18 +208,43 @@ async def supply_position(entity_id: str, root_id: str | None) -> dict:
         WITH e, s, c, sc ORDER BY coalesce(s.id, elementId(s))
         RETURN collect({
           sole_source:s.sole_source, contract_ref:s.contract_ref,
-          source:s.source, source_id:s.source_id, source_identifier:s.source_identifier,
+          supplier_id:e.id, consumer_id:c.id,
+          source:sc.source, source_id:s.source_id, source_identifier:s.source_identifier,
           catalog_ids:s.catalog_ids, source_url:s.source_url,
           usage_note:s.usage_note, quality_note:s.quality_note,
           supports:s.supports, unknowns:s.unknowns, source_status:s.source_status,
           connector_error:s.connector_error, connector_error_type:s.connector_error_type,
           connector_error_status:s.connector_error_status,
           evidence_id:coalesce(s.id, elementId(s)), claim_id:s.claim_id,
-          status:s.status, retrieved_at:s.retrieved_at, confidence:s.confidence,
-          method:coalesce(sc.method,s.method),
+          status:s.status, relationship_retrieved_at:coalesce(s.latest_retrieved_at,s.retrieved_at),
+          retrieved_at:coalesce(sc.latest_retrieved_at,sc.retrieved_at),
+          first_retrieved_at:sc.retrieved_at, latest_retrieved_at:sc.latest_retrieved_at,
+          confidence:sc.confidence, method:sc.method,
           simulated:coalesce(s.simulated,false),
           entity_simulated:coalesce(e.simulated,false) OR coalesce(c.simulated,false),
           claim_status:sc.status, claim_simulated:coalesce(sc.simulated,false),
+          claim_predicate:sc.predicate, claim_object_value:sc.object_value,
+          claim_source_url:sc.source_url,
+          claim_subject_id:head([(sc)-[:ASSERTS]->(claim_subject) | claim_subject.id]),
+          claim_target_id:head([(sc)-[:TARGETS]->(claim_target) | claim_target.id]),
+          claim_conflicting:CASE WHEN sc IS NULL THEN false ELSE EXISTS {
+            MATCH (other:Claim {predicate:'supply_sole_source'})-[:ASSERTS]->(e)
+            MATCH (other)-[:TARGETS]->(c)
+            WHERE other.id <> sc.id AND other.status='committed'
+              AND coalesce(other.simulated,false)=false
+              AND other.object_value <> sc.object_value
+          } END,
+          artifacts:CASE WHEN sc IS NULL THEN [] ELSE
+            [(sa:Artifact)-[se:EVIDENCES]->(sc) | {
+              id:sa.id, kind:sa.kind, title:sa.title, url:sa.url, award_id:sa.award_id,
+              source:sa.source,
+              retrieved_at:coalesce(sa.latest_retrieved_at,sa.retrieved_at),
+              first_retrieved_at:sa.retrieved_at, latest_retrieved_at:sa.latest_retrieved_at,
+              evidence_retrieved_at:coalesce(se.latest_retrieved_at,se.retrieved_at),
+              method:se.method, confidence:se.confidence,
+              simulated:coalesce(sa.simulated,false),
+              evidence_simulated:coalesce(se.simulated,false)
+            }] END,
           artifact_simulated:CASE WHEN sc IS NULL THEN false ELSE EXISTS {
             MATCH (sa:Artifact)-[:EVIDENCES]->(sc) WHERE coalesce(sa.simulated,false)
           } END,
@@ -254,7 +302,9 @@ async def people(entity_id: str) -> dict:
             source_id:coalesce(r2.source_id,rc2.source_id),
             source_identifier:coalesce(r2.source_identifier,rc2.source_identifier),
             catalog_ids:coalesce(r2.catalog_ids,rc2.catalog_ids),
-            retrieved_at:coalesce(r2.retrieved_at,rc2.retrieved_at),
+            retrieved_at:coalesce(r2.latest_retrieved_at,rc2.latest_retrieved_at,r2.retrieved_at,rc2.retrieved_at),
+            first_retrieved_at:coalesce(r2.retrieved_at,rc2.retrieved_at),
+            latest_retrieved_at:coalesce(r2.latest_retrieved_at,rc2.latest_retrieved_at),
             usage_note:coalesce(r2.usage_note,rc2.usage_note),
             quality_note:coalesce(r2.quality_note,rc2.quality_note),
             supports:coalesce(r2.supports,rc2.supports),
@@ -271,7 +321,9 @@ async def people(entity_id: str) -> dict:
                coalesce(r.source_identifier,rc.source_identifier) AS source_identifier,
                coalesce(r.catalog_ids,rc.catalog_ids) AS catalog_ids,
                coalesce(r.source_url,head([(ra:Artifact)-[:EVIDENCES]->(rc) | ra.url])) AS source_url,
-               coalesce(r.retrieved_at,rc.retrieved_at) AS retrieved_at,
+               coalesce(r.latest_retrieved_at,rc.latest_retrieved_at,r.retrieved_at,rc.retrieved_at) AS retrieved_at,
+               coalesce(r.retrieved_at,rc.retrieved_at) AS first_retrieved_at,
+               coalesce(r.latest_retrieved_at,rc.latest_retrieved_at) AS latest_retrieved_at,
                coalesce(r.usage_note,rc.usage_note) AS usage_note,
                coalesce(r.quality_note,rc.quality_note) AS quality_note,
                coalesce(r.supports,rc.supports) AS supports,
@@ -317,7 +369,6 @@ async def people(entity_id: str) -> dict:
         r["former_government"] = bool(r["current"]) and any(not x["current"] for x in gov)
     seats = await db.read("MATCH (e:Entity {id:$id}) RETURN e.board_size AS n", {"id": entity_id})
     return {"current": current, "former": former, "board_size": seats[0]["n"] if seats else None, "resolved_current_count": len(current)}
-
 
 # Country and nationality tokens that suggest a counterparty is foreign when no jurisdiction is
 # resolved for it. A hint only: it feeds a "low" indicator that says so, never a finding.
@@ -382,11 +433,15 @@ async def screens(entity_id: str) -> list[dict]:
         WHERE c.predicate ENDS WITH '_screen'
         OPTIONAL MATCH (a:Artifact)-[evidences:EVIDENCES]->(c)
         WITH c, asserts, collect(DISTINCT a{.id,.title,.url,.source,.source_id,.source_identifier,
-          .catalog_ids,.retrieved_at,.usage_note,.quality_note,.supports,.unknowns,.source_status,
+          .catalog_ids,.retrieved_at,.latest_retrieved_at,.as_of,.latest_as_of,
+          .usage_note,.quality_note,.supports,.unknowns,.source_status,
           .connector_error,.connector_error_type,.connector_error_status,.simulated,
           evidence_edge_id:evidences.id, evidence_source:evidences.source,
           evidence_source_id:evidences.source_id, evidence_source_identifier:evidences.source_identifier,
-          evidence_catalog_ids:evidences.catalog_ids, evidence_retrieved_at:evidences.retrieved_at,
+           evidence_catalog_ids:evidences.catalog_ids,
+           evidence_retrieved_at:coalesce(evidences.latest_retrieved_at,evidences.retrieved_at),
+           evidence_first_retrieved_at:evidences.retrieved_at,
+           evidence_latest_retrieved_at:evidences.latest_retrieved_at,
           evidence_usage_note:evidences.usage_note, evidence_quality_note:evidences.quality_note,
           evidence_supports:evidences.supports, evidence_unknowns:evidences.unknowns,
           evidence_source_status:evidences.source_status,
@@ -394,7 +449,7 @@ async def screens(entity_id: str) -> list[dict]:
           evidence_connector_error_type:evidences.connector_error_type,
           evidence_connector_error_status:evidences.connector_error_status,
           evidence_simulated:coalesce(evidences.simulated,false)}) AS artifacts
-        ORDER BY c.retrieved_at DESC, c.id
+        ORDER BY coalesce(c.latest_retrieved_at,c.retrieved_at) DESC, c.id
         RETURN collect({
           claim_id:c.id, predicate:c.predicate, result:c.object_value, source:c.source, method:c.method,
           source_id:c.source_id, source_identifier:c.source_identifier, catalog_ids:c.catalog_ids,
@@ -404,7 +459,9 @@ async def screens(entity_id: str) -> list[dict]:
           connector_error_status:c.connector_error_status,
           confidence:c.confidence, status:c.status, asserts_edge_id:asserts.id,
           simulated:coalesce(c.simulated,false) OR coalesce(asserts.simulated,false),
-          retrieved_at:c.retrieved_at, artifacts:artifacts, detail:c.detail
+          retrieved_at:coalesce(c.latest_retrieved_at,c.retrieved_at),
+          first_retrieved_at:c.retrieved_at, latest_retrieved_at:c.latest_retrieved_at,
+          as_of:coalesce(c.latest_as_of,c.as_of), artifacts:artifacts, detail:c.detail
         }) AS screens
         """,
         {"id": entity_id},
@@ -435,7 +492,8 @@ def _factor_freshness(value: str | None, max_age_days: int, as_of: date) -> str:
         return "unavailable"
     return "stale" if (as_of - retrieved).days > max_age_days else "current"
 
-
+def _retrieval_time(item: dict) -> str | None:
+    return item.get("latest_retrieved_at") or item.get("retrieved_at")
 def _severity(value: str | None) -> str | None:
     value = (value or "").lower()
     if value in SEVERITY_WEIGHT:
@@ -471,11 +529,84 @@ def _eligible_graph_fact(fact: dict, *nodes: dict) -> bool:
     elif (
         fact.get("status") not in (None, "committed")
         or not fact.get("source")
-        or not fact.get("retrieved_at")
+        or not _retrieval_time(fact)
         or fact.get("confidence") is None
     ):
         return False
     return True
+
+
+def _safe_https_url(value: object) -> bool:
+    try:
+        parsed = urlparse(str(value or ""))
+    except ValueError:
+        return False
+    return bool(
+        parsed.scheme == "https"
+        and parsed.hostname
+        and not parsed.username
+        and not parsed.password
+    )
+
+
+def _canonical_usaspending_award_url(value: object) -> bool:
+    if not _safe_https_url(value):
+        return False
+    parsed = urlparse(str(value))
+    path_parts = [part for part in parsed.path.split("/") if part]
+    return bool(
+        parsed.hostname == "www.usaspending.gov"
+        and len(path_parts) == 2
+        and path_parts[0] == "award"
+        and path_parts[1].startswith("CONT_AWD_")
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
+def _eligible_supply_artifacts(fact: dict, max_age_days: int, as_of: date) -> list[dict]:
+    source_url = fact.get("source_url")
+    if not _canonical_usaspending_award_url(source_url):
+        return []
+    return sorted([
+        artifact for artifact in fact.get("artifacts", [])
+        if artifact.get("id")
+        and artifact.get("kind") == "award"
+        and artifact.get("url") == source_url
+        and _canonical_usaspending_award_url(artifact.get("url"))
+        and artifact.get("award_id") == fact.get("contract_ref")
+        and artifact.get("source") == "USAspending"
+        and artifact.get("method")
+        and artifact.get("confidence") is not None
+        and not artifact.get("simulated")
+        and not artifact.get("evidence_simulated")
+        and _factor_freshness(artifact.get("retrieved_at"), max_age_days, as_of) == "current"
+        and _factor_freshness(artifact.get("evidence_retrieved_at"), max_age_days, as_of) == "current"
+    ], key=lambda artifact: str(artifact["id"]))
+
+
+def _eligible_supply_fact(fact: dict, entity: dict, max_age_days: int, as_of: date) -> bool:
+    return bool(
+        fact.get("evidence_id")
+        and fact.get("status") == "committed"
+        and fact.get("claim_id")
+        and fact.get("claim_status") == "committed"
+        and fact.get("claim_predicate") == "supply_sole_source"
+        and fact.get("claim_subject_id") == fact.get("supplier_id")
+        and fact.get("claim_target_id") == fact.get("consumer_id")
+        and isinstance(fact.get("sole_source"), bool)
+        and isinstance(fact.get("claim_object_value"), bool)
+        and fact["claim_object_value"] == fact["sole_source"]
+        and not fact.get("claim_conflicting")
+        and fact.get("source") == "USAspending"
+        and fact.get("method")
+        and fact.get("confidence") is not None
+        and fact.get("claim_source_url") == fact.get("source_url")
+        and _factor_freshness(_retrieval_time(fact), max_age_days, as_of) == "current"
+        and _eligible_supply_artifacts(fact, max_age_days, as_of)
+        and _eligible_graph_fact(fact, entity)
+    )
+
 
 def _screen_artifacts(item: dict) -> list[dict]:
     evidence = [a for a in item.get("artifacts", []) if a]
@@ -505,6 +636,7 @@ def evaluate_risk_contract(
 
     for category, spec in RISK_CATEGORIES.items():
         candidates = [s for s in screens_data if s.get("predicate") in spec["predicates"]]
+        eligible_supply: list[dict] = []
         approved = [
             s for s in candidates
             if s.get("status") == "committed"
@@ -512,7 +644,7 @@ def evaluate_risk_contract(
             and not core.get("e", {}).get("simulated")
             and _severity(s.get("result")) is not None
         ]
-        approved.sort(key=lambda s: str(s.get("retrieved_at") or ""), reverse=True)
+        approved.sort(key=lambda s: str(_retrieval_time(s) or ""), reverse=True)
         factors: list[dict] = []
 
         # Ownership and supply criticality can also be established by approved graph facts.
@@ -527,10 +659,10 @@ def evaluate_risk_contract(
                 factors.append({"rule_id": "ownership.foreign-parent.v1", "severity": severity,
                                 "evidence_refs": refs, "truth_status": "committed",
                                  "claim_status": evidence.get("claim_status") if evidence.get("claim_id") else None,
-                                 "freshness": _factor_freshness(evidence.get("retrieved_at"), spec["max_age_days"], as_of),
+                                 "freshness": _factor_freshness(_retrieval_time(evidence), spec["max_age_days"], as_of),
                                 "provenance": {
                                     "source": evidence.get("source") or "graph",
-                                    "retrieved_at": evidence.get("retrieved_at"),
+                                    "retrieved_at": _retrieval_time(evidence),
                                      "confidence": _confidence(evidence.get("confidence"), default=0.0),
                                      "method": evidence.get("claim_method"),
                                 },
@@ -538,19 +670,25 @@ def evaluate_risk_contract(
         elif category == "supply_criticality" and supply.get("risk_evidence"):
             eligible_supply = [
                 s for s in supply["risk_evidence"]
-                if s.get("evidence_id")
-                and isinstance(s.get("sole_source"), bool)
-                and _eligible_graph_fact(s, core.get("e", {}))
+                if _eligible_supply_fact(s, core.get("e", {}), spec["max_age_days"], as_of)
             ]
             for ref in eligible_supply:
                 severity = "medium" if ref["sole_source"] else "clear"
-                refs = [str(x) for x in (ref.get("claim_id"), ref.get("evidence_id")) if x]
+                eligible_artifacts = _eligible_supply_artifacts(ref, spec["max_age_days"], as_of)
+                artifact_refs = [str(a["id"]) for a in eligible_artifacts]
+                refs = [str(ref["claim_id"]), *artifact_refs, str(ref["evidence_id"])]
                 factors.append({"rule_id": "supply.sole-source.v1", "severity": severity,
                                 "evidence_refs": refs, "truth_status": "committed",
-                                 "claim_status": ref.get("claim_status") if ref.get("claim_id") else None,
-                                 "freshness": _factor_freshness(ref.get("retrieved_at"), spec["max_age_days"], as_of),
+                                 "claim_status": ref.get("claim_status"),
+                                 "artifacts": eligible_artifacts,
+                                 "graph_path": {
+                                     "relationship_id": str(ref["evidence_id"]),
+                                     "supplier_id": ref.get("supplier_id"),
+                                     "consumer_id": ref.get("consumer_id"),
+                                 },
+                                 "freshness": _factor_freshness(_retrieval_time(ref), spec["max_age_days"], as_of),
                                 "provenance": {"source": ref.get("source") or "graph",
-                                               "retrieved_at": ref.get("retrieved_at"),
+                                               "retrieved_at": _retrieval_time(ref),
                                                "confidence": _confidence(ref.get("confidence"), default=0.0),
                                                "method": ref.get("method")},
                                 "explanation": "A sole-source supply relationship exists." if ref["sole_source"] else "The supply relationship is explicitly recorded as non-sole-source."})
@@ -567,8 +705,8 @@ def evaluate_risk_contract(
                 "evidence_refs": refs or [f"claim:{item.get('predicate')}"],
                 "truth_status": "committed",
                 "claim_status": item.get("status"),
-                "freshness": _factor_freshness(item.get("retrieved_at"), spec["max_age_days"], as_of),
-                "provenance": {"source": item.get("source"), "retrieved_at": item.get("retrieved_at"),
+                "freshness": _factor_freshness(_retrieval_time(item), spec["max_age_days"], as_of),
+                "provenance": {"source": item.get("source"), "retrieved_at": _retrieval_time(item),
                                "confidence": _confidence(item.get("confidence"), default=0.0),
                                "method": item.get("method")},
                 "explanation": item.get("detail") or f"{item.get('predicate')} returned {item.get('result')}.",
@@ -596,14 +734,29 @@ def evaluate_risk_contract(
                                   "message": f"{category} evidence freshness is {freshness}."})
         else:
             severity, contribution, freshness, category_confidence = None, 0.0, "missing", 0.0
-            excluded = sorted({str(s.get("status") or "unknown") for s in candidates if s not in approved})
+            excluded_items = [s for s in candidates if s not in approved]
+            if category == "supply_criticality":
+                excluded_items += [
+                    {
+                        **s,
+                        "status": (
+                            "stale" if _factor_freshness(_retrieval_time(s), spec["max_age_days"], as_of) == "stale"
+                            else s.get("claim_status") or ("claimless" if not s.get("claim_id") else "missing_artifact")
+                        ),
+                        "simulated": _graph_fact_simulated(s),
+                        "claim_id": s.get("claim_id"),
+                    }
+                    for s in supply.get("risk_evidence", [])
+                    if s not in eligible_supply
+                ]
+            excluded = sorted({str(s.get("status") or "unknown") for s in excluded_items})
             diligence.append({"category": category, "code": "missing_approved_evidence",
                               "excluded_truth_statuses": excluded,
                               "excluded_evidence": [{
-                                  "evidence_ref": s.get("claim_id") or f"claim:{s.get('predicate')}",
+                                  "evidence_ref": s.get("claim_id") or s.get("evidence_id") or f"claim:{s.get('predicate')}",
                                   "truth_status": s.get("status") or "unknown",
                                   "simulated": bool(_screen_simulated(s) or core.get("e", {}).get("simulated")),
-                              } for s in candidates if s not in approved],
+                              } for s in excluded_items],
                               "message": f"No approved, non-simulated evidence covers {category}."})
         total += contribution
         outputs.append({"id": category, "weight": spec["weight"], "severity": severity,
@@ -652,7 +805,14 @@ def evaluate_risk_contract(
                     "container": "risk_evidence",
                     "fields": ["evidence_id", "claim_id", "claim_status", "claim_simulated",
                                "artifact_simulated", "evidence_simulated", "sole_source", "entity_simulated",
-                               "source", "retrieved_at", "confidence", "status", "simulated"],
+                               "source", "retrieved_at", "method", "confidence", "status", "simulated",
+                               "supplier_id", "consumer_id", "claim_predicate", "claim_object_value",
+                               "claim_subject_id", "claim_target_id", "claim_conflicting",
+                               "source_url", "claim_source_url", "artifacts"],
+                    "artifact_fields": ["id", "kind", "award_id", "url", "source",
+                                        "retrieved_at", "evidence_retrieved_at", "method",
+                                        "confidence", "simulated", "evidence_simulated"],
+                    "claimless_trusted_fact_contract": "not supported; a committed claim and exact source artifact are required",
                 },
             },
             "eligible_truth_status": "committed",
@@ -672,10 +832,12 @@ async def artifacts(entity_id: str, limit: int = 50) -> list[dict]:
         WITH collect(DISTINCT a1) + collect(DISTINCT a2) AS arts
         UNWIND arts AS a
         WITH DISTINCT a WHERE a IS NOT NULL
-        RETURN a.id AS id, a.kind AS kind, a.title AS title, a.url AS url, a.source AS source, a.retrieved_at AS retrieved_at,
+        RETURN a.id AS id, a.kind AS kind, a.title AS title, a.url AS url, a.source AS source,
+               coalesce(a.latest_retrieved_at,a.retrieved_at) AS retrieved_at,
+               a.retrieved_at AS first_retrieved_at, a.latest_retrieved_at AS latest_retrieved_at,
                coalesce(a.simulated,false) AS simulated,
                a.published_at AS published_at, a.sentiment AS sentiment, a.amount AS amount, a.summary AS summary
-        ORDER BY coalesce(a.published_at, a.retrieved_at) DESC LIMIT $limit
+        ORDER BY coalesce(a.published_at, a.latest_retrieved_at, a.retrieved_at) DESC LIMIT $limit
         """,
         {"id": entity_id, "limit": limit},
     )
@@ -711,13 +873,10 @@ def _int(v) -> int | None:
         return int(v) if v not in (None, "") else None
     except (TypeError, ValueError):
         return None
-
-
 def _tie_label(t: dict) -> str:
     """'Membership: SHREC', 'Subsidiary: Raytheon Saudi Arabia'."""
     word = {"MEMBER_OF": "Membership", "TRANSACTS_WITH": "Business relationship", "LOBBIES": "Lobbying", "DONATED_TO": "Donation", "OWNS": "Subsidiary"}.get(t.get("type") or "", "Tie")
     return f"{word}: {t.get('entity')}"
-
 
 
 def _screen_refs(screen: dict) -> tuple[list[str], str | None, bool]:
@@ -1241,3 +1400,110 @@ def deterministic_summary(report: dict, reason: str | None = None) -> dict:
     findings = approved_summary_findings(report)
     notable_ids = [f["id"] for f in findings if not f["no_data"] and f.get("severity") in {"high", "medium", "low"}]
     return _render_summary(report, notable_ids[:3], "deterministic", None, reason)
+
+def _ownership_record(row: dict, *, relationship_present: bool) -> dict:
+    artifacts = [a for a in (row.get("artifacts") or []) if a and a.get("id")]
+    claim_status = row.get("claim_status")
+    evidence_present = bool(row.get("claim_id") and artifacts)
+    freshness = _ownership_freshness(row.get("claim_retrieved_at"))
+    conflicting = bool(relationship_present and claim_status and claim_status != "committed")
+    simulated = any((
+        row.get("owner_simulated"),
+        row.get("relationship_simulated"),
+        row.get("claim_simulated"),
+        any(a.get("simulated") or a.get("evidence_simulated") for a in artifacts),
+    ))
+    return {
+        "owner": {
+            "id": row.get("owner_id"),
+            "name": row.get("owner_name") or "Unavailable",
+            "kind": row.get("owner_kind") or "Unavailable",
+        },
+        "relationship_type": OWNERSHIP_TYPES.get(row.get("predicate"), "unknown"),
+        "predicate": row.get("predicate"),
+        "percentage": row.get("percentage"),
+        "effective_date": row.get("effective_date"),
+        "as_of_date": row.get("as_of_date"),
+        "relationship": {
+            "id": row.get("relationship_id"),
+            "present": relationship_present,
+        },
+        "claim": {
+            "id": row.get("claim_id"),
+            "status": claim_status or "unavailable",
+            "source": row.get("claim_source"),
+            "retrieved_at": row.get("claim_retrieved_at"),
+            "method": row.get("claim_method"),
+            "confidence": row.get("claim_confidence"),
+        } if row.get("claim_id") else None,
+        "artifacts": artifacts,
+        "truth_status": (
+            "conflicting" if conflicting
+            else "superseded" if claim_status == "committed" and not relationship_present
+            else "stale" if claim_status == "committed" and evidence_present and freshness == "stale"
+            else "unsupported" if claim_status == "committed" and not evidence_present
+            else claim_status or "unsupported"
+        ),
+        "freshness": freshness,
+        "conflicting": conflicting,
+        "current": bool(relationship_present and claim_status == "committed"),
+        "evidence_present": evidence_present,
+        "simulated": bool(simulated),
+    }
+
+async def ownership_records(entity_id: str) -> list[dict]:
+    """Return claim-current ownership facts without treating copied edge metadata as evidence."""
+    claim_rows = await db.read(
+        """
+        MATCH (c:Claim)-[:ASSERTS]->(owner)
+        MATCH (c)-[:TARGETS]->(target)
+        WHERE target.id=$id AND c.predicate IN ['OWNS','ULTIMATE_PARENT_OF','BENEFICIAL_OWNER_OF']
+        OPTIONAL MATCH (owner)-[r]->(target)
+          WHERE type(r)=c.predicate AND r.claim_id=c.id
+        OPTIONAL MATCH (a:Artifact)-[ev:EVIDENCES]->(c)
+        WITH c, owner, r, collect(DISTINCT a{
+          .id,.title,.url,.kind,.source,.retrieved_at,.source_status,.simulated,
+          evidence_id:coalesce(ev.id, elementId(ev)),
+          evidence_simulated:coalesce(ev.simulated,false)
+        }) AS artifacts
+        RETURN owner.id AS owner_id, owner.name AS owner_name,
+               coalesce(owner.kind, head(labels(owner))) AS owner_kind,
+               coalesce(owner.simulated,false) AS owner_simulated,
+               c.predicate AS predicate, c.id AS claim_id, c.status AS claim_status,
+               c.source AS claim_source, c.retrieved_at AS claim_retrieved_at,
+               c.method AS claim_method, c.confidence AS claim_confidence,
+               coalesce(c.simulated,false) AS claim_simulated,
+               coalesce(r.id, elementId(r)) AS relationship_id,
+               coalesce(r.simulated,false) AS relationship_simulated,
+               coalesce(r.pct, apoc.convert.fromJsonMap(coalesce(c.rel_props,'{}')).pct) AS percentage,
+               coalesce(r.effective_date, r.from, apoc.convert.fromJsonMap(coalesce(c.rel_props,'{}')).effective_date,
+                        apoc.convert.fromJsonMap(coalesce(c.rel_props,'{}')).from) AS effective_date,
+               coalesce(r.as_of_date, r.to, apoc.convert.fromJsonMap(coalesce(c.rel_props,'{}')).as_of_date,
+                        apoc.convert.fromJsonMap(coalesce(c.rel_props,'{}')).to) AS as_of_date,
+               artifacts
+        ORDER BY c.retrieved_at DESC, owner.name
+        """,
+        {"id": entity_id},
+    )
+    edge_rows = await db.read(
+        """
+        MATCH (owner)-[r:OWNS|ULTIMATE_PARENT_OF|BENEFICIAL_OWNER_OF]->(target:Entity {id:$id})
+        WHERE r.claim_id IS NULL
+        RETURN owner.id AS owner_id, owner.name AS owner_name,
+               coalesce(owner.kind, head(labels(owner))) AS owner_kind,
+               coalesce(owner.simulated,false) AS owner_simulated,
+               type(r) AS predicate, null AS claim_id, null AS claim_status,
+               null AS claim_source, null AS claim_retrieved_at,
+               null AS claim_method, null AS claim_confidence, false AS claim_simulated,
+               coalesce(r.id, elementId(r)) AS relationship_id,
+               coalesce(r.simulated,false) AS relationship_simulated,
+               r.pct AS percentage, coalesce(r.effective_date,r.from) AS effective_date,
+               coalesce(r.as_of_date,r.to) AS as_of_date, [] AS artifacts
+        ORDER BY owner.name
+        """,
+        {"id": entity_id},
+    )
+    return (
+        [_ownership_record(row, relationship_present=bool(row.get("relationship_id"))) for row in claim_rows]
+        + [_ownership_record(row, relationship_present=True) for row in edge_rows]
+    )

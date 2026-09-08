@@ -1,0 +1,249 @@
+{
+  "environment": "docker",
+  "fixture": {
+    "command": "./scripts/seed.sh --offline",
+    "root_id": "ent_6484d4d13b76",
+    "root_label": "V-22 Osprey Program (PMA-275)"
+  },
+  "root_id": "ent_6484d4d13b76",
+  "startup_ready_ms": null,
+  "ready_probe_ms": 16.14,
+  "fixture_reset": false,
+  "results": [
+    {
+      "name": "readiness",
+      "kind": "readiness",
+      "method": "GET",
+      "path": "/api/health",
+      "expect": {
+        "field": "ok",
+        "equals": true
+      },
+      "target_ms": 5000,
+      "samples_ms": [
+        1.05,
+        0.95,
+        0.99
+      ],
+      "median_ms": 0.99,
+      "max_ms": 1.05,
+      "payload_bytes_max": 3933,
+      "passed": true
+    },
+    {
+      "name": "program-load",
+      "kind": "program_load",
+      "method": "GET",
+      "path": "/api/graph/subgraph?entity_id=ent_6484d4d13b76&depth=2",
+      "expect": {
+        "field": "subgraph.nodes",
+        "min_items": 1
+      },
+      "target_ms": 5000,
+      "samples_ms": [
+        134.95,
+        37.55,
+        37.11
+      ],
+      "median_ms": 37.55,
+      "max_ms": 134.95,
+      "payload_bytes_max": 177649,
+      "passed": true
+    },
+    {
+      "name": "preset-vendors",
+      "kind": "preset",
+      "method": "POST",
+      "path": "/api/query/template",
+      "body": {
+        "name": "vendors_of",
+        "params": {
+          "entity_id": "{root_id}",
+          "depth": 3
+        }
+      },
+      "expect": {
+        "field": "data.rows",
+        "min_items": 1
+      },
+      "target_ms": 5000,
+      "samples_ms": [
+        129.11,
+        28.45,
+        43.14
+      ],
+      "median_ms": 43.14,
+      "max_ms": 129.11,
+      "payload_bytes_max": 91643,
+      "passed": true
+    },
+    {
+      "name": "preset-category",
+      "kind": "preset",
+      "method": "POST",
+      "path": "/api/query/template",
+      "body": {
+        "name": "color_by_category",
+        "params": {
+          "entity_id": "{root_id}",
+          "depth": 3
+        }
+      },
+      "expect": {
+        "field": "data.rows",
+        "min_items": 1
+      },
+      "target_ms": 5000,
+      "samples_ms": [
+        112.52,
+        38.31,
+        36.36
+      ],
+      "median_ms": 38.31,
+      "max_ms": 112.52,
+      "payload_bytes_max": 230750,
+      "passed": true
+    },
+    {
+      "name": "preset-country",
+      "kind": "preset",
+      "method": "POST",
+      "path": "/api/query/template",
+      "body": {
+        "name": "manufactures_in",
+        "params": {
+          "root_id": "{root_id}",
+          "country": "CN",
+          "depth": 3
+        }
+      },
+      "expect": {
+        "field": "data.rows",
+        "min_items": 1
+      },
+      "target_ms": 5000,
+      "samples_ms": [
+        83.15,
+        7.15,
+        5.64
+      ],
+      "median_ms": 7.15,
+      "max_ms": 83.15,
+      "payload_bytes_max": 5891,
+      "passed": true
+    },
+    {
+      "name": "preset-ownership",
+      "kind": "preset",
+      "method": "POST",
+      "path": "/api/query/template",
+      "body": {
+        "name": "ownership_chain",
+        "params": {
+          "entity_id": "{root_id}"
+        }
+      },
+      "expect": {
+        "field": "data.rows",
+        "min_items": 1
+      },
+      "target_ms": 5000,
+      "samples_ms": [
+        63.66,
+        3.6,
+        3.34
+      ],
+      "median_ms": 3.6,
+      "max_ms": 63.66,
+      "payload_bytes_max": 989,
+      "passed": true
+    },
+    {
+      "name": "preset-sole-source",
+      "kind": "preset",
+      "method": "POST",
+      "path": "/api/query/template",
+      "body": {
+        "name": "sole_source",
+        "params": {
+          "root_id": "{root_id}",
+          "depth": 3
+        }
+      },
+      "expect": {
+        "field": "data.rows",
+        "min_items": 1
+      },
+      "target_ms": 5000,
+      "samples_ms": [
+        61.45,
+        10.67,
+        11.99
+      ],
+      "median_ms": 11.99,
+      "max_ms": 61.45,
+      "payload_bytes_max": 29445,
+      "passed": true
+    },
+    {
+      "name": "vendor-report",
+      "kind": "report",
+      "method": "GET",
+      "path": "/api/entities/ent_6484d4d13b76/report",
+      "expect": {
+        "field": "entity.id",
+        "equals": "{root_id}"
+      },
+      "target_ms": 5000,
+      "samples_ms": [
+        25.79,
+        20.51,
+        23.1
+      ],
+      "median_ms": 23.1,
+      "max_ms": 25.79,
+      "payload_bytes_max": 7539,
+      "passed": true
+    },
+    {
+      "name": "comparison-data",
+      "kind": "comparison",
+      "method": "GET",
+      "path": "/api/entities?limit=2&offset=0",
+      "expect": {
+        "field": "items",
+        "min_items": 2
+      },
+      "target_ms": 5000,
+      "samples_ms": [
+        161.3,
+        6.84,
+        6.17
+      ],
+      "median_ms": 6.84,
+      "max_ms": 161.3,
+      "payload_bytes_max": 616,
+      "passed": true
+    },
+    {
+      "name": "export-data",
+      "kind": "export",
+      "method": "GET",
+      "path": "/api/graph/subgraph?entity_id=ent_6484d4d13b76&depth=3",
+      "expect": {
+        "field": "subgraph.nodes",
+        "min_items": 1
+      },
+      "target_ms": 5000,
+      "samples_ms": [
+        49.46,
+        35.68,
+        37.44
+      ],
+      "median_ms": 37.44,
+      "max_ms": 49.46,
+      "payload_bytes_max": 182236,
+      "passed": true
+    }
+  ]
+}

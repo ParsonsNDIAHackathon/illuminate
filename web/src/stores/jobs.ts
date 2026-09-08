@@ -1,9 +1,12 @@
 import { defineStore } from 'pinia'
-import { api } from '../api/client'
+import { api, type EnrichmentJob } from '../api/client'
 
 export const useJobs = defineStore('jobs', {
-  state: () => ({ jobs: [] as any[] }),
-  getters: { running: (s) => s.jobs.filter(j => j.status === 'queued' || j.status === 'running') },
+  state: () => ({ jobs: [] as EnrichmentJob[] }),
+  getters: {
+    running: (s) => s.jobs.filter(j => j.status === 'queued' || j.status === 'running'),
+    latestFor: (s) => (entityId: string) => s.jobs.find(j => j.entity_id === entityId),
+  },
   actions: {
     async load() { this.jobs = await api.get('/api/jobs') },
     update(j: any) { const i = this.jobs.findIndex(x => x.id === j.id); if (i >= 0) this.jobs[i] = j; else this.jobs.unshift(j) },

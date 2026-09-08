@@ -60,6 +60,10 @@ def supplies(facts):
     return {(f.subject.id, f.object.id): f for f in facts if f.predicate == "SUPPLIES"}
 
 
+def test_missing_competition_fields_are_unknown_not_non_sole():
+    assert ua.is_sole_source({"latest_transaction_contract_data": {}}) == (None, None)
+
+
 # --- the search a program describes ----------------------------------------------
 def test_program_search_defaults_and_overrides():
     cfg = ua.program_search(PROGRAM)

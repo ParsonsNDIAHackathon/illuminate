@@ -13,7 +13,7 @@ The judged path uses the committed offline seed fixtures and a five-second warm-
 
 Exact requests and machine-readable targets live in `config/mission-performance-budgets.json`. Comparison currently measures the bounded two-vendor data request; export measures the bounded graph payload that the client exports. This keeps the harness independent of presentation formats.
 
-The 2026-09-08 Replit deterministic-fixture baseline used three samples per operation. Startup reached Neo4j in 18 seconds and the API in 24 seconds. Warm-path maxima were: readiness 4 ms, initial program graph 37 ms, presets 44 ms, vendor report 22 ms, comparison data 8 ms, and export data 37 ms. All judged requests met the five-second target. Generate the Docker baseline with the same command during the already-planned Docker verification task.
+The 2026-09-08 Replit deterministic-fixture baseline used three samples per operation. Startup reached Neo4j in 18 seconds and the API in 24 seconds. Warm-path maxima were: readiness 4 ms, initial program graph 37 ms, presets 44 ms, vendor report 22 ms, comparison data 8 ms, and export data 37 ms. All judged requests met the five-second target. The Docker baseline is recorded in `.performance/docker.json`; generate a fresh local record after material runtime or fixture changes. Because the Replit Docker daemon used for that record blocks bridge forwarding, the runtime check used an uncommitted host-network override. The committed bridge topology, DNS names, and published-port configuration were validated statically but must be exercised on a normal Docker host.
 
 ## Repeatable measurement
 

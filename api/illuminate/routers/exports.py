@@ -23,7 +23,7 @@ from .. import db
 from ..config import settings
 
 router = APIRouter(prefix="/api/exports/v1", tags=["exports"])
-VERSION = "1.0"
+VERSION = "1.1"
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 1000
 
@@ -64,6 +64,19 @@ class Quality(BaseModel):
     notes: str | None = None
 
 
+class AnalystDisposition(BaseModel):
+    action: Literal["investigate", "monitor", "seek_alternate_source", "accept_with_rationale", "close_no_action"]
+    owner: str
+    due_date: str | None = None
+    actor: str
+    decided_at: str
+    version: int = Field(ge=1)
+    program_id: str | None = None
+    finding_ids: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    simulated: bool = False
+
+
 class PathNode(BaseModel):
     id: str
     type: str
@@ -101,6 +114,7 @@ class Finding(BaseModel):
     classification: str
     license: str | None = None
     quality: Quality
+    analyst_disposition: AnalystDisposition | None = None
     truth_status: Literal["staged", "committed", "rejected", "unknown"]
     simulated: bool
     deleted: bool = False
@@ -108,7 +122,7 @@ class Finding(BaseModel):
 
 
 class PageMeta(BaseModel):
-    schema_version: Literal["1.0"] = VERSION
+    schema_version: Literal["1.1"] = VERSION
     generated_at: datetime
     count: int
     limit: int
@@ -133,6 +147,7 @@ FIELD_DICTIONARY = {
     "classification": "Information handling classification supplied by the finding, default UNCLASSIFIED.",
     "license": "Source or record license/SPDX expression when known.",
     "quality": "Normalized quality/completeness scores and notes.",
+    "analyst_disposition": "Current human disposition and bounded audit metadata. Analyst rationale is deliberately excluded.",
     "truth_status": "Claim review state: staged, committed, rejected, or unknown.",
     "simulated": "True when the finding or any exported path participant is simulated.",
     "deleted": "True on an incremental tombstone; full exports omit tombstoned findings.",
@@ -145,9 +160,14 @@ WHERE c.id IS NOT NULL AND s.id IS NOT NULL
 OPTIONAL MATCH (c)-[:TARGETS]->(o)
 WITH c, s, o ORDER BY coalesce(o.id,'')
 WITH c, s, collect(DISTINCT o) AS target_nodes
+OPTIONAL MATCH (decision:AnalystDecision)-[:DECISION_FOR]->(s)
+WHERE size(coalesce(decision.evidence_refs,[]))=0 OR c.id IN decision.evidence_refs
+OR EXISTS { MATCH (artifact:Artifact)-[:EVIDENCES]->(c) WHERE artifact.id IN decision.evidence_refs }
+WITH c, s, target_nodes, decision ORDER BY coalesce(decision.sequence,decision.version,0) DESC
+WITH c, s, target_nodes, head(collect(decision)) AS current_decision
 OPTIONAL MATCH (a:Artifact)-[ev:EVIDENCES]->(c)
-WITH c, s, target_nodes, a, ev ORDER BY coalesce(a.id,'')
-WITH c, s, target_nodes, collect(DISTINCT a{
+WITH c, s, target_nodes, current_decision, a, ev ORDER BY coalesce(a.id,'')
+WITH c, s, target_nodes, current_decision, collect(DISTINCT a{
   .id, .title, .source, source_url:coalesce(a.source_url,a.url),
   .source_id, .source_identifier, .catalog_ids, .retrieved_at, .usage_note,
   .quality_note, .supports, .unknowns, .source_status, .connector_error,
@@ -162,7 +182,7 @@ WITH c, s, target_nodes, collect(DISTINCT a{
   evidence_connector_error_status:ev.connector_error_status, evidence_method:ev.method,
   evidence_confidence:ev.confidence, evidence_license:ev.license, evidence_simulated:ev.simulated
 }) AS artifacts,
-reduce(changed=datetime('1970-01-01T00:00:00Z'), value IN [c.updated_at,c.decided_at,c.retrieved_at] |
+reduce(changed=datetime('1970-01-01T00:00:00Z'), value IN [c.updated_at,c.decided_at,c.retrieved_at,current_decision.decided_at] |
   CASE WHEN value IS NOT NULL AND datetime(toString(value)) > changed
        THEN datetime(toString(value)) ELSE changed END) AS changed,
 c.id + '|' + s.id AS identity_key
@@ -185,7 +205,12 @@ RETURN c.id AS claim_id, c.predicate AS predicate, c.object_value AS object_valu
        coalesce(s.simulated,false) AS subject_simulated,
        [o IN target_nodes WHERE o.id IS NOT NULL | o{
          .id, type:labels(o)[0], name:coalesce(o.name,o.title), simulated:coalesce(o.simulated,false)
-       }] AS targets, artifacts, toString(changed) AS observed,
+        }] AS targets, artifacts,
+        CASE WHEN current_decision IS NULL THEN null ELSE current_decision{
+          action:current_decision.disposition,.owner,.due_date,.actor,.decided_at,.version,
+          .program_id,.finding_ids,.evidence_refs,simulated:coalesce(current_decision.simulated,false)
+        } END AS analyst_disposition,
+        toString(changed) AS observed,
        identity_key
 ORDER BY changed, identity_key
 LIMIT $fetch
@@ -194,8 +219,13 @@ LIMIT $fetch
 _UPPER = """
 MATCH (c:Claim)-[:ASSERTS]->(s)
 WHERE c.id IS NOT NULL AND s.id IS NOT NULL
+OPTIONAL MATCH (decision:AnalystDecision)-[:DECISION_FOR]->(s)
+WHERE size(coalesce(decision.evidence_refs,[]))=0 OR c.id IN decision.evidence_refs
+OR EXISTS { MATCH (artifact:Artifact)-[:EVIDENCES]->(c) WHERE artifact.id IN decision.evidence_refs }
+WITH c, s, decision ORDER BY coalesce(decision.sequence,decision.version,0) DESC
+WITH c, s, head(collect(decision)) AS current_decision
 WITH c, s,
-reduce(changed=datetime('1970-01-01T00:00:00Z'), value IN [c.updated_at,c.decided_at,c.retrieved_at] |
+reduce(changed=datetime('1970-01-01T00:00:00Z'), value IN [c.updated_at,c.decided_at,c.retrieved_at,current_decision.decided_at] |
   CASE WHEN value IS NOT NULL AND datetime(toString(value)) > changed
        THEN datetime(toString(value)) ELSE changed END) AS changed,
 c.id + '|' + s.id AS identity_key
@@ -424,6 +454,11 @@ def _finding(row: dict[str, Any]) -> Finding:
         simulated = simulated or bool(artifact.get("simulated") or artifact.get("evidence_simulated"))
     status = row.get("status") if row.get("status") in {"staged", "committed", "rejected"} else "unknown"
     primary = targets[0] if targets else {}
+    analyst_disposition = (
+        AnalystDisposition.model_validate(row["analyst_disposition"])
+        if row.get("analyst_disposition") else None
+    )
+    simulated = simulated or bool(analyst_disposition and analyst_disposition.simulated)
     return Finding(
         finding_id=fid, subject_id=subject_id, subject_type=row.get("subject_type") or "Node",
         subject_name=row.get("subject_name"), predicate=row.get("predicate") or "unknown",
@@ -434,6 +469,7 @@ def _finding(row: dict[str, Any]) -> Finding:
         recommendation=row.get("recommendation"), paths=paths, provenance=provenance,
         classification=row.get("classification") or "UNCLASSIFIED", license=row.get("license"),
         quality=Quality(score=row.get("quality_score"), completeness=row.get("completeness"), notes=row.get("quality_notes")),
+        analyst_disposition=analyst_disposition,
         truth_status=status, simulated=simulated, observed_at=_string(row.get("observed")) or "1970-01-01T00:00:00Z",
     )
 
@@ -629,6 +665,10 @@ async def sample():
         risk=Risk(score=72, level="high", category="concentration", rationale="Single qualified source."),
         recommendation="Validate alternate sources.", paths=[], provenance=[Provenance(source="example", claim_id="clm_example")],
         classification="UNCLASSIFIED", license="CC0-1.0", quality=Quality(score=1, completeness=1),
+        analyst_disposition=AnalystDisposition(
+            action="investigate", owner="Supply Risk Team", actor="example-analyst",
+            decided_at="2026-09-08T00:00:00Z", version=1, simulated=True,
+        ),
         truth_status="committed", simulated=True, observed_at="2026-09-08T00:00:00Z",
     )
     return {"schema_version": VERSION, "finding": example.model_dump(mode="json")}

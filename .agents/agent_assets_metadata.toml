@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "rxOtXA45ayu54u8to_gLY"
+uri = "file://attached_assets/generated_videos/illuminate-project-overview.mp4"
+type = "video"
+title = "Illuminate Project Overview"
+description = "An 8-second 16:9 animated overview of Illuminate’s supply-chain graph, evidence-backed vendor risk assessment, reviewable recommendations, and reusable findings export."
+logical_id = "a4c4c22c-8aaa-4da0-a05f-caecfa9cf288"
+content_hash = "sha256:62cd6e68e59164aee1620ccecbd506c76b7704e14439db25419da6d30665eda1"
+size = 3797151
+mtime_ms = 1788894867621
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:7047f4fe-f97e-4d58-8dbb-1b68af1bf84d/a4c4c22c-8aaa-4da0-a05f-caecfa9cf288/a74dc05c-32c3-45ec-8555-7f188d2e18d0"
+storage_version_token = "1788894888265607"
+content_type = "video/mp4"

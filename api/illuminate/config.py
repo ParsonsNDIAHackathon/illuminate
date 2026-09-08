@@ -41,10 +41,14 @@ class Settings(BaseSettings):
     connector_retries: int = 1
     connector_processing_timeout_s: float = 60.0
     enrichment_job_timeout_s: float = 180.0
+    supplier_enrichment_fanout: int = 20
     summary_timeout_s: float = 30.0
     readiness_timeout_s: float = 3.0
     readiness_cache_s: float = 10.0
     freshness_stale_hours: float = 168.0
+    # A failed live retrieval may use an ordinary runtime cache entry only within
+    # this bound. Committed seed fixtures are a separate, explicit mode.
+    connector_cache_fallback_max_age_s: float = 30 * 86400
 
     # Default model tiers (D8). Overridable per user in workspace settings.
     model_strong: str = "gpt-5"

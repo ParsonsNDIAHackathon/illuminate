@@ -276,6 +276,47 @@ def test_linked_metadata_changes_payload_at_same_observation_time():
     assert hashlib.sha256(before.encode()).digest() != hashlib.sha256(after.encode()).digest()
 
 
+def test_safe_analyst_disposition_is_exported_without_rationale():
+    row = {
+        **ROWS[0],
+        "analyst_disposition": {
+            "action": "monitor", "owner": "Supply Risk Team", "due_date": "2026-10-01",
+            "actor": "analyst-7", "decided_at": "2026-09-08T12:00:00Z", "version": 2,
+            "program_id": "program_1", "finding_ids": ["finding:risk:ownership"],
+            "evidence_refs": ["clm_1"], "simulated": False,
+            "rationale": "This sensitive workspace note must not leave the boundary.",
+        },
+    }
+    payload = exports._finding(row).model_dump(mode="json")
+    assert payload["analyst_disposition"]["action"] == "monitor"
+    assert payload["analyst_disposition"]["version"] == 2
+    assert "rationale" not in payload["analyst_disposition"]
+    assert "sensitive workspace note" not in json.dumps(payload)
+
+
+def test_disposition_change_changes_export_fingerprint_without_altering_truth():
+    first = dict(ROWS[0], analyst_disposition={
+        "action": "investigate", "owner": "Team", "actor": "analyst",
+        "decided_at": ROWS[0]["observed"], "version": 1,
+    })
+    second = dict(first, analyst_disposition={
+        "action": "monitor", "owner": "Team", "actor": "analyst",
+        "decided_at": ROWS[0]["observed"], "version": 2,
+    })
+    before = exports._finding(first)
+    after = exports._finding(second)
+    assert before.truth_status == after.truth_status == "committed"
+    assert hashlib.sha256(before.model_dump_json().encode()).digest() != hashlib.sha256(after.model_dump_json().encode()).digest()
+
+
+def test_simulated_decision_taints_exported_finding():
+    row = dict(ROWS[0], analyst_disposition={
+        "action": "investigate", "owner": "Team", "actor": "analyst",
+        "decided_at": ROWS[0]["observed"], "version": 1, "simulated": True,
+    })
+    assert exports._finding(row).simulated is True
+
+
 def test_token_shape_is_validated():
     malformed = exports._token({"v": exports.VERSION, "kind": "watermark"})
     with pytest.raises(exports.HTTPException) as exc:

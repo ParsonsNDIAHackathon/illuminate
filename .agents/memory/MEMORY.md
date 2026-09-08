@@ -1,8 +1,9 @@
-- [Neo4j on Replit](neo4j-on-replit.md) — Nix Neo4j needs a writable config and explicit APOC plugin wiring for this app.
+- [Neo4j on Replit](neo4j-on-replit.md) — Embedded Neo4j needs writable config, explicit APOC wiring, and a persistent single-instance deployment.
 - [Concurrent merge verification](concurrent-merge-verification.md) — re-check shared entry points after parallel task merges, immediately before completion.
 - [Main branch synchronization](main-replit-branch-sync.md) — compare explicit fresh refs and publish only the immutable commit already evaluated.
 - [Graph evidence truth](graph-evidence-truth.md) — consumers must resolve current backing-claim and artifact status; edge metadata alone can become stale.
-- [Readiness truth rules](readiness-truth-rules.md) — primary readiness requires stamped seed completion plus live mission coverage; optional services never gate it.
+- [Readiness truth rules](readiness-truth-rules.md) — rehearsal readiness and production live readiness are separate; only the database gates startup.
+- [Live observation identity](live-observation-identity.md) — idempotent refreshes key observations by upstream identity while preserving first-seen and latest-retrieval truth separately.
 - [AI summary authority boundary](ai-summary-authority.md) — Models may prioritize approved findings, but deterministic code owns narrative, citations, scores, and fallback.
 - [NDIA catalog contract](ndia-catalog-contract.md) — event-3 read fields are public, but organizer-provided write routes must remain opt-in.
 - [Evidence lineage safety](evidence-lineage-safety.md) — connector diagnostics must be allowlisted, and shared artifact provenance must remain immutable.
@@ -12,3 +13,9 @@
 - [Seed evidence timestamps](seed-evidence-timestamps.md) — idempotent seed reruns must preserve retrieval time and track ingestion time separately.
 - [Headless phone viewport checks](headless-phone-viewports.md) — Chromium window sizing may crop rather than emulate sub-500px CSS viewports; use device metrics.
 - [Atomic claim decisions](atomic-claim-decisions.md) — terminal review state and its materialized graph effects must commit in one claim-locked transaction.
+- [Scoped decision concurrency](scoped-decision-concurrency.md) — scope-visible versions and entity-wide chronology require separate counters.
+- [Nested Docker verification](nested-docker-verification.md) — keep Replit daemon workarounds temporary; verify the committed portable Compose path separately.
+- [Seed replay identity](seed-replay-identity.md) — invalidate readiness before rebuilds and keep fixture-backed claim identities stable across destructive replay.
+- [Credential diagnostic truth](credential-diagnostic-truth.md) — accept credentials only from complete provider success envelopes; bounded unknown responses fail closed.
+- [Inventory contract boundaries](inventory-contract-boundaries.md) — reconcile declarations bidirectionally and keep generated evidence separate from curated review conclusions.
+- [Judge-journey gates](judge-journey-gates.md) — rehearsal checks must assert conditional loaded outcomes through the browser origin, not static page chrome.
