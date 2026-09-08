@@ -353,6 +353,76 @@ async def seed_cached_gdelt() -> bool:
         entity,
     )
     return True
+async def screen_claim(cid: str, subject: str, predicate: str, result: str, source: str, detail: str) -> None:
+    """A committed screen result on a node, carrying simulated=true like the rest of the scenario."""
+    await db.write(
+        "MERGE (c:Claim {id:$cid}) SET c += $p WITH c MATCH (e {id:$e}) MERGE (c)-[r:ASSERTS]->(e) ON CREATE SET r.id=$rid",
+        {"cid": cid, "e": subject, "rid": edge_id(), "p": {
+            "predicate": predicate, "subject_id": subject, "object_value": result, "source": source,
+            "trust": "authoritative", "method": "simulated", "confidence": 0.9, "status": "committed",
+            "retrieved_at": now_iso(), "detail": detail, "simulated": True}},
+    )
+
+
+async def scenario_insider(root_id: str, exclude: str) -> None:
+    """A second, independent thread: an insider tie rather than an ownership one.
+
+    The vendor's own record is clean — it screens clear, it is not foreign-owned, and
+    nothing about the company invites a second look. The exposure is one employee who
+    also sits inside a designated cyber-threat group, so it is only reachable by going
+    through the person: supplier → employee → flagged group. That is the shape a
+    document review misses and a graph does not.
+
+    The group is invented. It carries no relation to any real threat actor, and the
+    designations recorded against it are simulated.
+    """
+    S = {"source": "scenario", "method": "simulated", "confidence": 1.0, "simulated": True, "source_url": "https://example.invalid/scenario"}
+    vendor = await db.read(
+        "MATCH (v:Entity)-[:SUPPLIES {tier:2}]->(:Entity) WHERE v.id <> $x AND coalesce(v.simulated,false)=false "
+        "RETURN v.id AS id, v.name AS name ORDER BY v.name LIMIT 1", {"x": exclude})
+    if not vendor:
+        log("scenario: no second tier-2 vendor for the insider tie; skipping")
+        return
+    v = vendor[0]
+
+    group_name = "Obsidian Lantern (simulated)"
+    group = entity_id(name=group_name)
+    await merge_entity(group, {"name": group_name, "kind": "organization", **S,
+                               "detail": "designated cyber-threat group; invented for the scenario"})
+    await merge_location("RU")
+    await merge_rel(group, "OPERATES_IN", location_id("RU"), {**S, "detail": "assessed area of operation"})
+    await db.write(
+        "MATCH (e:Entity {id:$id}) SET e.flagged = true, "
+        "e.flag_reason = 'designated cyber-threat group — intrusion campaigns against defence suppliers (simulated scenario)'",
+        {"id": group})
+    # Designated, and designated *for cyber activity* — the sanctions screen and the cyber
+    # screen are separate findings and the report scores them under separate families.
+    await screen_claim("clm_sim_cyber_sanctions", group, "sanctions_screen", "hit", "OFAC",
+                       "simulated screen result: hit — SDN designation under a cyber-related programme")
+    await screen_claim("clm_sim_cyber_un", group, "sanctions_screen", "hit", "UN Security Council",
+                       "simulated screen result: hit — listed on the UN Consolidated List")
+    await screen_claim("clm_sim_cyber", group, "cyber_screen", "hit", "scenario threat reporting",
+                       "simulated screen result: hit — credited with intrusion campaigns against defence suppliers")
+
+    person_name = "R. Ostrowski (simulated)"
+    pid = person_id(person_name, "scenario")
+    await db.write("MERGE (p:Person {id:$id}) SET p += $p",
+                   {"id": pid, "p": {"name": person_name, "name_norm": "r ostrowski simulated", **S}})
+    # Employed by the real tier-2 vendor, and named inside the group. Two roles, one person.
+    await merge_rel(pid, "HELD_ROLE", v["id"],
+                    {**S, "title": "Network Operations Engineer", "role_type": "position", "from": "2024-03-04", "current": True,
+                     "detail": "holds administrative access to production and supplier-facing systems"},
+                    {"from": "2024-03-04"})
+    await merge_rel(pid, "HELD_ROLE", group,
+                    {**S, "title": "Named affiliate", "role_type": "position", "from": "2021-08-01", "current": True,
+                     "detail": "named in simulated threat reporting as an affiliate of the group"},
+                    {"from": "2021-08-01"})
+    # The person, not the employer: screening the vendor alone returns nothing.
+    await screen_claim("clm_sim_person_sanctions", pid, "sanctions_screen", "hit", "OFAC",
+                       "simulated screen result: hit — individual designation, matched on full name")
+    log(f"scenario: {person_name} employed by {v['name']} (tier 2) and affiliated with {group_name}")
+
+
 async def scenario(root_id: str) -> None:
     """A clearly-labelled simulated adversarial tie (the brief allows 'simulated or
     historical'). Every node/edge carries simulated=true and a '(simulated)' suffix."""
@@ -402,10 +472,10 @@ async def scenario(root_id: str) -> None:
         await merge_rel(p2, "HELD_ROLE", two[1]["id"], {**S, "title": "Chair", "role_type": "board", "from": "2021-06-01", "current": True}, {"from": "2021-06-01"})
     # screens for the simulated entity: clear (it is the opacity, not a listing, that matters)
     for pred, src in (("sanctions_screen", "OFAC"), ("exclusion_screen", "SAM.gov")):
-        await db.write("MERGE (c:Claim {id:$cid}) SET c += $p WITH c MATCH (e:Entity {id:$e}) MERGE (c)-[r:ASSERTS]->(e) ON CREATE SET r.id=$rid",
-                       {"cid": f"clm_sim_{pred}", "e": ning, "rid": edge_id(), "p": {"predicate": pred, "subject_id": ning, "object_value": "clear", "source": src, "trust": "authoritative", "method": "simulated", "confidence": 0.9, "status": "committed", "retrieved_at": now_iso(), "detail": "simulated screen result: clear", "simulated": True}})
+        await screen_claim(f"clm_sim_{pred}", ning, pred, "clear", src, "simulated screen result: clear")
     await db.write("MATCH (e:Entity {id:$id}) SET e.flagged = true, e.flag_reason = 'foreign ultimate parent via two intermediaries (simulated scenario)'", {"id": ning})
     log(f"scenario: Ningbo Precision Castings (simulated) attached at tier {tier} under {h['name']}")
+    await scenario_insider(root_id, exclude=h["id"])
 
 
 async def stats() -> dict:
