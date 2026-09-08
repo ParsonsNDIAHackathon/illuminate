@@ -27,13 +27,26 @@ MAX_LIMIT = 1000
 
 
 class Provenance(BaseModel):
+    scope: Literal["claim", "artifact", "evidence"] = "claim"
     source: str | None = None
+    source_id: str | None = None
+    source_identifier: str | None = None
+    catalog_ids: list[str] = Field(default_factory=list)
     source_url: str | None = None
     retrieved_at: str | None = None
+    usage_note: str | None = None
+    quality_note: str | None = None
+    supports: str | None = None
+    unknowns: str | None = None
+    source_status: str | None = None
+    connector_error: str | None = None
+    connector_error_type: str | None = None
+    connector_error_status: int | None = None
     method: str | None = None
     confidence: float | None = Field(default=None, ge=0, le=1)
     claim_id: str | None = None
     license: str | None = None
+    simulated: bool = False
 
 
 class Risk(BaseModel):
@@ -114,7 +127,7 @@ FIELD_DICTIONARY = {
     "risk": "Normalized score, level, category, and human-readable rationale when available.",
     "recommendation": "Recommended review or mitigation action; never an automated accusation.",
     "paths": "Typed Claim-to-subject, Claim-to-target, and evidence-to-Claim lineage paths.",
-    "provenance": "Safe source metadata only; restricted raw source payloads are never exported.",
+    "provenance": "Safe claim, artifact, and evidence metadata: stable source/catalog identifiers, retrieval and usage/quality/coverage notes, status, sanitized connector diagnostics, and simulation state.",
     "classification": "Information handling classification supplied by the finding, default UNCLASSIFIED.",
     "license": "Source or record license/SPDX expression when known.",
     "quality": "Normalized quality/completeness scores and notes.",
@@ -130,11 +143,22 @@ WHERE c.id IS NOT NULL AND s.id IS NOT NULL
 OPTIONAL MATCH (c)-[:TARGETS]->(o)
 WITH c, s, o ORDER BY coalesce(o.id,'')
 WITH c, s, collect(DISTINCT o) AS target_nodes
-OPTIONAL MATCH (a:Artifact)-[:EVIDENCES]->(c)
-WITH c, s, target_nodes, a ORDER BY coalesce(a.id,'')
+OPTIONAL MATCH (a:Artifact)-[ev:EVIDENCES]->(c)
+WITH c, s, target_nodes, a, ev ORDER BY coalesce(a.id,'')
 WITH c, s, target_nodes, collect(DISTINCT a{
   .id, .title, .source, source_url:coalesce(a.source_url,a.url),
-  .retrieved_at, .method, .confidence, .license, .simulated
+  .source_id, .source_identifier, .catalog_ids, .retrieved_at, .usage_note,
+  .quality_note, .supports, .unknowns, .source_status, .connector_error,
+  .connector_error_type, .connector_error_status, .method, .confidence, .license, .simulated,
+  evidence_present:ev IS NOT NULL, evidence_source:ev.source, evidence_source_id:ev.source_id,
+  evidence_source_identifier:ev.source_identifier, evidence_catalog_ids:ev.catalog_ids,
+  evidence_source_url:ev.source_url,
+  evidence_retrieved_at:ev.retrieved_at, evidence_usage_note:ev.usage_note,
+  evidence_quality_note:ev.quality_note, evidence_supports:ev.supports,
+  evidence_unknowns:ev.unknowns, evidence_source_status:ev.source_status,
+  evidence_connector_error:ev.connector_error, evidence_connector_error_type:ev.connector_error_type,
+  evidence_connector_error_status:ev.connector_error_status, evidence_method:ev.method,
+  evidence_confidence:ev.confidence, evidence_license:ev.license, evidence_simulated:ev.simulated
 }) AS artifacts,
 reduce(changed=datetime('1970-01-01T00:00:00Z'), value IN [c.updated_at,c.decided_at,c.retrieved_at] |
   CASE WHEN value IS NOT NULL AND datetime(toString(value)) > changed
@@ -146,8 +170,12 @@ WHERE ($include_rejected OR coalesce(c.status,'unknown') <> 'rejected')
 RETURN c.id AS claim_id, c.predicate AS predicate, c.object_value AS object_value,
        c.detail AS detail, c.risk_score AS risk_score, c.risk_level AS risk_level,
        c.risk_category AS risk_category, c.risk_rationale AS risk_rationale,
-       c.recommendation AS recommendation, c.source AS source, c.source_url AS source_url,
-       c.retrieved_at AS retrieved_at, c.method AS method, c.confidence AS confidence,
+       c.recommendation AS recommendation, c.source AS source, c.source_id AS source_id,
+       c.source_identifier AS source_identifier, c.catalog_ids AS catalog_ids, c.source_url AS source_url,
+       c.retrieved_at AS retrieved_at, c.usage_note AS usage_note, c.quality_note AS quality_note,
+       c.supports AS supports, c.unknowns AS unknowns, c.source_status AS source_status,
+       c.connector_error AS connector_error, c.connector_error_type AS connector_error_type,
+       c.connector_error_status AS connector_error_status, c.method AS method, c.confidence AS confidence,
        c.classification AS classification, c.license AS license, c.quality_score AS quality_score,
        c.completeness AS completeness, c.quality_notes AS quality_notes, c.status AS status,
        coalesce(c.simulated,false) AS claim_simulated,
@@ -325,10 +353,18 @@ def _finding(row: dict[str, Any]) -> Finding:
     for item in targets:
         target = PathNode(id=str(item["id"]), type=item.get("type") or "Node", name=item.get("name"))
         paths.append(TypedPath(nodes=[claim_node, target], edges=[PathEdge(type="TARGETS", source=fid, target=target.id)]))
-    provenance = [Provenance(source=row.get("source"), source_url=row.get("source_url"),
-                             retrieved_at=_string(row.get("retrieved_at")), method=row.get("method"),
-                             confidence=row.get("confidence"), claim_id=row.get("claim_id"),
-                             license=row.get("license"))]
+    provenance = [Provenance(
+        scope="claim", source=row.get("source"), source_id=row.get("source_id"),
+        source_identifier=row.get("source_identifier"), catalog_ids=row.get("catalog_ids") or [],
+        source_url=row.get("source_url"), retrieved_at=_string(row.get("retrieved_at")),
+        usage_note=row.get("usage_note"), quality_note=row.get("quality_note"),
+        supports=row.get("supports"), unknowns=row.get("unknowns"),
+        source_status=row.get("source_status"), connector_error=row.get("connector_error"),
+        connector_error_type=row.get("connector_error_type"),
+        connector_error_status=row.get("connector_error_status"), method=row.get("method"),
+        confidence=row.get("confidence"), claim_id=row.get("claim_id"),
+        license=row.get("license"), simulated=bool(row.get("claim_simulated")),
+    )]
     simulated = bool(row.get("claim_simulated") or row.get("subject_simulated")
                      or any(item.get("simulated") for item in targets))
     for artifact in row.get("artifacts") or []:
@@ -337,11 +373,38 @@ def _finding(row: dict[str, Any]) -> Finding:
         aid = str(artifact["id"])
         artifact_node = PathNode(id=aid, type="Artifact", name=artifact.get("title"))
         paths.append(TypedPath(nodes=[artifact_node, claim_node], edges=[PathEdge(type="EVIDENCES", source=aid, target=fid)]))
-        provenance.append(Provenance(source=artifact.get("source"), source_url=artifact.get("source_url"),
-                                     retrieved_at=_string(artifact.get("retrieved_at")), method=artifact.get("method"),
-                                     confidence=artifact.get("confidence"), claim_id=row.get("claim_id"),
-                                     license=artifact.get("license")))
-        simulated = simulated or bool(artifact.get("simulated"))
+        provenance.append(Provenance(
+            scope="artifact", source=artifact.get("source"), source_id=artifact.get("source_id"),
+            source_identifier=artifact.get("source_identifier"), catalog_ids=artifact.get("catalog_ids") or [],
+            source_url=artifact.get("source_url"), retrieved_at=_string(artifact.get("retrieved_at")),
+            usage_note=artifact.get("usage_note"), quality_note=artifact.get("quality_note"),
+            supports=artifact.get("supports"), unknowns=artifact.get("unknowns"),
+            source_status=artifact.get("source_status"), connector_error=artifact.get("connector_error"),
+            connector_error_type=artifact.get("connector_error_type"),
+            connector_error_status=artifact.get("connector_error_status"), method=artifact.get("method"),
+            confidence=artifact.get("confidence"), claim_id=row.get("claim_id"),
+            license=artifact.get("license"), simulated=bool(artifact.get("simulated")),
+        ))
+        if artifact.get("evidence_present"):
+            provenance.append(Provenance(
+                scope="evidence", source=artifact.get("evidence_source"),
+                source_id=artifact.get("evidence_source_id"),
+                source_identifier=artifact.get("evidence_source_identifier"),
+                catalog_ids=artifact.get("evidence_catalog_ids") or [],
+                source_url=artifact.get("evidence_source_url"),
+                retrieved_at=_string(artifact.get("evidence_retrieved_at")),
+                usage_note=artifact.get("evidence_usage_note"),
+                quality_note=artifact.get("evidence_quality_note"),
+                supports=artifact.get("evidence_supports"), unknowns=artifact.get("evidence_unknowns"),
+                source_status=artifact.get("evidence_source_status"),
+                connector_error=artifact.get("evidence_connector_error"),
+                connector_error_type=artifact.get("evidence_connector_error_type"),
+                connector_error_status=artifact.get("evidence_connector_error_status"),
+                method=artifact.get("evidence_method"), confidence=artifact.get("evidence_confidence"),
+                claim_id=row.get("claim_id"), license=artifact.get("evidence_license"),
+                simulated=bool(artifact.get("evidence_simulated")),
+            ))
+        simulated = simulated or bool(artifact.get("simulated") or artifact.get("evidence_simulated"))
     status = row.get("status") if row.get("status") in {"staged", "committed", "rejected"} else "unknown"
     primary = targets[0] if targets else {}
     return Finding(

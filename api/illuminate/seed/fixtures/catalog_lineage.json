@@ -1,0 +1,46 @@
+{
+  "records": [
+    {
+      "id": "src_ndia_1_federal_spending",
+      "connector": "usaspending",
+      "source": "USAspending",
+      "catalog_ids": ["ndia:1"],
+      "record_kind": "federal_spending",
+      "source_identifier": "CONT_AWD_0620_9700_W58RGZ12D0089_9700",
+      "cache_fixture": "023e4ae30e111d888090e7b7d045cae9966d403c.json",
+      "source_url": "https://www.usaspending.gov/award/CONT_AWD_0620_9700_W58RGZ12D0089_9700",
+      "retrieved_at": "2026-09-07T17:41:18Z",
+      "source_status": "cached",
+      "connector_error": null,
+      "simulated": false
+    },
+    {
+      "id": "src_ndia_49_contract_award",
+      "connector": "sam",
+      "source": "SAM.gov Entity Management",
+      "catalog_ids": ["ndia:49"],
+      "record_kind": "contract_reference",
+      "source_identifier": "UEI K63KMZD596X8",
+      "cache_fixture": "2505636c3c8705e3cba843550e040bd7b88bcc2a.json",
+      "source_url": "https://sam.gov/entity/K63KMZD596X8/coreData",
+      "retrieved_at": "2026-09-08T00:15:32Z",
+      "source_status": "cached",
+      "connector_error": null,
+      "simulated": false
+    },
+    {
+      "id": "src_ndia_62_gdelt",
+      "connector": "gdelt",
+      "source": "GDELT",
+      "catalog_ids": ["ndia:62"],
+      "record_kind": "cached_media_evidence",
+      "source_identifier": "20260908160000-92",
+      "cache_fixture": "gdelt_gkg_20260908160000_92.json",
+      "source_url": "https://data.gdeltproject.org/gdeltv2/20260908160000.gkg.csv.zip",
+      "retrieved_at": "2026-09-08T16:00:00Z",
+      "source_status": "cached",
+      "connector_error": null,
+      "simulated": false
+    }
+  ]
+}

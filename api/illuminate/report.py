@@ -127,7 +127,14 @@ async def supply_position(entity_id: str, root_id: str | None) -> dict:
         MATCH (e:Entity {id:$id})-[s:SUPPLIES]->(c:Entity)
          RETURN c.id AS id, c.name AS name, coalesce(s.id, elementId(s)) AS edge_id,
                  s.tier AS tier, s.sole_source AS sole_source, s.psc AS psc, s.naics AS naics,
-                s.contract_ref AS contract_ref, s.amount AS amount, s.source AS source, s.source_url AS source_url,
+                s.contract_ref AS contract_ref, s.amount AS amount, s.source AS source,
+                s.source_id AS source_id, s.source_identifier AS source_identifier,
+                s.catalog_ids AS catalog_ids, s.source_url AS source_url,
+                s.usage_note AS usage_note, s.quality_note AS quality_note,
+                s.supports AS supports, s.unknowns AS unknowns,
+                s.source_status AS source_status, s.connector_error AS connector_error,
+                s.connector_error_type AS connector_error_type,
+                s.connector_error_status AS connector_error_status,
                 coalesce(s.id, elementId(s)) AS evidence_id, s.claim_id AS claim_id, s.status AS status,
                 s.retrieved_at AS retrieved_at, s.confidence AS confidence,
                 coalesce(s.simulated,false) OR coalesce(c.simulated,false) AS simulated
@@ -143,7 +150,12 @@ async def supply_position(entity_id: str, root_id: str | None) -> dict:
         WITH e, s, c, sc ORDER BY coalesce(s.id, elementId(s))
         RETURN collect({
           sole_source:s.sole_source, contract_ref:s.contract_ref,
-          source:s.source, source_url:s.source_url,
+          source:s.source, source_id:s.source_id, source_identifier:s.source_identifier,
+          catalog_ids:s.catalog_ids, source_url:s.source_url,
+          usage_note:s.usage_note, quality_note:s.quality_note,
+          supports:s.supports, unknowns:s.unknowns, source_status:s.source_status,
+          connector_error:s.connector_error, connector_error_type:s.connector_error_type,
+          connector_error_status:s.connector_error_status,
           evidence_id:coalesce(s.id, elementId(s)), claim_id:s.claim_id,
           status:s.status, retrieved_at:s.retrieved_at, confidence:s.confidence,
           simulated:coalesce(s.simulated,false),
@@ -202,11 +214,35 @@ async def people(entity_id: str) -> dict:
               MATCH (:Artifact)-[r2e:EVIDENCES]->(rc2) WHERE coalesce(r2e.simulated,false)
             } END,
             source:coalesce(r2.source,rc2.source),
+            source_id:coalesce(r2.source_id,rc2.source_id),
+            source_identifier:coalesce(r2.source_identifier,rc2.source_identifier),
+            catalog_ids:coalesce(r2.catalog_ids,rc2.catalog_ids),
+            retrieved_at:coalesce(r2.retrieved_at,rc2.retrieved_at),
+            usage_note:coalesce(r2.usage_note,rc2.usage_note),
+            quality_note:coalesce(r2.quality_note,rc2.quality_note),
+            supports:coalesce(r2.supports,rc2.supports),
+            unknowns:coalesce(r2.unknowns,rc2.unknowns),
+            source_status:coalesce(r2.source_status,rc2.source_status),
+            connector_error:coalesce(r2.connector_error,rc2.connector_error),
+            connector_error_type:coalesce(r2.connector_error_type,rc2.connector_error_type),
+            connector_error_status:coalesce(r2.connector_error_status,rc2.connector_error_status),
             source_url:coalesce(r2.source_url,head([(r2a:Artifact)-[:EVIDENCES]->(rc2) | r2a.url]))}) AS elsewhere
         RETURN p.id AS person_id, p.name AS name, coalesce(r.id,elementId(r)) AS edge_id,
                r.claim_id AS claim_id, r.title AS title, r.role_type AS role_type, r.from AS from, r.to AS to,
                coalesce(r.current, r.to IS NULL) AS current, coalesce(r.source,rc.source) AS source,
+               coalesce(r.source_id,rc.source_id) AS source_id,
+               coalesce(r.source_identifier,rc.source_identifier) AS source_identifier,
+               coalesce(r.catalog_ids,rc.catalog_ids) AS catalog_ids,
                coalesce(r.source_url,head([(ra:Artifact)-[:EVIDENCES]->(rc) | ra.url])) AS source_url,
+               coalesce(r.retrieved_at,rc.retrieved_at) AS retrieved_at,
+               coalesce(r.usage_note,rc.usage_note) AS usage_note,
+               coalesce(r.quality_note,rc.quality_note) AS quality_note,
+               coalesce(r.supports,rc.supports) AS supports,
+               coalesce(r.unknowns,rc.unknowns) AS unknowns,
+               coalesce(r.source_status,rc.source_status) AS source_status,
+               coalesce(r.connector_error,rc.connector_error) AS connector_error,
+               coalesce(r.connector_error_type,rc.connector_error_type) AS connector_error_type,
+               coalesce(r.connector_error_status,rc.connector_error_status) AS connector_error_status,
                coalesce(rc.simulated,false) AS claim_simulated,
                CASE WHEN rc IS NULL THEN false ELSE EXISTS {
                  MATCH (ra:Artifact)-[:EVIDENCES]->(rc) WHERE coalesce(ra.simulated,false)
@@ -245,11 +281,27 @@ async def screens(entity_id: str) -> list[dict]:
         MATCH (c:Claim)-[asserts:ASSERTS]->(e:Entity {id:$id})
         WHERE c.predicate ENDS WITH '_screen'
         OPTIONAL MATCH (a:Artifact)-[evidences:EVIDENCES]->(c)
-        WITH c, asserts, collect(DISTINCT a{.id,.title,.url,.source,.retrieved_at,.simulated,
-          evidence_edge_id:evidences.id, evidence_simulated:coalesce(evidences.simulated,false)}) AS artifacts
+        WITH c, asserts, collect(DISTINCT a{.id,.title,.url,.source,.source_id,.source_identifier,
+          .catalog_ids,.retrieved_at,.usage_note,.quality_note,.supports,.unknowns,.source_status,
+          .connector_error,.connector_error_type,.connector_error_status,.simulated,
+          evidence_edge_id:evidences.id, evidence_source:evidences.source,
+          evidence_source_id:evidences.source_id, evidence_source_identifier:evidences.source_identifier,
+          evidence_catalog_ids:evidences.catalog_ids, evidence_retrieved_at:evidences.retrieved_at,
+          evidence_usage_note:evidences.usage_note, evidence_quality_note:evidences.quality_note,
+          evidence_supports:evidences.supports, evidence_unknowns:evidences.unknowns,
+          evidence_source_status:evidences.source_status,
+          evidence_connector_error:evidences.connector_error,
+          evidence_connector_error_type:evidences.connector_error_type,
+          evidence_connector_error_status:evidences.connector_error_status,
+          evidence_simulated:coalesce(evidences.simulated,false)}) AS artifacts
         ORDER BY c.retrieved_at DESC, c.id
         RETURN collect({
           claim_id:c.id, predicate:c.predicate, result:c.object_value, source:c.source,
+          source_id:c.source_id, source_identifier:c.source_identifier, catalog_ids:c.catalog_ids,
+          source_url:c.source_url, usage_note:c.usage_note, quality_note:c.quality_note,
+          supports:c.supports, unknowns:c.unknowns, source_status:c.source_status,
+          connector_error:c.connector_error, connector_error_type:c.connector_error_type,
+          connector_error_status:c.connector_error_status,
           confidence:c.confidence, status:c.status, asserts_edge_id:asserts.id,
           simulated:coalesce(c.simulated,false) OR coalesce(asserts.simulated,false),
           retrieved_at:c.retrieved_at, artifacts:artifacts, detail:c.detail

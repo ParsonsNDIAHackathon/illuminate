@@ -16,7 +16,11 @@ ROWS = [
         "claim_id": "clm_1", "predicate": "sole_source_dependency", "object_value": True,
         "detail": "one source", "risk_score": 75, "risk_level": "high", "risk_category": "concentration",
         "risk_rationale": "one source", "recommendation": "qualify another source", "source": "USAspending",
+        "source_id": "usaspending-v2", "source_identifier": "award-123", "catalog_ids": ["ndia:1"],
         "source_url": "https://example.test/award", "retrieved_at": "2026-09-08T10:00:00Z",
+        "usage_note": "public domain", "quality_note": "award record",
+        "supports": "federal award linkage", "unknowns": "does not prove performance",
+        "source_status": "retrieved",
         "method": "connector", "confidence": .9, "classification": "UNCLASSIFIED", "license": "CC0-1.0",
         "quality_score": .9, "completeness": .8, "quality_notes": None, "status": "committed",
         "claim_simulated": False, "subject_id": "ent_1", "subject_type": "Entity",
@@ -30,7 +34,15 @@ ROWS = [
         "subject_name": "Scenario Supplier", "subject_simulated": False,
         "targets": [{"id": "loc_CN", "type": "Location", "name": "China", "simulated": False}],
         "artifacts": [{"id": "art_1", "title": "Registry", "source": "registry", "source_url": "https://example.test",
-                       "retrieved_at": "2026-09-08T11:00:00Z", "simulated": False}],
+                       "retrieved_at": "2026-09-08T11:00:00Z", "simulated": False,
+                       "evidence_present": True, "evidence_source": "OpenCorporates",
+                       "evidence_source_id": "opencorporates-v0.4",
+                       "evidence_retrieved_at": "2026-09-08T11:00:00Z",
+                       "evidence_usage_note": "subject to provider terms",
+                       "evidence_quality_note": "jurisdiction coverage varies",
+                       "evidence_supports": "company registry discovery",
+                       "evidence_unknowns": "does not establish beneficial ownership",
+                       "evidence_source_status": "retrieved", "evidence_simulated": False}],
         "observed": "2026-09-08T11:00:00Z",
         "identity_key": "clm_2|ent_2",
     },
@@ -73,6 +85,12 @@ async def test_schema_and_canonical_page_validate(fake_db):
     risk_finding = next(f for f in validated.findings if f.risk.score == 75)
     simulated_finding = next(f for f in validated.findings if f.simulated)
     assert risk_finding.object_value is True
+    claim_lineage = next(item for item in risk_finding.provenance if item.scope == "claim")
+    assert claim_lineage.catalog_ids == ["ndia:1"]
+    assert claim_lineage.source_identifier == "award-123"
+    evidence_lineage = next(item for item in simulated_finding.provenance if item.scope == "evidence")
+    assert evidence_lineage.source_id == "opencorporates-v0.4"
+    assert evidence_lineage.unknowns == "does not establish beneficial ownership"
     assert {p.edges[0].type for p in simulated_finding.paths} == {"ASSERTS", "TARGETS", "EVIDENCES"}
     assert "properties" in exports.FindingPage.model_json_schema()
 
@@ -157,7 +175,11 @@ def test_linked_metadata_changes_payload_at_same_observation_time():
     before = exports._finding(ROWS[1]).model_dump_json()
     changed = dict(ROWS[1])
     changed["subject_name"] = "Renamed Scenario Supplier"
-    changed["artifacts"] = [dict(ROWS[1]["artifacts"][0], license="CC-BY-4.0")]
+    changed["artifacts"] = [dict(
+        ROWS[1]["artifacts"][0],
+        evidence_source_status="updated",
+        evidence_catalog_ids=["ndia:future"],
+    )]
     after = exports._finding(changed).model_dump_json()
     assert changed["observed"] == ROWS[1]["observed"]
     assert hashlib.sha256(before.encode()).digest() != hashlib.sha256(after.encode()).digest()

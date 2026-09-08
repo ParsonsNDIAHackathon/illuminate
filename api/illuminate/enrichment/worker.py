@@ -84,7 +84,8 @@ class Worker:
                 await self.run(job)
             except Exception as e:
                 job.status = "failed"
-                job.results["_error"] = f"{type(e).__name__}: job failed; retry or inspect service readiness"
+                safe_error = claims.connector_error_metadata(e)["connector_error"]
+                job.results["_error"] = f"{safe_error}: job failed; retry or inspect service readiness"
                 job.finished_at = time.time()
                 await self._emit("job_update", job.to_dict())
             finally:
@@ -115,7 +116,8 @@ class Worker:
                 await self._clear_summary_selection(job)
                 job.summary_status = "timed_out"
         except Exception as e:
-            job.results["_error"] = f"{type(e).__name__}: job failed; retry or inspect service readiness"
+            safe_error = claims.connector_error_metadata(e)["connector_error"]
+            job.results["_error"] = f"{safe_error}: job failed; retry or inspect service readiness"
             if job.summary_status in {"not_requested", "running"}:
                 await self._clear_summary_selection(job)
         self._set_status(job)
@@ -135,11 +137,14 @@ class Worker:
                 continue
             try:
                 st = await asyncio.wait_for(conn.status(job.user), timeout=settings.connector_timeout_s)
-            except (asyncio.TimeoutError, TimeoutError):
-                job.results[name] = {"status": "timed_out", "error": "connector status timed out", "action": "retry later; cached graph data remains available", "attempts": 0}
+            except (asyncio.TimeoutError, TimeoutError) as error:
+                source_record_id = await claims.record_connector_error(name, job.entity_id, error)
+                job.results[name] = {"status": "timed_out", "error": "connector status timed out", "action": "retry later; cached graph data remains available", "attempts": 0, "source_record_id": source_record_id}
                 continue
-            except Exception as e:
-                job.results[name] = {"status": "failed", "error": f"{type(e).__name__}: status unavailable", "action": "check connector configuration", "attempts": 0}
+            except Exception as error:
+                source_record_id = await claims.record_connector_error(name, job.entity_id, error)
+                safe_error = claims.connector_error_metadata(error)["connector_error"]
+                job.results[name] = {"status": "failed", "error": f"{safe_error}: status unavailable", "action": "check connector configuration", "attempts": 0, "source_record_id": source_record_id}
                 continue
             if not st.get("connected"):
                 job.results[name] = {"status": "skipped", "error": st.get("detail") or "connector unavailable", "action": "configure the optional connector or continue with cached data", "attempts": 0}
@@ -148,6 +153,7 @@ class Worker:
             res = {"status": "running", "facts": 0, "staged": 0, "committed": 0, "error": None, "attempts": 0}
             job.results[name] = res
             facts = None
+            connector_error = None
             for attempt in range(settings.connector_retries + 1):
                 res["attempts"] = attempt + 1
                 try:
@@ -158,12 +164,17 @@ class Worker:
                     if attempt:
                         res["recovered_after_attempts"] = attempt
                     break
-                except (asyncio.TimeoutError, TimeoutError):
+                except (asyncio.TimeoutError, TimeoutError) as error:
+                    connector_error = error
                     res.update(status="timed_out", error="connector timed out", action="retry later; cached graph data remains available")
-                except Exception as e:
-                    res.update(status="failed", error=f"{type(e).__name__}: connector failed", action="check service availability and retry")
+                except Exception as error:
+                    connector_error = error
+                    safe_error = claims.connector_error_metadata(error)["connector_error"]
+                    res.update(status="failed", error=f"{safe_error}: connector failed", action="check service availability and retry")
                 if attempt < settings.connector_retries:
                     await asyncio.sleep(min(2 ** attempt, 2))
+            if facts is None and connector_error is not None:
+                res["source_record_id"] = await claims.record_connector_error(name, job.entity_id, connector_error)
             if facts is not None:
                 res["facts"] = len(facts)
                 if not facts:
@@ -275,7 +286,8 @@ class Worker:
         except Exception as e:
             await self._clear_summary_selection(job)
             job.summary_status = "failed"
-            job.results["_summary_error"] = f"{type(e).__name__}: model summary unavailable; deterministic report remains available"
+            safe_error = claims.connector_error_metadata(e)["connector_error"]
+            job.results["_summary_error"] = f"{safe_error}: model summary unavailable; deterministic report remains available"
 
     async def _clear_summary_selection(self, job: Job) -> None:
         try:

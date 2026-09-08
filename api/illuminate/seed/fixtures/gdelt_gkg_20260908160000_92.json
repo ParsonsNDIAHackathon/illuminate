@@ -1,0 +1,25 @@
+{
+  "gkg_record_id": "20260908160000-92",
+  "gkg_version": "2.1",
+  "bulk_file_url": "https://data.gdeltproject.org/gdeltv2/20260908160000.gkg.csv.zip",
+  "bulk_md5": "b9fe4545cdec2ba43a0b1eb70d420f0a",
+  "retrieved_at": "2026-09-08T16:00:00Z",
+  "article_url": "https://www.bostonglobe.com/2026/09/07/nation/miami-cargo-jet-crash-investigation/",
+  "title": "Amazon cargo plane crash in Miami under investigation; 5 dead",
+  "domain": "bostonglobe.com",
+  "published_at": "2026-09-07T23:41:00Z",
+  "matched_entity": "Boeing",
+  "organizations": [
+    "Boeing",
+    "Transportation Department",
+    "Miami International Airport"
+  ],
+  "themes": [
+    "MANMADE_DISASTER_IMPLIED",
+    "WB_135_TRANSPORT",
+    "WB_1803_TRANSPORT_INFRASTRUCTURE"
+  ],
+  "tone": -3.54457572502685,
+  "usage_note": "Metadata excerpt from the public GDELT 2.1 GKG bulk feed; linked publisher content retains its own terms.",
+  "quality_note": "Organization extraction and tone are automated leads; this record does not establish supplier fault or a verified risk finding."
+}

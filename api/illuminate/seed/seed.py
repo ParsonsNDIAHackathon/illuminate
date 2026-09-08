@@ -29,8 +29,10 @@ from ..ids import edge_id, entity_id, location_id, normalize_name, person_id, ar
 from ..schema import ensure_schema
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+CATALOG_FIXTURE = FIXTURES / "catalog_lineage.json"
 PROV = {"source": "USAspending", "method": "connector", "confidence": 0.95}
 SEED_VERSION = "uc7-fixtures-v1"
+from ..connectors.registry import source_metadata
 
 
 def log(msg: str) -> None:
@@ -66,7 +68,22 @@ async def merge_rel(src: str, rel: str, dst: str, props: dict, key_props: dict |
 async def merge_artifact(aid: str, props: dict, about: str) -> None:
     props = {k: v for k, v in props.items() if v is not None}
     props.setdefault("retrieved_at", now_iso())
-    await db.write("MERGE (a:Artifact {id:$id}) SET a += $p WITH a MATCH (e {id:$e}) MERGE (a)-[r:ABOUT]->(e) ON CREATE SET r.id=$rid", {"id": aid, "p": props, "e": about, "rid": edge_id()})
+    ingested_at = now_iso()
+    source_key = {"USAspending": "usaspending", "GDELT": "gdelt", "GLEIF": "gleif", "LittleSis": "littlesis",
+                  "SEC EDGAR": "edgar", "OFAC SDN": "ofac", "OpenCorporates": "opencorporates",
+                  "SAM.gov Exclusions (public extract)": "sam_exclusions"}.get(props.get("source"))
+    if source_key:
+        for key, value in source_metadata(source_key).items():
+            props.setdefault(key, value)
+        props.setdefault("source_status", "retrieved")
+        props.setdefault("simulated", False)
+    await db.write(
+        "MERGE (a:Artifact {id:$id}) "
+        "ON CREATE SET a += $p, a.first_ingested_at=$ingested "
+        "SET a.last_ingested_at=$ingested "
+        "WITH a MATCH (e {id:$e}) MERGE (a)-[r:ABOUT]->(e) ON CREATE SET r.id=$rid",
+        {"id": aid, "p": props, "ingested": ingested_at, "e": about, "rid": edge_id()},
+    )
 
 
 def _country(loc: dict | None) -> str | None:
@@ -231,7 +248,9 @@ async def enrich_with(connector_names: list[str], entity_ids: list[str], *, comm
             try:
                 facts = await conn.enrich(rows[0]["e"], "local")
             except Exception as e:
-                log(f"  {name}: {rows[0]['e']['name']}: {type(e).__name__}: {str(e)[:100]}")
+                await claims.record_connector_error(name, eid, e)
+                safe_error = claims.connector_error_metadata(e)["connector_error"]
+                log(f"  {name}: {rows[0]['e']['name']}: {safe_error}")
                 if type(e).__name__ == "SAMRateLimited":
                     log(f"  {name}: stopping this pass — remaining entities keep their cached results only")
                     break
@@ -245,7 +264,57 @@ async def enrich_with(connector_names: list[str], entity_ids: list[str], *, comm
                 n_commit += st == "committed"
         log(f"{name}: {n_facts} facts, {n_commit} committed over {len(entity_ids)} entities")
 
+async def seed_catalog_lineage() -> None:
+    """Load deterministic representative retrieval records for the judged catalog path."""
+    records = json.loads(CATALOG_FIXTURE.read_text())["records"]
+    for raw_record in records:
+        record = dict(raw_record)
+        cached = json.loads((FIXTURES / record["cache_fixture"]).read_text())
+        stamp = cached.get("_ts") or cached.get("retrieved_at")
+        if isinstance(stamp, (int, float)):
+            stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(stamp))
+        if not stamp:
+            raise ValueError(f"catalog fixture {record['cache_fixture']} has no retrieval timestamp")
+        record["retrieved_at"] = stamp
+        ingested_at = now_iso()
+        meta = source_metadata(record["connector"])
+        await db.write(
+            "MERGE (r:SourceRecord {id:$id}) "
+            "ON CREATE SET r += $meta, r += $record, r.first_ingested_at=$ingested "
+            "SET r.last_ingested_at=$ingested",
+            {"id": record["id"], "meta": meta, "record": record, "ingested": ingested_at},
+        )
 
+async def seed_cached_gdelt() -> bool:
+    """Ingest one attributable GKG record so the offline demo has real cached media evidence."""
+    record = json.loads((FIXTURES / "gdelt_gkg_20260908160000_92.json").read_text())
+    subject = await db.read(
+        "MATCH (e:Entity) WHERE toLower(e.name) CONTAINS $name RETURN e.id AS id ORDER BY e.name LIMIT 1",
+        {"name": record["matched_entity"].lower()},
+    )
+    if not subject:
+        log(f"GDELT cached record {record['gkg_record_id']}: no {record['matched_entity']} entity; association skipped")
+        return False
+    entity = subject[0]["id"]
+    await merge_artifact(
+        artifact_id(record["article_url"]),
+        {
+            "kind": "news",
+            "title": record["title"],
+            "url": record["article_url"],
+            "source": "GDELT",
+            "source_identifier": record["gkg_record_id"],
+            "retrieved_at": record["retrieved_at"],
+            "source_status": "cached",
+            "published_at": record["published_at"],
+            "domain": record["domain"],
+            "sentiment": record["tone"],
+            "gkg_bulk_file": record["bulk_file_url"],
+            "gkg_bulk_md5": record["bulk_md5"],
+        },
+        entity,
+    )
+    return True
 async def scenario(root_id: str) -> None:
     """A clearly-labelled simulated adversarial tie (the brief allows 'simulated or
     historical'). Every node/edge carries simulated=true and a '(simulated)' suffix."""
@@ -310,7 +379,9 @@ async def main_async(args) -> None:
     await ensure_schema()
     if args.reset:
         await reset_graph()
+    await seed_catalog_lineage()
     info = await seed_program(args.keyword, args.root_name, since=args.since, until=args.until, max_primes=args.primes, max_subs=args.subs, agency=args.agency)
+    await seed_cached_gdelt()
     ws = load_workspace()
     ws.root_id, ws.root_label = info["root_id"], info["root_name"]
     save_workspace(ws)

@@ -115,8 +115,14 @@ async def artifacts(kind: str | None = None, entity_id: str | None = None, limit
         MATCH (a:Artifact) WHERE {' AND '.join(where)}
         OPTIONAL MATCH (a)-[:ABOUT]->(e:Entity)
         OPTIONAL MATCH (a)-[:EVIDENCES]->(c:Claim)
-        RETURN a.id AS id, a.kind AS kind, a.title AS title, a.url AS url, a.source AS source, a.published_at AS published_at, a.retrieved_at AS retrieved_at,
-               a.amount AS amount, a.sentiment AS sentiment, collect(DISTINCT e{{.id,.name}})[..5] AS about, count(DISTINCT c) AS claims
+        RETURN a.id AS id, a.kind AS kind, a.title AS title, a.url AS url, a.source AS source, a.source_id AS source_id,
+               a.source_identifier AS source_identifier,
+               a.catalog_ids AS catalog_ids, a.published_at AS published_at, a.retrieved_at AS retrieved_at,
+               a.usage_note AS usage_note, a.quality_note AS quality_note, a.supports AS supports, a.unknowns AS unknowns,
+               a.source_status AS source_status,
+               a.connector_error AS connector_error, coalesce(a.simulated,false) AS simulated,
+               a.amount AS amount, a.sentiment AS sentiment, collect(DISTINCT e{{.id,.name}})[..5] AS about,
+               count(DISTINCT c) AS claims, collect(DISTINCT c.status) AS claim_statuses
         ORDER BY coalesce(a.published_at, a.retrieved_at) DESC LIMIT $limit
         """,
         params,

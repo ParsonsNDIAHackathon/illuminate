@@ -15,6 +15,7 @@ LABELS: dict[str, str] = {
     "Location": "Country / region / city. kind ∈ {country, region, city}; code is ISO-3166 where applicable.",
     "Artifact": "Evidence: filing, award record, registry record, news article, web page. Never a raw blob.",
     "Claim": "Reified assertion (subject, predicate, object) with source, method, confidence, status ∈ {staged, committed, rejected}.",
+    "SourceRecord": "A normalized source retrieval or connector attempt, including catalog identity, coverage limits, status, and any non-secret error.",
 }
 
 # --- Relationship types ----------------------------------------------------------
@@ -37,7 +38,11 @@ RELS: dict[str, str] = {
 }
 
 # Provenance every node and edge written by the system carries (Entity metadata table).
-PROVENANCE_FIELDS = ["source", "source_url", "retrieved_at", "method", "confidence", "claim_id"]
+PROVENANCE_FIELDS = [
+    "source", "source_id", "catalog_ids", "source_url", "retrieved_at",
+    "usage_note", "quality_note", "supports", "unknowns", "source_status",
+    "connector_error", "method", "confidence", "claim_id", "simulated",
+]
 
 # Claim truth states used by deterministic consumers such as vendor-risk scoring.
 # Only committed, non-simulated claims and artifacts are eligible as approved facts.
@@ -91,6 +96,7 @@ CONSTRAINTS = [
     "CREATE CONSTRAINT location_id IF NOT EXISTS FOR (n:Location) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT artifact_id IF NOT EXISTS FOR (n:Artifact) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT claim_id IF NOT EXISTS FOR (n:Claim) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT source_record_id IF NOT EXISTS FOR (n:SourceRecord) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT export_state_key IF NOT EXISTS FOR (n:InsightExportState) REQUIRE (n.version, n.finding_id) IS UNIQUE",
     "CREATE CONSTRAINT export_event_key IF NOT EXISTS FOR (n:InsightExportEvent) REQUIRE (n.version, n.revision) IS UNIQUE",
     "CREATE CONSTRAINT export_counter_version IF NOT EXISTS FOR (n:InsightExportCounter) REQUIRE n.version IS UNIQUE",
