@@ -13,6 +13,7 @@ from typing import Any, Callable
 from ..config import settings
 
 MAX_DEPTH = settings.cypher_max_hops
+MAX_SUBGRAPH_NODES = 1000
 
 
 def _depth(v, default=3) -> int:
@@ -21,6 +22,14 @@ def _depth(v, default=3) -> int:
     except Exception:
         d = default
     return max(1, min(MAX_DEPTH, d))
+
+
+def _subgraph_limit(v, default=400) -> int:
+    try:
+        limit = int(v)
+    except (TypeError, ValueError):
+        limit = default
+    return max(1, min(MAX_SUBGRAPH_NODES, limit))
 
 
 @dataclass
@@ -235,7 +244,7 @@ def _neighbourhood(p):
         f"CALL apoc.path.subgraphAll(root, {{maxLevel:{d}, relationshipFilter:'{rf}', limit:$limit}}) YIELD nodes, relationships\n"
         "RETURN nodes, relationships LIMIT 1"
     )
-    return cy, {"id": p["entity_id"], "limit": int(p.get("limit", 400))}
+    return cy, {"id": p["entity_id"], "limit": _subgraph_limit(p.get("limit", 400))}
 
 
 TEMPLATES: dict[str, Template] = {

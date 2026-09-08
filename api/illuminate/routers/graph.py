@@ -23,13 +23,13 @@ async def stats():
 
 
 @router.get("/graph/search")
-async def search(q: str, kind: str = "any", limit: int = 10, user: str = Depends(user_id)):
+async def search(q: str, kind: str = "any", limit: int = Query(10, ge=1, le=50), user: str = Depends(user_id)):
     r = await search_entities(ToolContext.from_workspace(source="ui", user=user), q, kind, limit)
     return r.data
 
 
 @router.get("/graph/subgraph")
-async def subgraph(entity_id: str, depth: int = 2, people: bool = True, countries: bool = False, artifacts: bool = False, categories: bool = False, user: str = Depends(user_id)):
+async def subgraph(entity_id: str, depth: int = Query(2, ge=1, le=6), people: bool = True, countries: bool = False, artifacts: bool = False, categories: bool = False, user: str = Depends(user_id)):
     ctx = ToolContext.from_workspace(source="ui", user=user)
     r = await expand_subgraph(ctx, entity_id, depth, {"people": people, "countries": countries, "artifacts": artifacts, "categories": categories})
     return {"subgraph": r.subgraph, "cypher": r.cypher, "params": r.params}
@@ -48,7 +48,7 @@ async def node(node_id: str):
 
 
 @router.get("/entities")
-async def entities(q: str | None = None, kind: str | None = None, flagged: bool | None = None, limit: int = Query(100, le=1000), offset: int = 0):
+async def entities(q: str | None = None, kind: str | None = None, flagged: bool | None = None, limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0, le=100000)):
     where = ["1=1"]
     params: dict = {"limit": limit, "offset": offset}
     if q:
@@ -80,7 +80,7 @@ async def entities(q: str | None = None, kind: str | None = None, flagged: bool 
 
 
 @router.get("/people")
-async def people(q: str | None = None, limit: int = Query(200, le=1000)):
+async def people(q: str | None = None, limit: int = Query(200, ge=1, le=1000)):
     params: dict = {"limit": limit}
     where = "WHERE toLower(p.name) CONTAINS toLower($q)" if q else ""
     if q:
@@ -99,7 +99,7 @@ async def people(q: str | None = None, limit: int = Query(200, le=1000)):
 
 
 @router.get("/artifacts")
-async def artifacts(kind: str | None = None, entity_id: str | None = None, limit: int = Query(200, le=1000)):
+async def artifacts(kind: str | None = None, entity_id: str | None = None, limit: int = Query(200, ge=1, le=1000)):
     where = ["1=1"]
     params: dict = {"limit": limit}
     if kind:

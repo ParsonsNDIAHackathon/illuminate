@@ -15,6 +15,13 @@ def test_depth_is_capped():
     assert "*1..6]" in cy
 
 
+def test_neighbourhood_result_size_is_bounded():
+    _, params = TEMPLATES["neighbourhood"].build({"entity_id": "x", "limit": 999999})
+    assert params["limit"] == 1000
+    _, params = TEMPLATES["neighbourhood"].build({"entity_id": "x", "limit": -1})
+    assert params["limit"] == 1
+
+
 def test_intent_matching():
     assert match_intent("for all of Sikorsky's vendors, highlight goods in purple and services in yellow") == "color_by_category"
     assert match_intent("highlight all entities that rely on manufacturing in country CN, include tier 2 and below") == "manufactures_in"

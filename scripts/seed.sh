@@ -10,6 +10,8 @@ if [ -n "$($COMPOSE ps -q --status running api 2>/dev/null)" ]; then
   exec $COMPOSE exec -T api python "${args[@]}"
 elif [ -x api/.venv/bin/python ]; then
   cd api && exec .venv/bin/python "${args[@]}"
+elif (cd api && python3 -c 'import illuminate' 2>/dev/null); then
+    cd api && exec python3 "${args[@]}"
 elif command -v docker >/dev/null 2>&1; then
   # Nothing up yet: a one-off api container, which starts neo4j first via depends_on.
   exec $COMPOSE run --rm api python "${args[@]}"
