@@ -28,6 +28,10 @@ ORG_MATCH = 92
 PERSON_MATCH = 90
 
 
+class ListCoverageError(ValueError):
+    """The fetched payload cannot support an authoritative clear result."""
+
+
 def _names(node: ET.Element, alias_tag: str) -> list[str]:
     """A designation's primary name plus its aliases. Individuals split their name over
     FIRST_NAME..FOURTH_NAME; entities put the whole name in FIRST_NAME."""
@@ -58,7 +62,19 @@ def _record(node: ET.Element, alias_tag: str) -> dict | None:
 
 def parse(xml: str) -> dict:
     """Slim the 2MB list down to what a screen needs. Returns {generated, entities, individuals}."""
-    root = ET.fromstring(xml)
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError as exc:
+        raise ListCoverageError("UN sanctions response is not valid XML") from exc
+    if root.tag != "CONSOLIDATED_LIST":
+        raise ListCoverageError(
+            f"UN sanctions response has unexpected root element {root.tag!r}"
+        )
+    generated = (root.get("dateGenerated") or "").strip()
+    if not generated:
+        raise ListCoverageError("UN sanctions list is missing its generation timestamp")
+    if root.find("./ENTITIES") is None or root.find("./INDIVIDUALS") is None:
+        raise ListCoverageError("UN sanctions list is missing a designation section")
     entities, individuals = [], []
     for node in root.findall("./ENTITIES/ENTITY"):
         rec = _record(node, "ENTITY_ALIAS")
@@ -69,7 +85,9 @@ def parse(xml: str) -> dict:
         if rec:
             rec["nationality"] = (node.findtext("./NATIONALITY/VALUE") or "").strip()
             individuals.append(rec)
-    return {"generated": root.get("dateGenerated", ""), "entities": entities, "individuals": individuals}
+    if not entities or not individuals:
+        raise ListCoverageError("UN sanctions list has no usable entity or individual coverage")
+    return {"generated": generated, "entities": entities, "individuals": individuals}
 
 
 async def consolidated_list() -> dict:
@@ -108,7 +126,8 @@ def _person_score(a: str, b: str) -> float:
 
 def screen(name: str, aliases: list[str] | None = None, listing: dict | None = None) -> dict:
     """Screen an organisation against the ENTITIES section."""
-    listing = listing or {}
+    if not listing or not listing.get("generated") or not listing.get("entities"):
+        raise ListCoverageError("UN sanctions entity coverage is unavailable")
     rows = listing.get("entities", [])
     queries = [n for n in [name, *(aliases or [])] if n]
     hits = _hits(rows, queries, ORG_MATCH, name_match_score)
@@ -117,7 +136,8 @@ def screen(name: str, aliases: list[str] | None = None, listing: dict | None = N
 
 def screen_person(name: str, aliases: list[str] | None = None, listing: dict | None = None) -> dict:
     """Screen a named individual against the INDIVIDUALS section."""
-    listing = listing or {}
+    if not listing or not listing.get("generated") or not listing.get("individuals"):
+        raise ListCoverageError("UN sanctions individual coverage is unavailable")
     rows = listing.get("individuals", [])
     queries = [n for n in [name, *(aliases or [])] if n]
     hits = _hits(rows, queries, PERSON_MATCH, _person_score)

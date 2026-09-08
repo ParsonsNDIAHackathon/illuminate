@@ -321,6 +321,20 @@ Validate with `make validate-bom`; regenerate this view with `make generate-bom`
 - **Fallback:** Continue without this optional source and show coverage limitations
 - **Review:** `review_required`
 
+### UN Security Council Consolidated List (`un-sc-consolidated`)
+
+- **Class / required:** external-data; optional
+- **Purpose:** Optional evidence capability for sanctions
+- **Coverage / limits:** Name matching requires analyst review and list coverage does not implement legal ownership analysis.
+- **Terms/license:** [Provider terms apply; REVIEW_REQUIRED before new redistribution or production use](https://scsanctions.un.org/resources/xml/en/consolidated.xml)
+- **Attribution/redistribution:** Preserve source URL, retrieval time, and provider attribution; redistribution rights REVIEW_REQUIRED
+- **Access:** public read-only HTTPS; credentials/rate limits: none
+- **Cost (2026-09-08):** Public/free or account-billed depending on provider tier; variable pricing REVIEW_REQUIRED
+- **Freshness/storage:** 24 hours; cached records retain provenance; storage/retention terms REVIEW_REQUIRED
+- **If omitted:** UN Security Council Consolidated List evidence/enrichment is unavailable; core deterministic graph remains usable
+- **Fallback:** Continue without this optional source and show coverage limitations
+- **Review:** `review_required`
+
 ### OpenCorporates (`opencorporates`)
 
 - **Class / required:** external-data; optional

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -108,3 +109,63 @@ def test_entity_report_presents_ownership_lineage_and_missing_states():
     assert "claim_id: o.claim.id" in report_view
     assert "@click=\"rawId = a.id\"" in report_view
     assert "claim_id=${encodeURIComponent(claimId)}" in claims_view
+
+
+@pytest.mark.asyncio
+async def test_build_report_preserves_assembled_ownership_contract(monkeypatch):
+    monkeypatch.setattr(report, "entity_core", AsyncMock(return_value={
+        "e": {"id": "ent_target", "name": "Target"},
+        "ownership": [{"claim": {"id": "clm_owner"}, "owner": {"id": "ent_parent"}}],
+        "direct_parents": [],
+        "ultimate_parents": [],
+        "incorporated": [],
+        "parent_seat": [],
+        "manufactures": [],
+        "operates": [],
+        "categories": [],
+    }))
+    monkeypatch.setattr(report, "supply_position", AsyncMock(return_value={"supplies": [], "risk_evidence": []}))
+    monkeypatch.setattr(report, "people", AsyncMock(return_value={"current": [], "former": []}))
+    monkeypatch.setattr(report, "screens", AsyncMock(return_value=[]))
+    monkeypatch.setattr(report, "artifacts", AsyncMock(return_value=[]))
+    monkeypatch.setattr(report, "news", AsyncMock(return_value=[]))
+    monkeypatch.setattr(report, "affiliations", AsyncMock(return_value={
+        "memberships": [], "transactions": [], "lobbying": [], "donations": [],
+        "subsidiaries": [], "count": 0,
+    }))
+
+    assembled = await report.build_report("ent_target")
+
+    assert assembled is not None
+    assert assembled["control"]["ownership"] == [
+        {"claim": {"id": "clm_owner"}, "owner": {"id": "ent_parent"}}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_affiliations_normalize_legacy_org_type_strings_and_unknown_jurisdiction(monkeypatch):
+    reads = AsyncMock(side_effect=[
+        [{
+            "type": "MEMBER_OF",
+            "edge_id": "rel_1",
+            "outbound": True,
+            "entity_id": "ent_group",
+            "entity": "United Kingdom Industry Council",
+            "kind": "organization",
+            "federal": False,
+            "flagged": False,
+            "org_types": "Organization|Business",
+            "incorporated": None,
+            "parent_seat": None,
+            "current": True,
+        }],
+        [],
+    ])
+    monkeypatch.setattr(report.db, "read", reads)
+
+    result = await report.affiliations("ent_target")
+
+    tie = result["memberships"][0]
+    assert tie["org_types"] == ["Organization", "Business"]
+    assert tie["foreign"] is None
+    assert tie["foreign_hint"] is True

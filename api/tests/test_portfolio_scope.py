@@ -32,9 +32,11 @@ async def test_mission_portfolio_is_supply_only_paginated_and_mission_relative(m
 
     rows_query, params = queries[0]
     total_query, _ = queries[1]
-    assert f"[:SUPPLIES*1..{SUPPLY_SCOPE_MAX_DEPTH}]" in rows_query
-    assert "min(length(path)) AS tier" in rows_query
-    assert "OWNS" not in rows_query and "ULTIMATE_PARENT_OF" not in rows_query.split("OPTIONAL MATCH")[0]
+    membership_query, enrichment_query = rows_query.split("OPTIONAL MATCH", 1)
+    assert f"[:SUPPLIES*1..{SUPPLY_SCOPE_MAX_DEPTH}]" in membership_query
+    assert "min(length(path)) AS tier" in membership_query
+    assert "OWNS" not in membership_query and "ULTIMATE_PARENT_OF" not in membership_query
+    assert "OWNS|ULTIMATE_PARENT_OF" in enrichment_query
     assert "SKIP $offset LIMIT $limit" in rows_query
     assert "WITH DISTINCT e RETURN count(e) AS n" in total_query
     assert params["root_id"] == "program_a"

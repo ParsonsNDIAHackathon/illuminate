@@ -382,6 +382,16 @@ _FOREIGN_HINTS = re.compile(
 def _foreign_hint(name: str | None) -> bool:
     return bool(_FOREIGN_HINTS.search((name or "").lower()))
 
+def _string_list(value: Any) -> list[str]:
+    """Normalize legacy scalar graph properties before returning an API list."""
+    if isinstance(value, str):
+        values = re.split(r"[|,;]", value)
+    elif isinstance(value, (list, tuple, set)):
+        values = value
+    else:
+        return []
+    return list(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
+
 
 async def affiliations(entity_id: str) -> dict:
     """The entity's recorded ties beyond supply and ownership: memberships, lobbying,
@@ -415,6 +425,7 @@ async def affiliations(entity_id: str) -> dict:
     )
     rows += subs
     for r in rows:
+        r["org_types"] = _string_list(r.get("org_types"))
         code = r.get("incorporated") or r.get("parent_seat")
         r["foreign"] = (not code.upper().startswith(HOME)) if code else None
         r["foreign_hint"] = r["foreign"] is None and _foreign_hint(r.get("entity"))
@@ -1142,13 +1153,18 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
     # Report committed findings even when simulated; the separate score contract excludes
     # simulated evidence from numeric contributions.
     reported_scr = [s for s in scr if s.get("status", "committed") == "committed"]
-    sanc = next((s for s in reported_scr if s["predicate"] == "sanctions_screen"), None)
-    excl = next((s for s in reported_scr if s["predicate"] == "exclusion_screen"), None)
-    if sanc or excl:
-        hit = (sanc and sanc["result"] == "hit") or (excl and excl["result"] == "hit")
-        src = " · ".join(x["source"] for x in (sanc, excl) if x)
-        det = "; ".join(filter(None, [(sanc or {}).get("detail"), (excl or {}).get("detail")]))
-        refs = [_screen_refs(screen) for screen in (sanc, excl) if screen]
+    sanctions = [s for s in reported_scr if s["predicate"] == "sanctions_screen"]
+    exclusions = [s for s in reported_scr if s["predicate"] == "exclusion_screen"]
+    applicable_screens = sanctions + exclusions
+    if applicable_screens:
+        hit = any(screen.get("result") == "hit" for screen in applicable_screens)
+        src = " · ".join(dict.fromkeys(
+            screen["source"] for screen in applicable_screens if screen.get("source")
+        ))
+        det = "; ".join(
+            screen["detail"] for screen in applicable_screens if screen.get("detail")
+        )
+        refs = [_screen_refs(screen) for screen in applicable_screens]
         ids = list(dict.fromkeys(i for screen_ids, _, _ in refs for i in screen_ids))
         url = next((screen_url for _, screen_url, _ in refs if screen_url), None)
         simulated = any(screen_simulated for _, _, screen_simulated in refs)
@@ -1212,7 +1228,11 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
             "incorporated": core.get("incorporated"), "parent_seat": core.get("parent_seat"),
             "manufactures": core.get("manufactures"), "operates": core.get("operates"),
         },
-        "control": {"direct_parents": core.get("direct_parents"), "ultimate_parents": core.get("ultimate_parents")},
+        "control": {
+            "direct_parents": core.get("direct_parents"),
+            "ultimate_parents": core.get("ultimate_parents"),
+            "ownership": core.get("ownership") or [],
+        },
         "categories": core.get("categories"),
         "supply": supply,
         "people": ppl,

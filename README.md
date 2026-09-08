@@ -8,6 +8,8 @@ For a concise judge-facing source-to-decision view, trust boundaries, deployment
 presenter answers, see the [architecture and lineage brief](docs/architecture-lineage-brief.md).
 For the timed six-minute script, failure drills, clean-session harness, recording plan, and
 release gates, use the [judge demo rehearsal packet](docs/DEMO_REHEARSAL.md).
+For the harsh evidence-only rubric result, evaluated revision, deductions, and unresolved
+blockers, see the [versioned rubric scorecards](docs/rubric-scorecards/README.md).
 For role-specific goals, safety expectations, and executable review scenarios, see the
 [NDIA user personas](docs/NDIA_USER_PERSONAS.md).
 
@@ -34,7 +36,6 @@ secret in commands, remote URLs, files, or Git configuration.
 
 Requires Docker and `make`. For the host-side dev loop (hot reload) you also need
 Python ≥ 3.12 and Node ≥ 20.
-
 
 ### Validate data sources
 

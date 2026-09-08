@@ -445,6 +445,26 @@
       "declaration_summary": "available via ofac at https://sanctionslistservice.ofac.treas.gov/"
     },
     {
+      "id": "un-sc-consolidated",
+      "name": "UN Security Council Consolidated List",
+      "kind": "external-data",
+      "purpose": "Optional evidence capability for sanctions",
+      "coverage": "Name matching requires analyst review and list coverage does not implement legal ownership analysis.",
+      "terms_reference": "https://scsanctions.un.org/resources/xml/en/consolidated.xml",
+      "license_or_terms": "Provider terms apply; REVIEW_REQUIRED before new redistribution or production use",
+      "attribution_redistribution": "Preserve source URL, retrieval time, and provider attribution; redistribution rights REVIEW_REQUIRED",
+      "access_credentials_rate_limits": "public read-only HTTPS; credentials/rate limits: none",
+      "cost_model": "Public/free or account-billed depending on provider tier; variable pricing REVIEW_REQUIRED",
+      "cost_as_of": "2026-09-08",
+      "freshness_storage": "24 hours; cached records retain provenance; storage/retention terms REVIEW_REQUIRED",
+      "required": false,
+      "omission_impact": "UN Security Council Consolidated List evidence/enrichment is unavailable; core deterministic graph remains usable",
+      "fallback": "Continue without this optional source and show coverage limitations",
+      "review_status": "review_required",
+      "declaration_fingerprint": "cf0a7354c383c0f6b6ef4f85ec0860beba930c1b201a526c030cb739a3c29ca3",
+      "declaration_summary": "available via un_sanctions at https://scsanctions.un.org/resources/xml/en/consolidated.xml"
+    },
+    {
       "id": "opencorporates",
       "name": "OpenCorporates",
       "kind": "external-data",
@@ -561,8 +581,8 @@
       "omission_impact": "Offline deterministic mission data and startup readiness are unavailable",
       "fallback": "Refresh through reviewed connectors and preserve provenance before replacing snapshots.",
       "review_status": "review_required",
-      "declaration_fingerprint": "9ef1bb0ee1ec8948c6d2e83e353911993396f7935ef23d8ce2662098b9903786",
-      "declaration_summary": "255 committed files (.gz, .json, .txt)"
+      "declaration_fingerprint": "77c1baefa12cc803abd4e7dc95e2695b46820a8a438e472462a609cbbebdd88d",
+      "declaration_summary": "901 committed files (.gz, .json, .txt)"
     }
   ],
   "software_components": [

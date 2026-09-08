@@ -66,6 +66,36 @@ def test_an_empty_alias_element_is_not_read_as_a_name(listing):
     assert listing["individuals"][0]["aliases"] == []
 
 
+@pytest.mark.parametrize("payload", [
+    "<Error><Code>UpstreamFailure</Code></Error>",
+    "<CONSOLIDATED_LIST dateGenerated='2026-09-08'><INDIVIDUALS/><ENTITIES/></CONSOLIDATED_LIST>",
+    "<CONSOLIDATED_LIST><INDIVIDUALS/><ENTITIES/></CONSOLIDATED_LIST>",
+    "not xml",
+])
+def test_invalid_or_empty_un_payload_cannot_authorize_clearance(payload):
+    with pytest.raises(un_sanctions.ListCoverageError):
+        un_sanctions.parse(payload)
+
+
+def test_missing_section_coverage_cannot_authorize_clearance(listing):
+    with pytest.raises(un_sanctions.ListCoverageError):
+        un_sanctions.screen("Ordinary Supplier", listing={**listing, "entities": []})
+    with pytest.raises(un_sanctions.ListCoverageError):
+        un_sanctions.screen_person("Ordinary Person", listing={**listing, "individuals": []})
+
+
+@pytest.mark.asyncio
+async def test_connector_surfaces_invalid_list_instead_of_emitting_clear(monkeypatch):
+    async def invalid_listing():
+        return {"generated": "2026-09-08", "entities": [], "individuals": []}
+
+    monkeypatch.setattr(un_sanctions, "consolidated_list", invalid_listing)
+    with pytest.raises(un_sanctions.ListCoverageError):
+        await get_connector("un_sanctions").enrich(
+            {"id": "supplier", "name": "Ordinary Supplier"}, "dev"
+        )
+
+
 def test_a_designated_entity_is_found_through_its_alias(listing):
     res = un_sanctions.screen("Allied Democratic Forces", listing=listing)
     assert res["result"] == "hit"

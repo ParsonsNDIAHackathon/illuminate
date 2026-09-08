@@ -30,3 +30,15 @@ Commit provenance did not make a broken combined result acceptable.
 **How to apply:** When final validation identifies an integrated regression,
 coordinate with its active owner when possible; otherwise make the narrow repair
 and validate that behavior before retrying completion.
+
+Immutable evidence records should include the evaluated Git tree object as well
+as the commit ID when concurrent task integration may rebase a branch.
+
+**Why:** Automatic integration can legitimately rewrite commit IDs while
+preserving a product tree, making a commit-only scorecard look unrelated even
+when the evaluated files are byte-identical.
+
+**How to apply:** Record both identities, then immediately before completion
+verify that current product/config/test files match the recorded tree. If a
+concurrent merge changes that tree, rerun the affected checks and full gate
+instead of relying on ancestry or an older scorecard.

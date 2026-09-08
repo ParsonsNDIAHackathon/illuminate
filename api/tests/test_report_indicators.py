@@ -129,6 +129,41 @@ async def test_screen_indicator_links_claim_artifact_and_relationships():
 
 
 @pytest.mark.asyncio
+async def test_sanctions_indicator_cannot_hide_a_hit_behind_a_newer_clear():
+    clear = {
+        "predicate": "sanctions_screen",
+        "result": "clear",
+        "source": "OFAC",
+        "detail": "no OFAC match",
+        "status": "committed",
+        "retrieved_at": "2026-09-08",
+        "claim_id": "ofac-clear",
+        "artifact": {"id": "ofac-list", "url": "https://example.test/ofac"},
+    }
+    hit = {
+        "predicate": "sanctions_screen",
+        "result": "hit",
+        "source": "UN Security Council",
+        "detail": "matched UN designation",
+        "status": "committed",
+        "retrieved_at": "2026-09-07",
+        "claim_id": "un-hit",
+        "artifact": {"id": "un-list", "url": "https://example.test/un"},
+    }
+
+    risk = await risk_indicators(
+        "vendor", core(), {"supplies": []}, people(), [clear, hit]
+    )
+
+    indicator = next(i for i in risk["indicators"] if i["family"] == "sanctions")
+    assert indicator["severity"] == "high"
+    assert indicator["label"].endswith("— HIT")
+    assert indicator["source"] == "OFAC · UN Security Council"
+    assert "no OFAC match; matched UN designation" == indicator["detail"]
+    assert indicator["element_ids"] == ["ofac-clear", "ofac-list", "un-hit", "un-list"]
+
+
+@pytest.mark.asyncio
 async def test_simulated_evidence_edge_is_visible_but_excluded_from_score():
     artifact = {
         "id": "artifact",
