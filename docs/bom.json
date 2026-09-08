@@ -641,6 +641,24 @@
       "review_status": "review_required"
     },
     {
+      "id": "pypi:asyncpg",
+      "name": "asyncpg",
+      "version": "0.31.0",
+      "classification": "direct",
+      "declared_license": "REVIEW_REQUIRED",
+      "declared_license_reference": "https://pypi.org/project/asyncpg/0.31.0/",
+      "conditions": "all supported runtime profiles",
+      "license": "REVIEW_REQUIRED",
+      "license_reference": "https://pypi.org/project/asyncpg/0.31.0/",
+      "supplier": "PyPI project maintainers",
+      "use_scope": "direct pypi component resolved from repository declarations",
+      "required": true,
+      "cost_support": "Open-source/community component; no support entitlement bundled; hosting and support costs are operator-dependent",
+      "omission_impact": "Application build or the dependent runtime capability fails",
+      "replacement": "Remove or replace the depending feature and regenerate the lockfile and BOM in the same change",
+      "review_status": "review_required"
+    },
+    {
       "id": "pypi:attrs",
       "name": "attrs",
       "version": "26.1.0",
