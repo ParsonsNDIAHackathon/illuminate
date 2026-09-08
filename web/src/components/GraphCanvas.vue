@@ -32,6 +32,10 @@ const ws = useWorkspace()
 let cy: Core | null = null
 let sameNameCollapsed: boolean | null = null
 const groupingLockedIds = new Set<string>()
+// While a group is collapsed, the painted node stays grabbable and every other member is pinned to
+// it by a fixed offset — so dragging the one node the user can see carries the whole group with it.
+const groupFollowers = new Map<string, { id: string; dx: number; dy: number }[]>()
+let movingFollowers = false
 const emit = defineEmits<{ (e: 'expand', id: string): void; (e: 'report', id: string): void }>()
 
 const SAME_NAME_COLLAPSE_ZOOM = 1
@@ -303,6 +307,7 @@ function applyZoomGrouping(force = false) {
     }
   })
   groupingLockedIds.clear()
+  groupFollowers.clear()
   sameNameCollapsedGroups().forEach(ids => {
     const members = ids.map(id => cy!.getElementById(id)).filter(n => n.nonempty())
     if (members.length < 2) return
@@ -315,16 +320,29 @@ function applyZoomGrouping(force = false) {
       const visibleIds = new Set(visible.map(node => node.id()))
       const radius = visible.length > 1 ? 10 / cy!.zoom() : 0
       const visibleIndex = new Map(visible.map((node, index) => [node.id(), index]))
+      const offsetOf = (node: any) => {
+        if (!visibleIds.has(node.id())) return { x: 0, y: 0 }
+        const angle = visible.length > 1 ? (Math.PI * 2 * (visibleIndex.get(node.id()) || 0)) / visible.length : 0
+        return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }
+      }
+      // Members ride on the anchor, so their offsets are measured from it rather than from the
+      // group centre — the anchor itself sits on the ring when more than one member is shown.
+      const anchorOffset = offsetOf(members[0])
+      const followers: { id: string; dx: number; dy: number }[] = []
       members.forEach((node, index) => {
-        const shownIndex = visibleIndex.get(node.id()) || 0
-        const angle = visible.length > 1 ? (Math.PI * 2 * shownIndex) / visible.length : 0
-        node.position(visibleIds.has(node.id())
-          ? { x: position.x + Math.cos(angle) * radius, y: position.y + Math.sin(angle) * radius }
-          : position)
-        node.lock()
-        groupingLockedIds.add(node.id())
+        const offset = offsetOf(node)
+        node.unlock()
+        node.position({ x: position.x + offset.x, y: position.y + offset.y })
+        if (index > 0) {
+          node.lock()
+          groupingLockedIds.add(node.id())
+          followers.push({ id: node.id(), dx: offset.x - anchorOffset.x, dy: offset.y - anchorOffset.y })
+        }
         node.toggleClass('same-name-duplicate', index > 0 && !visibleIds.has(node.id()))
       })
+      // The anchor stays unlocked: locking it is what made a collapsed group undraggable, and it
+      // also kept the live simulation from ever moving the group.
+      groupFollowers.set(members[0].id(), followers)
     } else {
       const center = members[0].position()
       members.forEach((node, index) => {
@@ -336,6 +354,28 @@ function applyZoomGrouping(force = false) {
     }
   })
   if (wasCollapsed && !collapse) startLive()
+}
+
+// Keep a collapsed group stacked on its painted node wherever that node goes — dragged by the user
+// or nudged by the live simulation. Followers are locked, and a locked node ignores position(), so
+// each one is released for the move and pinned again.
+function moveFollowers(anchorId: string) {
+  if (!cy || movingFollowers) return
+  const followers = groupFollowers.get(anchorId)
+  if (!followers?.length) return
+  const p = cy.getElementById(anchorId).position()
+  movingFollowers = true
+  try {
+    followers.forEach(f => {
+      const node = cy!.getElementById(f.id)
+      if (node.empty()) return
+      node.unlock()
+      node.position({ x: p.x + f.dx, y: p.y + f.dy })
+      node.lock()
+    })
+  } finally {
+    movingFollowers = false
+  }
 }
 
 // What a live change touched, marked on the canvas and — if it landed off-screen — brought into view.
@@ -402,6 +442,7 @@ onMounted(() => {
   cy.on('tap', (ev) => { if (ev.target === cy) { graph.select(null); graph.selectEdge(null) } })
   cy.on('dbltap', 'node', (ev) => { const n = graph.nodes.get(ev.target.id()); if (n && (n.label === 'Entity' || n.label === 'Person')) emit('expand', ev.target.id()) })
   cy.on('zoom', () => applyZoomGrouping())
+  cy.on('position', 'node', (ev) => moveFollowers(ev.target.id()))
   sync()
 })
 onBeforeUnmount(() => { stopLive(); cy?.destroy() })
