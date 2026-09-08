@@ -140,24 +140,6 @@ class UNSanctionsConnector(Connector):
     trust = "authoritative"
     key_note = "No key. The consolidated XML is public and refreshed daily."
 
-    async def check_connectivity(self, user: str) -> dict:
-        """A redirect is the healthy answer here.
-
-        un.org hands the XML off to a short-lived signed blob URL, and probe_source
-        deliberately does not follow redirects — following one means buffering an
-        unbounded intermediate body. So a 3xx from the published URL is the source
-        working, and only a 4xx/5xx is a real failure.
-        """
-        from .http import HttpError, probe_source
-
-        try:
-            await probe_source(CONSOLIDATED_XML, params=None, timeout=8, max_bytes=4096)
-        except HttpError as e:
-            if not 300 <= e.status < 400:
-                raise
-            return {"ok": True, "status": "available", "detail": "Source is available (redirects to the signed list)"}
-        return {"ok": True, "status": "available", "detail": "Source is available"}
-
     async def enrich(self, entity: dict, user: str) -> list[Fact]:
         listing = await consolidated_list()
         res = screen(entity["name"], entity.get("aliases"), listing)

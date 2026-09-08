@@ -43,15 +43,6 @@ async function open(path) {
   await waitFor(() => evaluate('document.readyState === "complete"'), 'page load')
 }
 
-async function setZoom(zoom) {
-  await waitFor(async () => {
-    await evaluate(`(() => { window.__cy.stop(); window.__cy.zoom({ level: ${zoom}, renderedPosition: { x: 0, y: 0 } }); return true })()`)
-    await sleep(150)
-    return evaluate(`Math.abs(window.__cy.zoom() - ${zoom}) < 0.01`)
-  }, `zoom ${zoom}`)
-  await sleep(100)
-}
-
 /** Total distance every node travels over `ms` of wall clock, with the simulation left running. */
 async function drift(ms) {
   await evaluate(`(() => { window.__probe = {}; window.__cy.nodes().forEach(n => { window.__probe[n.id()] = { ...n.position() } }); return true })()`)
@@ -102,8 +93,8 @@ before(async () => {
   })
   await command('Page.enable')
   await command('Runtime.enable')
-  // Three same-name pairs around a hub, so collapsing stacks six nodes onto three anchors, plus
-  // stranded entities with no edge at all — the shape a layer toggle leaves behind.
+  // A hub with suppliers, plus stranded entities with no edge at all — the shape a layer
+  // toggle leaves behind, and the case that used to make cola diverge.
   await command('Page.addScriptToEvaluateOnNewDocument', { source: `
     (() => {
       const dup = (slug, name, i) => ({ id: slug + '-' + i, label: 'Entity', layer: 'entities', name, props: {} });
@@ -130,10 +121,10 @@ before(async () => {
     })();
   ` })
 
-  await open('/explorer')
+  await open('/')
   await waitFor(async () => {
     if (await evaluate('!!window.__cy')) return true
-    await open('/explorer')
+    await open('/')
     return evaluate('!!window.__cy')
   }, 'the explorer canvas to mount')
   await waitFor(() => evaluate('!!window.__cy && window.__cy.nodes().length >= 11'), 'graph on the canvas')
@@ -145,16 +136,6 @@ test('the live simulation settles when the canvas carries stranded nodes', async
   assert.ok(
     moved.worst < 60,
     `nodes must come to rest (worst ${moved.worstId} moved ${moved.worst.toFixed(1)}px, total ${moved.total.toFixed(1)}px)`,
-  )
-})
-
-test('the live simulation settles while a same-name group is collapsed', async () => {
-  await setZoom(0.5)
-  await sleep(4000)
-  const moved = await drift(2000)
-  assert.ok(
-    moved.worst < 60,
-    `nodes must come to rest while collapsed (worst ${moved.worstId} moved ${moved.worst.toFixed(1)}px, total ${moved.total.toFixed(1)}px)`,
   )
 })
 

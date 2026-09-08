@@ -102,31 +102,6 @@ def test_the_un_connector_is_registered_with_authoritative_trust():
     assert "un_sanctions" in connector_names()
     conn = get_connector("un_sanctions")
     assert conn.trust == "authoritative" and conn.needs_key() is False
-    assert conn.to_dict()["source_id"] == "un-sc-consolidated"
-
-
-@pytest.mark.asyncio
-async def test_the_un_probe_reads_a_redirect_as_healthy(monkeypatch):
-    from illuminate.connectors import http
-
-    async def probe(url, **kw):
-        raise http.HttpError(302, url)
-
-    monkeypatch.setattr(http, "probe_source", probe)
-    result = await get_connector("un_sanctions").check_connectivity("dev")
-    assert result["ok"] is True and result["status"] == "available"
-
-
-@pytest.mark.asyncio
-async def test_a_real_failure_still_surfaces(monkeypatch):
-    from illuminate.connectors import http
-
-    async def probe(url, **kw):
-        raise http.HttpError(503, url)
-
-    monkeypatch.setattr(http, "probe_source", probe)
-    with pytest.raises(http.HttpError):
-        await get_connector("un_sanctions").check_connectivity("dev")
 
 
 @pytest.fixture
