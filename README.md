@@ -12,6 +12,10 @@ presenter answers, see the [architecture and lineage brief](docs/architecture-li
 findings, incremental retrieval, provenance, simulation handling, and the
 planned NDIA catalog contribution.
 
+**New contributor? Follow the [contributor onboarding guide](docs/ONBOARDING.md)**
+to create a task, work in a branch, open a merge request, and run Illuminate
+locally.
+
 Requires Docker and `make`. For the host-side dev loop (hot reload) you also need
 Python ≥ 3.12 and Node ≥ 20.
 
