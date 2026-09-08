@@ -3,11 +3,16 @@ import { api, qs } from '../api/client'
 import type { StyleOp, LegendItem } from '../styles/styleOps'
 import { deriveLegend } from '../styles/styleOps'
 
-export interface GNode { id: string; label: string; labels?: string[]; name: string; props: Record<string, any> }
+export interface GNode { id: string; label: string; labels?: string[]; layer?: string | null; name: string; props: Record<string, any> }
 export interface GEdge { id: string; source: string; target: string; type: string; props: Record<string, any> }
 
 /** How long an arriving node stays marked as new on the canvas. */
 const FRESH_MS = 6000
+/** The layer toggles the graph endpoints take. Entities are always fetched. */
+export const LAYER_KEYS = ['people', 'countries', 'categories', 'artifacts', 'sources', 'claims'] as const
+function layerParams(layers: Record<string, boolean>) {
+  return Object.fromEntries(LAYER_KEYS.map(k => [k, !!layers[k]]))
+}
 
 export const useGraph = defineStore('graph', {
   state: () => ({
@@ -87,7 +92,7 @@ export const useGraph = defineStore('graph', {
     async loadAll(layers: Record<string, boolean>) {
       this.loading = true
       try {
-        const r = await api.get(`/api/graph/all?${qs({ people: !!layers.people, countries: !!layers.countries, artifacts: !!layers.artifacts, categories: !!layers.categories })}`)
+        const r = await api.get(`/api/graph/all?${qs(layerParams(layers))}`)
         this.focusId = null
         this.focusLabel = null
         this.truncated = !!r.truncated
@@ -107,7 +112,7 @@ export const useGraph = defineStore('graph', {
     async loadNeighbourhood(entityId: string, depth: number, layers: Record<string, boolean>, replace = false) {
       this.loading = true
       try {
-        const r = await api.get(`/api/graph/subgraph?${qs({ entity_id: entityId, depth, people: !!layers.people, countries: !!layers.countries, artifacts: !!layers.artifacts, categories: !!layers.categories })}`)
+        const r = await api.get(`/api/graph/subgraph?${qs({ entity_id: entityId, depth, ...layerParams(layers) })}`)
         replace ? this.replace(r.subgraph) : this.merge(r.subgraph)
         this.lastCypher = { statement: r.cypher, params: r.params }
       } finally { this.loading = false }
