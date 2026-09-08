@@ -58,7 +58,7 @@
     <section v-if="node.label === 'Artifact'">
       <h4>Artifact</h4>
       <dl>
-        <template v-if="p.url"><dt>Page</dt><dd><SourceLink :href="p.url">{{ p.url }}</SourceLink></dd></template>
+        <template v-if="p.url"><dt>Page</dt><dd><SourceLink :href="p.url" :artifact-id="node.id">{{ p.url }}</SourceLink></dd></template>
         <template v-if="p.published_at"><dt>Published</dt><dd>{{ p.published_at }}</dd></template>
         <template v-if="p.amount"><dt>Amount</dt><dd>${{ Number(p.amount).toLocaleString() }}</dd></template>
         <template v-if="p.award_id"><dt>Award</dt><dd>{{ p.award_id }}</dd></template>

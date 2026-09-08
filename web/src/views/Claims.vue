@@ -11,7 +11,7 @@
         <div class="text-caption" style="opacity:.7">{{ item.claim.detail }}</div>
       </template>
       <template #item.source="{ item }">{{ item.claim.source }} <span class="text-caption">· {{ item.claim.method }}<span v-if="item.claim.model"> · {{ item.claim.model }}</span></span><br><span class="text-caption">conf {{ item.claim.confidence }} · {{ item.claim.trust }}</span></template>
-      <template #item.artifacts="{ item }"><span v-for="a in item.artifacts" :key="a.id" class="mr-2 text-no-wrap"><SourceLink :href="a.url">{{ a.kind }}</SourceLink><v-btn icon="mdi-text-box-search-outline" size="x-small" variant="text" density="compact" title="View contents" @click="rawId = a.id" /></span></template>
+      <template #item.artifacts="{ item }"><span v-for="a in item.artifacts" :key="a.id" class="mr-2 text-no-wrap"><SourceLink :href="a.url" :artifact-id="a.id">{{ a.kind }}</SourceLink><v-btn icon="mdi-text-box-search-outline" size="x-small" variant="text" density="compact" title="View contents" @click="rawId = a.id" /></span></template>
       <template #item.actions="{ item }">
         <template v-if="item.claim.status === 'staged'">
           <v-btn size="x-small" color="success" @click="act(item.claim.id, 'commit')">Commit</v-btn>
