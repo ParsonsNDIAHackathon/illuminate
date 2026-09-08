@@ -156,6 +156,19 @@ async def test_status_refresh_and_safe_remote_errors(catalog_env, monkeypatch):
     assert "403" in error.detail
 
 
+async def test_status_never_claims_published_without_remote_identity(catalog_env):
+    path = catalog.settings.data_dir / "ndia-catalog.json"
+    path.write_text(json.dumps({
+        f"illuminate-insight-findings:{catalog.exports.VERSION}": {
+            "contribution_state": "published",
+            "message": "Untrusted local state without a remote identity",
+        }
+    }))
+    result = await catalog.status()
+    assert result.dataset_id is None
+    assert result.contribution_state == "unknown"
+
+
 async def test_uncertain_remote_outcome_blocks_duplicate_retry(catalog_env, monkeypatch):
     monkeypatch.setattr(catalog.settings, "ndia_key", SecretStr("secret"))
     calls = []

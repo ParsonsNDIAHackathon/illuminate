@@ -111,6 +111,13 @@ def _save_state(state: dict[str, Any]) -> None:
     temp.replace(path)
 
 
+def _truthful_state(state: str | None, dataset_id: str | None) -> str:
+    value = state or "not_submitted"
+    if value == "published" and not dataset_id:
+        return "unknown"
+    return value
+
+
 class PortalError(HTTPException):
     """A sanitized portal error that records whether retry may duplicate."""
 
@@ -214,7 +221,7 @@ async def _preview(user: str) -> ContributionPreview:
             and settings.illuminate_public_url is not None
             and bool(settings.ndia_catalog_contribution_path)
         ),
-        contribution_state=state.get("contribution_state", "not_submitted"),
+        contribution_state=_truthful_state(state.get("contribution_state"), remote_id),
         remote_dataset_id=remote_id,
         message=(
             "This export version is already associated with a remote dataset."
@@ -437,7 +444,7 @@ async def status(refresh: bool = False, user: str = Depends(user_id)):
     if not dataset_id:
         return ContributionResult(
             export_id=EXPORT_ID, export_version=exports.VERSION,
-            contribution_state=record.get("contribution_state", "not_submitted"),
+            contribution_state=_truthful_state(record.get("contribution_state"), None),
             message=record.get("message", "No remote dataset is recorded for this export version."),
             dry_run=False, metadata=metadata,
         )

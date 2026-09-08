@@ -66,7 +66,7 @@
         <router-link :to="contextualLink('/portfolio')"><b>1</b><span><strong>Triage vendors</strong>Rank risk separately from evidence quality.</span></router-link>
         <router-link :to="contextualLink('/compare/vendors')"><b>2</b><span><strong>Compare</strong>Align trustworthy and risky vendor profiles.</span></router-link>
         <router-link :to="contextualLink('/claims')"><b>3</b><span><strong>Review evidence</strong>Accept or reject staged claims before release.</span></router-link>
-        <a href="/api/exports/v1/findings?format=csv"><b>4</b><span><strong>Export with review status</strong>Download the versioned finding contract for controlled downstream review.</span></a>
+        <router-link :to="contextualLink('/interoperability')"><b>4</b><span><strong>Share findings</strong>Preview, download, and consume the versioned finding contract with review status intact.</span></router-link>
       </div>
     </section>
 

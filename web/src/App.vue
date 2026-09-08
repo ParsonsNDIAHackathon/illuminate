@@ -64,6 +64,7 @@ const recordsNav = computed(() => [
   { to: '/people', icon: 'mdi-account-tie', title: 'People' },
   { to: '/artifacts', icon: 'mdi-file-document-multiple-outline', title: 'Evidence' },
   { to: '/claims', icon: 'mdi-check-decagram-outline', title: 'Evidence review', badge: staged.value || undefined },
+  { to: '/interoperability', icon: 'mdi-database-export-outline', title: 'Share findings' },
 ])
 function contextQuery(): LocationQueryRaw {
   const keys = ['root_id', 'program', 'vendor', 'focus', 'finding', 'family', 'evidence']

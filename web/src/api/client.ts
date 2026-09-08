@@ -424,6 +424,18 @@ export interface CatalogContributionResult {
   metadata: CatalogDatasetMetadata
 }
 
+export interface FindingExportPage {
+  meta: {
+    schema_version: string
+    generated_at: string
+    count: number
+    limit: number
+    next_cursor: string | null
+    watermark: string
+  }
+  findings: Array<Record<string, any>>
+}
+
 export interface EnrichmentJob {
   id: string
   entity_id: string

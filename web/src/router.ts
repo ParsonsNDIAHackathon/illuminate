@@ -13,6 +13,7 @@ export const router = createRouter({
     { path: '/people', name: 'people', component: () => import('./views/People.vue') },
     { path: '/artifacts', name: 'artifacts', component: () => import('./views/Artifacts.vue') },
     { path: '/claims', name: 'claims', component: () => import('./views/Claims.vue') },
+    { path: '/interoperability', name: 'interoperability', component: () => import('./views/FindingsInteroperability.vue') },
     { path: '/connectors', name: 'connectors', component: () => import('./views/Connectors.vue') },
     { path: '/settings', name: 'settings', component: () => import('./views/Settings.vue') },
   ],

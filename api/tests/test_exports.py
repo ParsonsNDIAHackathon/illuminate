@@ -53,7 +53,7 @@ ROWS = [
 def fake_db(monkeypatch):
     events = [
         {"finding_id": exports._stable_finding_id(row), "revision": i + 1,
-         "payload": exports._finding(row).model_dump_json()}
+         "payload": exports._finding(row).model_dump_json(), "public": True, "deleted": False}
         for i, row in enumerate(ROWS)
     ]
 
@@ -154,8 +154,11 @@ async def test_public_http_contract_is_registered(fake_db):
         ndjson = await client.get("/api/exports/v1/findings", params={"limit": 1, "format": "ndjson"})
         csv_download = await client.get("/api/exports/v1/findings", params={"limit": 1, "format": "csv"})
         assert ndjson.status_code == csv_download.status_code == 200
+        assert first.headers["content-disposition"].endswith(".json\"")
         assert ndjson.headers["content-type"].startswith("application/x-ndjson")
         assert csv_download.headers["content-type"].startswith("text/csv")
+        assert ndjson.headers["content-disposition"].endswith(".ndjson\"")
+        assert csv_download.headers["content-disposition"].endswith(".csv\"")
         assert json.loads(ndjson.text)["finding_id"].startswith("fnd_")
         assert next(csv.DictReader(io.StringIO(csv_download.text)))["finding_id"]
 
@@ -185,7 +188,7 @@ async def test_rejected_findings_are_filterable_and_cursor_preserves_policy(monk
     rows = [dict(ROWS[0]), {**ROWS[1], "status": "rejected"}]
     events = [
         {"finding_id": exports._stable_finding_id(row), "revision": i + 1,
-         "payload": exports._finding(row).model_dump_json()}
+         "payload": exports._finding(row).model_dump_json(), "public": True, "deleted": False}
         for i, row in enumerate(rows)
     ]
 
@@ -324,6 +327,20 @@ def test_token_shape_is_validated():
     assert exc.value.status_code == 400
 
 
+def test_pre_policy_tokens_are_invalidated():
+    data = {"v": exports.VERSION, "kind": "watermark", "position": ["1", ""]}
+    raw = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
+    encoded = __import__("base64").urlsafe_b64encode(raw).decode().rstrip("=")
+    signature = __import__("hmac").new(
+        exports.settings.session_secret.get_secret_value().encode(),
+        encoded.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    with pytest.raises(exports.HTTPException) as exc:
+        exports._untoken(f"{encoded}.{signature}", "watermark")
+    assert exc.value.status_code == 400
+
+
 async def test_concurrent_syncs_are_serialized(monkeypatch):
     owner = None
     completed_at = "1970-01-01T00:00:00Z"
@@ -397,7 +414,12 @@ async def test_removed_finding_emits_tombstone(monkeypatch):
     monkeypatch.setattr(exports.db, "read", read)
     assert await exports._sync_export_ledger() == 2
     assert len(writes) == 1 and writes[0]["deleted"] is True
-    assert exports.Finding.model_validate_json(writes[0]["payload"]).deleted is True
+    tombstone = exports.Finding.model_validate_json(writes[0]["payload"])
+    assert tombstone.deleted is True
+    assert tombstone.finding_id == source.finding_id
+    assert tombstone.subject_id == "withheld"
+    assert tombstone.provenance == []
+    assert tombstone.detail is None
 
 
 async def test_concurrently_updated_association_is_not_tombstoned(monkeypatch):
@@ -457,3 +479,97 @@ async def test_incremental_contract_rejects_tampered_and_future_watermarks(fake_
         )
     assert tampered.status_code == 400
     assert future.status_code == 409
+
+
+def test_public_export_query_excludes_non_public_classifications():
+    policy = "c.classification = 'UNCLASSIFIED'"
+    assert policy in exports._SELECT
+    assert policy in exports._UPPER
+    assert "claim.classification = 'UNCLASSIFIED'" in exports._MISSING_STATES
+    assert exports._is_public_row({"classification": "UNCLASSIFIED"}) is True
+    assert exports._is_public_row({"classification": None}) is False
+    assert exports._is_public_row({}) is False
+    assert exports._is_public_row({"classification": "unclassified"}) is False
+    assert exports._is_public_row({"classification": "SECRET"}) is False
+    assert exports.LEDGER_VERSION != exports.VERSION
+    assert "MATCH (claim:Claim {id:state.claim_id})-[:ASSERTS]->(subject {id:state.subject_id})" in exports._LATEST_EVENTS
+    assert "OPTIONAL MATCH (claim:Claim" not in exports._LATEST_EVENTS
+    incremental_filter = exports._INCREMENTAL_EVENTS.index("WITH event, claim, subject")
+    incremental_visibility = exports._INCREMENTAL_EVENTS.index(
+        "WHERE coalesce(event.deleted,false) = true OR claim.classification = 'UNCLASSIFIED'"
+    )
+    assert incremental_filter < incremental_visibility
+
+
+async def test_public_pages_read_only_the_policy_scoped_ledger(monkeypatch):
+    observed_versions = []
+
+    async def sync():
+        return 1
+
+    async def read(query, params):
+        observed_versions.append(params["version"])
+        return []
+
+    monkeypatch.setattr(exports, "_sync_export_ledger", sync)
+    monkeypatch.setattr(exports.db, "read", read)
+    await exports._page(10, None, None, False)
+    assert observed_versions == [exports.LEDGER_VERSION]
+
+
+async def test_withdrawn_history_is_hidden_from_incremental_and_saved_full_cursor(monkeypatch):
+    original = exports._finding(ROWS[0])
+    old_payload = original.model_dump_json()
+    tombstone = exports._tombstone(original).model_dump_json()
+
+    async def sync():
+        return 2
+
+    async def read(query, params):
+        if query == exports._LATEST_EVENTS:
+            return [{
+                "finding_id": original.finding_id, "revision": 1,
+                "payload": old_payload, "public": False, "deleted": False,
+            }]
+        if query == exports._INCREMENTAL_EVENTS:
+            events = [
+                {
+                    "finding_id": original.finding_id, "revision": 1,
+                    "payload": old_payload, "public": False, "deleted": False,
+                },
+                {
+                    "finding_id": original.finding_id, "revision": 2,
+                    "payload": tombstone, "public": False, "deleted": True,
+                },
+            ]
+            after = (params["after_revision"], params["after_id"])
+            return [
+                event for event in events
+                if params["since_revision"] < event["revision"] <= params["upper"]
+                and (event["revision"], event["finding_id"]) > after
+            ][:params["fetch"]]
+        raise AssertionError("unexpected query")
+
+    monkeypatch.setattr(exports, "_sync_export_ledger", sync)
+    monkeypatch.setattr(exports.db, "read", read)
+    first = await exports._page(1, None, None, True, incremental=True)
+    assert first.findings == []
+    assert first.meta.next_cursor
+    incremental = await exports._page(1, first.meta.next_cursor, None, True, incremental=True)
+    assert incremental.meta.next_cursor is None
+    assert len(incremental.findings) == 1
+    assert incremental.findings[0].deleted is True
+    assert incremental.findings[0].subject_id == "withheld"
+    for fmt in ("json", "ndjson", "csv"):
+        response = exports._render(incremental, fmt)
+        body = response.body.decode()
+        assert "one source" not in body
+        assert "USAspending" not in body
+
+    saved_cursor = exports._token({
+        "v": exports.VERSION, "kind": "cursor", "mode": "full",
+        "after": ["0", ""], "upper": ["1", ""],
+        "since_revision": "0", "include_rejected": False,
+    })
+    saved_page = await exports._page(10, saved_cursor, None, False)
+    assert saved_page.findings == []

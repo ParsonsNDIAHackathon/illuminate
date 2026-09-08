@@ -6,6 +6,7 @@
         <p class="text-body-2" style="opacity:.72">Aligned UC-11 categories. Scores prioritize review; they are not proof of wrongdoing.</p>
       </div>
       <v-spacer />
+      <v-btn prepend-icon="mdi-database-export-outline" variant="text" :to="{ path: '/interoperability', query: route.query }">Share findings</v-btn>
       <v-btn prepend-icon="mdi-snowflake" variant="tonal" @click="showPreset">Use calibration example</v-btn>
     </div>
     <v-alert v-if="isPreset" type="info" variant="tonal" density="compact" class="mb-3">

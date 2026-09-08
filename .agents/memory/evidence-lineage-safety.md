@@ -21,6 +21,12 @@ Public finding exports must preserve claim, artifact, and evidence-link provenan
 
 **How to apply:** Any new machine-consumer contract must serialize all three scopes and derive revisions from the full exported payload.
 
+Unauthenticated finding exports must require an explicit public classification; missing or malformed classification fails closed. When a previously public finding leaves that boundary, emit only a redacted stable-ID tombstone.
+
+**Why:** Merely preserving a restrictive label after disclosure is not access control, and a full-payload tombstone can disclose the record it is meant to withdraw.
+
+**How to apply:** Enforce eligibility both in the source query and before ledger writes; preserve only the deletion key and lifecycle flags in withdrawal events. Bind tokens and ledger namespaces to the public-policy generation so retained pre-policy events cannot be replayed.
+
 Presentation must never infer verified claim status, retrieval method, scoring rule, or freshness from a related aggregate. Show unavailable unless that exact evidence or factor provides the value.
 
 **Why:** Evaluation eligibility is not claim verification, and category freshness can differ from an individual factor's timestamp; inferred labels overstate provenance.

@@ -13,15 +13,30 @@ const missionEntry = readFileSync(new URL('../src/views/MissionEntry.vue', impor
 const portfolio = readFileSync(new URL('../src/views/Portfolio.vue', import.meta.url), 'utf8')
 const report = readFileSync(new URL('../src/views/EntityReport.vue', import.meta.url), 'utf8')
 const router = readFileSync(new URL('../src/router.ts', import.meta.url), 'utf8')
+const interoperability = readFileSync(new URL('../src/views/FindingsInteroperability.vue', import.meta.url), 'utf8')
 
 test('global navigation is grouped by user intent', () => {
   assert.match(app, /title="Start mission"/)
   assert.match(app, /title="Mission graph"/)
   assert.match(app, /title="Supporting records"/)
   assert.match(app, /title="Administration"/)
+  assert.match(app, /title: 'Share findings'/)
   assert.match(app, /<v-menu location="end"/)
   assert.doesNotMatch(app, /title: 'Compare'/)
   assert.doesNotMatch(app, /title: 'Connectors'/)
+})
+
+test('findings interoperability is visible and preserves lifecycle semantics', () => {
+  assert.match(router, /path: '\/interoperability'/)
+  assert.match(missionEntry, /contextualLink\('\/interoperability'\)/)
+  assert.match(comparison, /path: '\/interoperability'/)
+  assert.match(interoperability, /Schema \{\{ page\?\.meta\.schema_version/)
+  assert.match(interoperability, /JSON · NDJSON · CSV/)
+  assert.match(interoperability, /deleted: true/)
+  assert.match(interoperability, /provenance, classification, truth status, simulation state/)
+  assert.match(interoperability, /catalogPublished = computed\(\(\) => Boolean\(catalogDatasetId\.value\)/)
+  assert.match(interoperability, /Validate dry run/)
+  assert.match(interoperability, /catalog credentials are never sent to this browser/)
 })
 
 test('comparison requires a deliberate second vendor or explicit preset', () => {

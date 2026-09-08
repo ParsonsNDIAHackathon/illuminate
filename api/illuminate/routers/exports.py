@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import db
@@ -24,6 +25,8 @@ from ..config import settings
 
 router = APIRouter(prefix="/api/exports/v1", tags=["exports"])
 VERSION = "1.1"
+PUBLIC_POLICY = "explicit-unclassified-v1"
+LEDGER_VERSION = f"{VERSION}:{PUBLIC_POLICY}"
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 1000
 
@@ -157,6 +160,7 @@ FIELD_DICTIONARY = {
 _SELECT = """
 MATCH (c:Claim)-[:ASSERTS]->(s)
 WHERE c.id IS NOT NULL AND s.id IS NOT NULL
+  AND c.classification = 'UNCLASSIFIED'
 OPTIONAL MATCH (c)-[:TARGETS]->(o)
 WITH c, s, o ORDER BY coalesce(o.id,'')
 WITH c, s, collect(DISTINCT o) AS target_nodes
@@ -219,6 +223,7 @@ LIMIT $fetch
 _UPPER = """
 MATCH (c:Claim)-[:ASSERTS]->(s)
 WHERE c.id IS NOT NULL AND s.id IS NOT NULL
+  AND c.classification = 'UNCLASSIFIED'
 OPTIONAL MATCH (decision:AnalystDecision)-[:DECISION_FOR]->(s)
 WHERE size(coalesce(decision.evidence_refs,[]))=0 OR c.id IN decision.evidence_refs
 OR EXISTS { MATCH (artifact:Artifact)-[:EVIDENCES]->(c) WHERE artifact.id IN decision.evidence_refs }
@@ -272,9 +277,13 @@ WHERE event.revision <= $upper
 WITH event.finding_id AS finding_id, max(event.revision) AS revision
 WHERE finding_id > $after_id
 MATCH (event:InsightExportEvent {version:$version, revision:revision})
+MATCH (state:InsightExportState {version:$version, finding_id:finding_id})
+MATCH (claim:Claim {id:state.claim_id})-[:ASSERTS]->(subject {id:state.subject_id})
 WHERE coalesce(event.deleted,false) = false
   AND ($include_rejected OR event.truth_status <> 'rejected')
-RETURN event.finding_id AS finding_id, event.revision AS revision, event.payload AS payload
+  AND claim.classification = 'UNCLASSIFIED'
+RETURN event.finding_id AS finding_id, event.revision AS revision, event.payload AS payload,
+       true AS public, false AS deleted
 ORDER BY finding_id
 LIMIT $fetch
 """
@@ -312,6 +321,7 @@ WHERE coalesce(state.sync_id,'') <> $sync_id
   AND state.finding_id > $after_id
   AND NOT EXISTS {
     MATCH (claim:Claim {id:state.claim_id})-[:ASSERTS]->(subject {id:state.subject_id})
+    WHERE claim.classification = 'UNCLASSIFIED'
   }
 RETURN state.finding_id AS finding_id, state.claim_id AS claim_id,
        state.subject_id AS subject_id, state.payload AS payload
@@ -325,7 +335,13 @@ WHERE event.revision > $since_revision AND event.revision <= $upper
   AND (event.revision > $after_revision
        OR (event.revision = $after_revision AND event.finding_id > $after_id))
   AND ($include_rejected OR event.truth_status <> 'rejected')
-RETURN event.finding_id AS finding_id, event.revision AS revision, event.payload AS payload
+MATCH (state:InsightExportState {version:$version, finding_id:event.finding_id})
+OPTIONAL MATCH (claim:Claim {id:state.claim_id})-[:ASSERTS]->(subject {id:state.subject_id})
+WITH event, claim, subject
+WHERE coalesce(event.deleted,false) = true OR claim.classification = 'UNCLASSIFIED'
+RETURN event.finding_id AS finding_id, event.revision AS revision, event.payload AS payload,
+       claim.classification = 'UNCLASSIFIED' AS public,
+       coalesce(event.deleted,false) AS deleted
 ORDER BY revision, finding_id
 LIMIT $fetch
 """
@@ -336,6 +352,7 @@ def _utc_now() -> datetime:
 
 
 def _token(data: dict[str, Any]) -> str:
+    data = {**data, "policy": PUBLIC_POLICY}
     raw = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
     encoded = base64.urlsafe_b64encode(raw).decode().rstrip("=")
     signature = hmac.new(
@@ -361,7 +378,8 @@ def _untoken(value: str | None, kind: str) -> dict[str, Any] | None:
         raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
         data = json.loads(raw)
         position_key = "after" if kind == "cursor" else "position"
-        if (not isinstance(data, dict) or data.get("v") != VERSION or data.get("kind") != kind
+        if (not isinstance(data, dict) or data.get("v") != VERSION
+                or data.get("policy") != PUBLIC_POLICY or data.get("kind") != kind
                 or not isinstance(data.get(position_key), list) or len(data[position_key]) != 2
                 or not all(isinstance(item, str) for item in data[position_key])):
             raise ValueError
@@ -486,11 +504,43 @@ def _scalar(value: Any) -> str | int | float | bool | None:
     return _string(value)
 
 
+def _is_public_row(row: dict[str, Any]) -> bool:
+    return row.get("classification") == "UNCLASSIFIED"
+
+
+def _tombstone(source: Finding) -> Finding:
+    """Retain only the stable deletion key when a finding leaves the public contract."""
+    return Finding(
+        finding_id=source.finding_id,
+        subject_id="withheld",
+        subject_type="Withheld",
+        predicate="withdrawn_from_public_export",
+        risk=Risk(),
+        paths=[],
+        provenance=[],
+        classification="UNCLASSIFIED",
+        quality=Quality(),
+        truth_status=source.truth_status,
+        simulated=source.simulated,
+        deleted=True,
+        observed_at=_utc_now(),
+    )
+
+
+def _event_finding(row: dict[str, Any]) -> Finding | None:
+    finding = Finding.model_validate_json(row["payload"])
+    if bool(row.get("deleted") or finding.deleted):
+        return _tombstone(finding)
+    if row.get("public") is not True or finding.classification != "UNCLASSIFIED":
+        return None
+    return finding
+
+
 async def _acquire_sync_lock(owner: str, wait_seconds: float = 60.0) -> str:
     deadline = asyncio.get_running_loop().time() + wait_seconds
     while True:
         result = await db.write(_ACQUIRE_LOCK, {
-            "version": VERSION, "owner": owner, "lease_seconds": 300,
+            "version": LEDGER_VERSION, "owner": owner, "lease_seconds": 300,
         })
         if result["rows"]:
             return result["rows"][0].get("completed_at") or "1970-01-01T00:00:00Z"
@@ -501,7 +551,7 @@ async def _acquire_sync_lock(owner: str, wait_seconds: float = 60.0) -> str:
 
 async def _renew_sync_lock(owner: str) -> None:
     result = await db.write(_RENEW_LOCK, {
-        "version": VERSION, "owner": owner, "lease_seconds": 300,
+        "version": LEDGER_VERSION, "owner": owner, "lease_seconds": 300,
     })
     if not result["rows"]:
         raise HTTPException(503, "export synchronization lease was lost; retry")
@@ -511,7 +561,7 @@ async def _write_events(owner: str, records: list[dict[str, Any]]) -> None:
     if not records:
         return
     await _renew_sync_lock(owner)
-    await db.write(_UPSERT_EVENTS, {"version": VERSION, "sync_id": owner, "records": records})
+    await db.write(_UPSERT_EVENTS, {"version": LEDGER_VERSION, "sync_id": owner, "records": records})
 
 
 async def _sync_export_ledger() -> int:
@@ -523,7 +573,7 @@ async def _sync_export_ledger() -> int:
     try:
         completed_at = datetime.fromisoformat(last_completed.replace("Z", "+00:00"))
         if completed_at >= started_at:
-            counter = await db.read(_COUNTER, {"version": VERSION})
+            counter = await db.read(_COUNTER, {"version": LEDGER_VERSION})
             return int(counter[0]["value"]) if counter else 0
         upper = await db.read(_UPPER, {})
         if upper:
@@ -536,6 +586,8 @@ async def _sync_export_ledger() -> int:
                 })
                 records = []
                 for row in rows:
+                    if not _is_public_row(row):
+                        continue
                     finding = _finding(row)
                     payload = finding.model_dump_json()
                     records.append({
@@ -552,11 +604,11 @@ async def _sync_export_ledger() -> int:
         after_id = ""
         while True:
             missing = await db.read(_MISSING_STATES, {
-                "version": VERSION, "sync_id": owner, "after_id": after_id, "fetch": MAX_LIMIT,
+                "version": LEDGER_VERSION, "sync_id": owner, "after_id": after_id, "fetch": MAX_LIMIT,
             })
             tombstones = []
             for row in missing:
-                finding = Finding.model_validate_json(row["payload"]).model_copy(update={"deleted": True})
+                finding = _tombstone(Finding.model_validate_json(row["payload"]))
                 payload = finding.model_dump_json()
                 tombstones.append({
                     "finding_id": finding.finding_id, "claim_id": row.get("claim_id"),
@@ -569,12 +621,12 @@ async def _sync_export_ledger() -> int:
                 break
             after_id = missing[-1]["finding_id"]
 
-        counter = await db.read(_COUNTER, {"version": VERSION})
+        counter = await db.read(_COUNTER, {"version": LEDGER_VERSION})
         completed = True
         return int(counter[0]["value"]) if counter else 0
     finally:
         await db.write(_RELEASE_LOCK, {
-            "version": VERSION, "owner": owner, "completed": completed,
+            "version": LEDGER_VERSION, "owner": owner, "completed": completed,
         })
 
 
@@ -599,7 +651,7 @@ async def _page(limit: int, cursor: str | None, since: str | None, include_rejec
         after_revision, after_id = since_revision, ""
         upper_revision = current_upper
     params = {
-        "version": VERSION, "upper": upper_revision, "fetch": limit + 1,
+        "version": LEDGER_VERSION, "upper": upper_revision, "fetch": limit + 1,
         "include_rejected": include_rejected, "after_id": after_id,
     }
     if mode == "incremental":
@@ -609,7 +661,7 @@ async def _page(limit: int, cursor: str | None, since: str | None, include_rejec
         rows = await db.read(_LATEST_EVENTS, params)
     has_more = len(rows) > limit
     rows = rows[:limit]
-    findings = [Finding.model_validate_json(row["payload"]) for row in rows]
+    findings = [finding for row in rows if (finding := _event_finding(row)) is not None]
     next_cursor = None
     if has_more:
         last = rows[-1]
@@ -626,14 +678,15 @@ async def _page(limit: int, cursor: str | None, since: str | None, include_rejec
 
 
 def _render(page: FindingPage, fmt: str) -> Response | FindingPage:
-    if fmt == "json":
-        return page
     rows = [f.model_dump(mode="json") for f in page.findings]
     headers = {
         "X-Illuminate-Schema-Version": VERSION,
         "X-Illuminate-Watermark": page.meta.watermark,
         "X-Illuminate-Next-Cursor": page.meta.next_cursor or "",
+        "Content-Disposition": f'attachment; filename="illuminate-findings-v{VERSION}.{fmt}"',
     }
+    if fmt == "json":
+        return JSONResponse(page.model_dump(mode="json"), headers=headers)
     if fmt == "ndjson":
         body = "\n".join(json.dumps(row, separators=(",", ":")) for row in rows)
         return Response(body + ("\n" if body else ""), media_type="application/x-ndjson", headers=headers)

@@ -60,42 +60,44 @@ GET /api/exports/v1/findings?format=json&limit=100
 Accept: application/json
 ```
 
-Illustrative response:
+Response shape (abridged from schema 1.1):
 
 ```json
 {
-  "schema_version": "1.0.0",
-  "generated_at": "2026-09-08T15:30:00Z",
+  "meta": {
+    "schema_version": "1.1",
+    "generated_at": "2026-09-08T15:30:00Z",
+    "count": 1,
+    "limit": 100,
+    "next_cursor": "opaque-signed-cursor",
+    "watermark": "opaque-signed-watermark"
+  },
   "findings": [
     {
-      "finding_id": "finding:sha256:…",
-      "finding_type": "foreign_ultimate_parent",
-      "subject": {
-        "id": "entity:uei:…",
-        "name": "Example Supplier",
-        "identifiers": [{"scheme": "UEI", "value": "…"}]
-      },
-      "risk": {"severity": "high", "confidence": 0.91},
+      "finding_id": "fnd_…",
+      "subject_id": "entity:uei:…",
+      "subject_type": "Entity",
+      "subject_name": "Example Supplier",
+      "predicate": "foreign_ultimate_parent",
+      "risk": {"score": 91, "level": "high", "category": "ownership"},
       "recommendation": "Review ownership and sourcing exposure.",
-      "path": [
-        {"source_id": "entity:uei:…", "relationship": "ULTIMATE_PARENT_OF", "target_id": "entity:lei:…"}
-      ],
+      "paths": [],
       "provenance": [{
+        "scope": "claim",
         "source": "GLEIF",
-        "source_record_id": "…",
+        "source_identifier": "…",
         "retrieved_at": "2026-09-08T13:00:00Z",
-        "license_or_usage": "See source terms",
+        "usage_note": "See source terms",
         "quality_note": "Identifier-backed ownership record"
       }],
       "classification": "UNCLASSIFIED",
-      "truth_status": "approved",
-      "completeness": {"status": "partial", "notes": ["Tier depth varies by program"]},
+      "quality": {"score": 0.91, "completeness": 0.8, "notes": "Tier depth varies"},
+      "truth_status": "committed",
       "simulated": false,
-      "updated_at": "2026-09-08T14:10:00Z"
+      "deleted": false,
+      "observed_at": "2026-09-08T14:10:00Z"
     }
-  ],
-  "page": {"next_cursor": "opaque:…"},
-  "watermark": "opaque:…"
+  ]
 }
 ```
 
@@ -105,7 +107,7 @@ absent, and store the final watermark only after every page has been committed.
 ### Incremental synchronization
 
 ```http
-GET /api/exports/v1/findings?since=opaque%3Aprevious-watermark&limit=100
+GET /api/exports/v1/findings/incremental?since=opaque%3Aprevious-watermark&limit=100
 Accept: application/json
 ```
 
@@ -119,20 +121,23 @@ full snapshot rather than guessing a time range.
 
 ```json
 {
-  "finding_id": "finding:sha256:scenario-example",
+  "finding_id": "fnd_scenario-example",
+  "subject_id": "ent_scenario",
+  "subject_type": "Entity",
+  "predicate": "scenario_dependency",
   "classification": "UNCLASSIFIED",
-  "truth_status": "scenario",
-  "confidence": 1.0,
-  "completeness": {"status": "complete_for_scenario"},
+  "truth_status": "staged",
+  "quality": {"score": 1.0, "completeness": 1.0, "notes": "Complete for this scenario only"},
   "simulated": true,
   "provenance": [{
     "source": "Illuminate demo scenario",
+    "confidence": 1.0,
     "quality_note": "Synthetic relationship; not source-verified"
   }]
 }
 ```
 
-`confidence: 1.0` in this example means the scenario was encoded
+`provenance.confidence: 1.0` in this example means the scenario was encoded
 deterministically; it does **not** make the scenario true. Simulation and truth
 status take precedence over confidence. Preserve these fields through every
 transform, including CSV or a data warehouse. Use canonical JSON or NDJSON when

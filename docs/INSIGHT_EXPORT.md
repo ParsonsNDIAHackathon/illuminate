@@ -34,13 +34,19 @@ strings), preserving types and nested data without dropping lineage. For these d
 watermark and continuation cursor are returned in `X-Illuminate-Watermark` and
 `X-Illuminate-Next-Cursor`.
 
-The exporter selects a fixed set of safe properties. It never exports raw
+The public exporter includes only findings explicitly classified `UNCLASSIFIED`;
+missing, malformed, and restricted classifications fail closed. A finding that
+later leaves that public boundary emits a redacted tombstone carrying only its
+stable deletion key and lifecycle flags. The exporter selects a fixed set of safe properties. It never exports raw
 cached documents, credentials, or arbitrary node properties. Full traversals
 exclude rejected claims by default; pass `include_rejected=true` for a review
 view. Incremental streams include rejected transitions by default so consumers
 cannot silently retain a claim that was later rejected; set
 `include_rejected=false` only for a deliberately filtered stream.
 Simulation propagates from the claim, subject, target, and evidence artifacts.
+Opaque cursors and watermarks are also bound to the current public-export policy
+generation. A policy change invalidates older tokens and starts a separate
+ledger namespace so retained pre-policy payloads cannot be replayed.
 
 Run the dependency-free consumer:
 
