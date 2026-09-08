@@ -29,7 +29,9 @@ async function request<T = any>(method: string, path: string, body?: any, header
   if (!r.ok) {
     let detail = r.statusText
     try { detail = (await r.json()).detail ?? detail } catch {}
-    throw new Error(`${method} ${path}: ${detail}`)
+    const safePath = path.split('?')[0]
+    const safeDetail = String(detail).replace(/https?:\/\/\S+/gi, '[remote service]').slice(0, 300)
+    throw new Error(`${method} ${safePath}: ${safeDetail}`)
   }
   return r.json()
 }
@@ -47,6 +49,8 @@ export interface ConnectorTestResult {
   detail: string
   diagnostics?: Record<string, boolean | number | string>
 }
+
+export type SourceRefreshState = 'connected' | 'refreshing' | 'current' | 'stale-fallback' | 'unavailable' | 'not-applicable' | 'credential-required'
 export interface ReadinessContract {
   ok: boolean
   status: 'ready' | 'degraded' | 'unavailable'
@@ -91,6 +95,8 @@ export type RiskEvidence = {
   method?: string
   detail?: string
   retrieved_at?: string
+  first_retrieved_at?: string
+  latest_retrieved_at?: string
   confidence?: number
   status?: string
   truth_status?: string
@@ -215,7 +221,7 @@ export async function getVendorRiskProfile(id: string, suppliedReport?: any, roo
       detail: evidence.detail,
       method: evidence.method,
       source_url: evidence.source_url || evidence.artifact?.url,
-      retrieved_at: evidence.retrieved_at,
+      retrieved_at: evidence.latest_retrieved_at || evidence.retrieved_at,
       confidence: evidence.confidence,
       status: evidence.status,
       truth_status: evidence.status,
@@ -370,6 +376,14 @@ export interface CatalogContributionResult {
   metadata: CatalogDatasetMetadata
 }
 
+export interface EnrichmentJob {
+  id: string
+  entity_id: string
+  entity_name?: string | null
+  status: string
+  created_at: number
+  results: Record<string, ConnectorRefreshResult | string>
+}
 export interface OwnershipRecord {
   owner: { id?: string; name: string; kind: string }
   relationship_type: 'direct' | 'ultimate_parent' | 'beneficial_owner' | 'unknown'
@@ -393,4 +407,18 @@ export interface OwnershipRecord {
   current: boolean
   evidence_present: boolean
   simulated: boolean
+}
+
+export interface ConnectorRefreshResult {
+  status: SourceRefreshState | 'succeeded' | 'empty' | 'partial' | 'failed' | 'timed_out'
+  queried: boolean
+  applicable: boolean
+  availability?: SourceRefreshState
+  refresh_state?: SourceRefreshState
+  reason?: string | null
+  action?: string | null
+  last_success_at?: string | null
+  facts?: number
+  cache?: boolean
+  simulated?: boolean
 }

@@ -8,36 +8,42 @@ STARTUP_TIMEOUT="${ILLUMINATE_STARTUP_TIMEOUT_SECONDS:-180}"
 SHUTDOWN_TIMEOUT="${ILLUMINATE_SHUTDOWN_TIMEOUT_SECONDS:-10}"
 DEADLINE=$((SECONDS + STARTUP_TIMEOUT))
 WEB_PORT="${PORT:-8080}"
+NEO4J_ROOT="${ILLUMINATE_NEO4J_ROOT:-$ROOT/.neo4j}"
 
-export NEO4J_server_directories_data="$ROOT/.neo4j/data"
-export NEO4J_server_directories_logs="$ROOT/.neo4j/logs"
-export NEO4J_server_directories_run="$ROOT/.neo4j/run"
-export NEO4J_server_directories_transaction_logs_root="$ROOT/.neo4j/transactions"
-export NEO4J_server_directories_plugins="$ROOT/.neo4j/plugins"
-export NEO4J_CONF="$ROOT/.neo4j/conf"
+export NEO4J_server_directories_data="$NEO4J_ROOT/data"
+export NEO4J_server_directories_logs="$NEO4J_ROOT/logs"
+export NEO4J_server_directories_run="$NEO4J_ROOT/run"
+export NEO4J_server_directories_transaction_logs_root="$NEO4J_ROOT/transactions"
+export NEO4J_server_directories_plugins="$NEO4J_ROOT/plugins"
+export NEO4J_CONF="$NEO4J_ROOT/conf"
 mkdir -p "$NEO4J_server_directories_data" "$NEO4J_server_directories_logs" \
   "$NEO4J_server_directories_run" "$NEO4J_server_directories_transaction_logs_root" \
   "$NEO4J_server_directories_plugins" "$NEO4J_CONF"
 
-PASSWORD_FILE="$ROOT/.neo4j/dev-password"
-if [ ! -f "$PASSWORD_FILE" ]; then
-  if [ -f "$ROOT/.neo4j/.password-set" ]; then
-    if [ -z "${NEO4J_PASSWORD:-}" ]; then
-      echo "Existing Neo4j data needs its current NEO4J_PASSWORD once to create the protected local credential file." >&2
-      exit 1
-    fi
+PASSWORD_FILE="$NEO4J_ROOT/dev-password"
+PASSWORD_MARKER="$NEO4J_ROOT/.password-set"
+CONFIGURED_PASSWORD="${NEO4J_PASSWORD:-${SESSION_SECRET:-}}"
+STORED_PASSWORD=""
+[ ! -f "$PASSWORD_FILE" ] || STORED_PASSWORD="$(cat "$PASSWORD_FILE")"
+NEEDS_CREDENTIAL_MIGRATION=0
+
+if [ -n "$CONFIGURED_PASSWORD" ]; then
+  export NEO4J_PASSWORD="$CONFIGURED_PASSWORD"
+  if [ -f "$PASSWORD_MARKER" ] && [ "$STORED_PASSWORD" != "$CONFIGURED_PASSWORD" ]; then
+    NEEDS_CREDENTIAL_MIGRATION=1
   fi
-  umask 077
-  if [ -n "${NEO4J_PASSWORD:-}" ]; then
-    printf '%s\n' "$NEO4J_PASSWORD" > "$PASSWORD_FILE"
-  else
-    python3 - <<'PY' > "$PASSWORD_FILE"
+elif [ -n "$STORED_PASSWORD" ]; then
+  export NEO4J_PASSWORD="$STORED_PASSWORD"
+elif [ -f "$PASSWORD_MARKER" ]; then
+  echo "Existing Neo4j data needs NEO4J_PASSWORD or SESSION_SECRET for bounded credential recovery." >&2
+  exit 1
+else
+  export NEO4J_PASSWORD="$(python3 - <<'PY'
 import secrets
 print(secrets.token_urlsafe(32))
 PY
-  fi
+)"
 fi
-export NEO4J_PASSWORD="$(cat "$PASSWORD_FILE")"
 
 NEO4J_BIN="$(readlink -f "$(command -v neo4j)")"
 NEO4J_SHARE="$(cd "$(dirname "$NEO4J_BIN")/../share/neo4j" && pwd)"
@@ -45,7 +51,9 @@ APOC_JAR="$(find "$NEO4J_SHARE/labs" -maxdepth 1 -name 'apoc-*-core.jar' -print 
 [ -n "$APOC_JAR" ] || { echo "Required Neo4j APOC core plugin was not found." >&2; exit 1; }
 ln -sf "$APOC_JAR" "$NEO4J_server_directories_plugins/$(basename "$APOC_JAR")"
 
-cat > "$NEO4J_CONF/neo4j.conf" <<EOF
+write_neo4j_config() {
+  local auth_enabled="${1:-true}"
+  cat > "$NEO4J_CONF/neo4j.conf" <<EOF
 server.default_listen_address=127.0.0.1
 server.directories.data=$NEO4J_server_directories_data
 server.directories.logs=$NEO4J_server_directories_logs
@@ -54,11 +62,91 @@ server.directories.transaction.logs.root=$NEO4J_server_directories_transaction_l
 server.directories.plugins=$NEO4J_server_directories_plugins
 dbms.security.procedures.allowlist=apoc.*
 dbms.security.procedures.unrestricted=apoc.*
+dbms.security.auth_enabled=$auth_enabled
 EOF
+}
 
-if [ ! -f "$ROOT/.neo4j/.password-set" ]; then
+wait_for_neo4j_http() {
+  local pid="$1"
+  local label="$2"
+  local deadline=$((SECONDS + STARTUP_TIMEOUT))
+  until curl --max-time 2 -sf http://127.0.0.1:7474/ >/dev/null; do
+    kill -0 "$pid" 2>/dev/null || {
+      echo "Neo4j exited during $label." >&2
+      return 1
+    }
+    [ "$SECONDS" -lt "$deadline" ] || {
+      echo "Neo4j $label timed out after ${STARTUP_TIMEOUT}s." >&2
+      return 1
+    }
+    sleep 1
+  done
+}
+
+stop_process() {
+  local pid="${1:-}"
+  local label="${2:-process}"
+  [ -n "$pid" ] || return 0
+  kill "$pid" 2>/dev/null || true
+  local deadline=$((SECONDS + SHUTDOWN_TIMEOUT))
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "$label did not stop after ${SHUTDOWN_TIMEOUT}s; forcing shutdown." >&2
+      kill -KILL "$pid" 2>/dev/null || true
+      break
+    fi
+    sleep 1
+  done
+  wait "$pid" 2>/dev/null || true
+}
+
+if [ "$NEEDS_CREDENTIAL_MIGRATION" -eq 1 ]; then
+  echo "Recovering the retained Neo4j credential without replacing graph data..."
+  write_neo4j_config false
+  neo4j console &
+  RECOVERY_PID=$!
+  cleanup_recovery() {
+    stop_process "$RECOVERY_PID" "Neo4j credential-recovery process"
+    write_neo4j_config true
+  }
+  trap cleanup_recovery EXIT INT TERM
+  wait_for_neo4j_http "$RECOVERY_PID" "credential recovery"
+  if ! timeout --foreground --signal=TERM --kill-after=5 "${STARTUP_TIMEOUT}s" python3 - <<'PY'
+import os
+from neo4j import GraphDatabase
+from neo4j.exceptions import ClientError
+
+with GraphDatabase.driver(os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"), auth=None) as driver:
+    driver.verify_connectivity()
+    with driver.session(database="system") as session:
+        try:
+            session.run(
+                "ALTER USER neo4j SET PLAINTEXT PASSWORD $password CHANGE NOT REQUIRED",
+                password=os.environ["NEO4J_PASSWORD"],
+            ).consume()
+        except ClientError as error:
+            # A stale local hint can request recovery even when the retained
+            # store already uses the desired secret. That state is healthy.
+            same_password = (
+                error.code == "Neo.ClientError.Statement.ArgumentError"
+                and "Old password and new password cannot be the same" in str(error)
+            )
+            if not same_password:
+                raise
+PY
+  then
+    echo "Neo4j credential recovery failed or timed out; graph data was not replaced." >&2
+    exit 1
+  fi
+  cleanup_recovery
+  trap - EXIT INT TERM
+fi
+
+write_neo4j_config true
+INITIALIZED_NOW=0
+if [ ! -f "$PASSWORD_MARKER" ]; then
   neo4j-admin dbms set-initial-password "$NEO4J_PASSWORD" --require-password-change=false
-  touch "$ROOT/.neo4j/.password-set"
+  INITIALIZED_NOW=1
 fi
 
 setsid neo4j console &
@@ -126,11 +214,11 @@ import os
 from neo4j import GraphDatabase
 
 with GraphDatabase.driver(
-    "bolt://127.0.0.1:7687",
-    auth=("neo4j", os.environ["NEO4J_PASSWORD"]),
+    os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
+    auth=(os.environ.get("NEO4J_USER", "neo4j"), os.environ["NEO4J_PASSWORD"]),
 ) as driver:
     driver.verify_connectivity()
-    with driver.session() as session:
+    with driver.session(database=os.environ.get("NEO4J_DATABASE", "neo4j")) as session:
         version = session.run("RETURN apoc.version() AS version").single()["version"]
         available = session.run(
             "CALL apoc.help('apoc.path.subgraphAll') "
@@ -140,15 +228,22 @@ with GraphDatabase.driver(
             raise RuntimeError("required APOC procedure apoc.path.subgraphAll is unavailable")
 PY
 then
-  echo "Neo4j Bolt authentication or APOC verification failed." >&2
+  echo "Neo4j Bolt authentication/APOC verification failed; the credential file was not changed." >&2
   exit 1
 fi
+
+umask 077
+PASSWORD_TMP="$PASSWORD_FILE.tmp.$$"
+printf '%s\n' "$NEO4J_PASSWORD" > "$PASSWORD_TMP"
+chmod 600 "$PASSWORD_TMP"
+mv "$PASSWORD_TMP" "$PASSWORD_FILE"
+[ "$INITIALIZED_NOW" -eq 0 ] || touch "$PASSWORD_MARKER"
 
 setsid bash -c 'cd api && exec python3 -m uvicorn illuminate.main:app --host 0.0.0.0 --port 8000' &
 API_PID=$!
 
 echo "Waiting for Illuminate API..."
-until curl --max-time 5 -sf http://127.0.0.1:8000/api/health | grep -q '"ok":true'; do
+until curl --max-time 2 -sf http://127.0.0.1:8000/api/health | grep -q '"ok":true'; do
   if ! kill -0 "$API_PID" 2>/dev/null; then
     echo "Illuminate API exited before becoming ready." >&2
     exit 1

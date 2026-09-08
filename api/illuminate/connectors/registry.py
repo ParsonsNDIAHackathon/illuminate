@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .base import Connector
+from .contextual import EPSSConnector, FARConnector, OpenStreetMapConnector
 from .edgar import EDGARConnector
 from .gdelt import GDELTConnector
 from .gleif import GLEIFConnector
@@ -12,6 +13,7 @@ from .sam import SAMConnector
 from .sam_exclusions import SAMExclusionsConnector
 from .usaspending import USAspendingConnector
 from .websearch import WebSearchConnector
+from .source_contract import coverage_contract, coverage_for_adapter
 from ..llm.client import check_key
 
 
@@ -127,7 +129,8 @@ class OpenAIPseudoConnector(Connector):
 
 REGISTRY: list[Connector] = [
     SAMConnector(), SAMExclusionsConnector(), USAspendingConnector(), GLEIFConnector(), LittleSisConnector(), EDGARConnector(), GDELTConnector(),
-    OFACConnector(), MarketConnector(), OpenCorporatesConnector(), WebSearchConnector(), OpenAIPseudoConnector(),
+    OFACConnector(), MarketConnector(), OpenCorporatesConnector(), OpenStreetMapConnector(), FARConnector(), EPSSConnector(),
+    WebSearchConnector(), OpenAIPseudoConnector(),
 ]
 
 # Explicit, non-mutating probes. Parameters are intentionally minimal and never
@@ -143,6 +146,9 @@ _DIAGNOSTICS = {
     "ofac": ("https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV", {}),
     "market": ("https://finnhub.io/api/v1/quote", {"symbol": "AAPL", "token": "$credential"}),
     "opencorporates": ("https://api.opencorporates.com/v0.4/companies/search", {"q": "a", "api_token": "$credential", "per_page": "1"}),
+    "openstreetmap": ("https://nominatim.openstreetmap.org/status", {"format": "json"}),
+    "far": ("https://www.ecfr.gov/current/title-48/chapter-1/subchapter-H/part-52", {}),
+    "epss": ("https://api.first.org/data/v1/epss", {"cve": "CVE-2021-44228"}),
 }
 for _connector in REGISTRY:
     if _connector.name in _DIAGNOSTICS:
@@ -164,13 +170,28 @@ def connector_names() -> list[str]:
 def source_metadata(name: str) -> dict:
     """Return a fresh normalized metadata mapping for a connector source."""
     meta = SOURCE_METADATA.get(name, {})
+    contract = coverage_for_adapter(name) or {}
     return {
-        "source_id": meta.get("source_id", name),
-        "catalog_ids": list(meta.get("catalog_ids", [])),
-        "usage_note": meta.get("usage_note"),
-        "quality_note": meta.get("quality_note"),
-        "supports": meta.get("supports"),
-        "unknowns": meta.get("unknowns"),
+        "source_id": meta.get("source_id") or contract.get("source_id") or name,
+        "catalog_ids": list(meta.get("catalog_ids") or contract.get("catalog_ids", [])),
+        "usage_note": meta.get("usage_note") or (
+            f"{contract.get('access')}; preserve upstream attribution and terms."
+            if contract else None
+        ),
+        "quality_note": meta.get("quality_note") or contract.get("limitations"),
+        "supports": meta.get("supports") or (
+            ", ".join(contract.get("categories", [])) + " evidence"
+            if contract.get("categories") else None
+        ),
+        "unknowns": meta.get("unknowns") or contract.get("limitations"),
+        "endpoint": contract.get("endpoint"),
+        "access": contract.get("access"),
+        "credentials": contract.get("credentials"),
+        "freshness": contract.get("freshness"),
+        "entity_kinds": list(contract.get("entity_kinds", [])),
+        "categories": list(contract.get("categories", [])),
+        "policy_status": contract.get("policy_status"),
+        "limitations": contract.get("limitations"),
     }
 def capability_kind(name: str) -> str:
     """All registry capabilities are optional to the deterministic judged path."""

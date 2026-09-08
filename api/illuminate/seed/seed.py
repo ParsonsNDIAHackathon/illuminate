@@ -21,7 +21,6 @@ from pathlib import Path
 from .. import db
 from ..connectors import get_connector
 from ..connectors.base import now_iso
-from ..connectors.http import set_cache_dir
 from ..connectors.registry import source_metadata
 from ..connectors.usaspending import award_detail, award_url, is_sole_source, psc_category, recipient, recipient_url, search_awards
 from ..enrichment import claims
@@ -32,25 +31,53 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 CATALOG_FIXTURE = FIXTURES / "catalog_lineage.json"
 PROV = {"source": "USAspending", "method": "connector", "confidence": 0.95}
 SEED_VERSION = "uc7-fixtures-v1"
+_seed_retrieval_mode = "offline_fixture"
+_seed_retrieval_trace: list[dict] | None = None
+from ..config import settings
+from ..connectors.http import retrieval_context, set_cache_dir
 
 
 def log(msg: str) -> None:
     print(f"[seed {time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
-
+def _with_retrieval_truth(props: dict, retrievals: list[dict] | None = None) -> dict:
+    """Attach the conservative truth of every response backing a seed record."""
+    result = dict(props)
+    if result.get("source") != "USAspending":
+        return result
+    outcomes = retrievals if retrievals is not None else (
+        _seed_retrieval_trace[-1:] if _seed_retrieval_trace else []
+    )
+    statuses = [item.get("source_status") for item in outcomes]
+    precedence = ("error", "fixture_miss", "stale_fallback", "offline_fixture", "cached", "live")
+    source_status = next((status for status in precedence if status in statuses), "unknown")
+    result["retrieval_mode"] = _seed_retrieval_mode
+    result["source_status"] = source_status
+    result["retrieval_status"] = result["source_status"]
+    result["cache"] = result["source_status"] in {"cached", "stale_fallback"}
+    result["fallback"] = result["source_status"] == "stale_fallback"
+    ages = [item["cache_age_s"] for item in outcomes if item.get("cache_age_s") is not None]
+    if ages:
+        result["cache_age_s"] = max(ages)
+    retrieved = sorted(str(item["retrieved_at"]) for item in outcomes if item.get("retrieved_at"))
+    if retrieved:
+        result["retrieved_at"] = retrieved[0]
+    return result
 async def reset_graph() -> None:
     await db.write("MATCH (n) WHERE NOT n:Category DETACH DELETE n")
     log("graph reset (categories kept)")
 
 
-async def merge_entity(eid: str, props: dict) -> None:
-    props = {k: v for k, v in props.items() if v is not None}
+async def merge_entity(eid: str, props: dict, *, retrievals: list[dict] | None = None) -> None:
+    props = _with_retrieval_truth({k: v for k, v in props.items() if v is not None}, retrievals)
+    props.setdefault("retrieval_mode", _seed_retrieval_mode)
     retrieved_at = props.pop("retrieved_at", None) or now_iso()
     ingested_at = now_iso()
     await db.write(
         "MERGE (e:Entity {id:$id}) "
         "ON CREATE SET e.retrieved_at=$retrieved, e.first_ingested_at=$ingested "
         "SET e += $p, e.retrieved_at=coalesce(e.retrieved_at,$retrieved), "
+        "e.latest_retrieved_at=$retrieved, "
         "e.first_ingested_at=coalesce(e.first_ingested_at,$ingested), "
         "e.last_ingested_at=$ingested, e.name_norm=coalesce(e.name_norm,$nn)",
         {
@@ -69,8 +96,17 @@ async def merge_location(code: str) -> str:
     return lid
 
 
-async def merge_rel(src: str, rel: str, dst: str, props: dict, key_props: dict | None = None) -> None:
-    props = {k: v for k, v in props.items() if v is not None}
+async def merge_rel(
+    src: str,
+    rel: str,
+    dst: str,
+    props: dict,
+    key_props: dict | None = None,
+    *,
+    retrievals: list[dict] | None = None,
+) -> None:
+    props = _with_retrieval_truth({k: v for k, v in props.items() if v is not None}, retrievals)
+    props.setdefault("retrieval_mode", _seed_retrieval_mode)
     retrieved_at = props.pop("retrieved_at", None) or now_iso()
     ingested_at = now_iso()
     key = key_props or {}
@@ -79,6 +115,7 @@ async def merge_rel(src: str, rel: str, dst: str, props: dict, key_props: dict |
         f"MATCH (a {{id:$a}}), (b {{id:$b}}) MERGE (a)-[r:{rel}{key_clause}]->(b) "
         "ON CREATE SET r.id=$rid, r.retrieved_at=$retrieved, r.first_ingested_at=$ingested "
         "SET r += $p, r.retrieved_at=coalesce(r.retrieved_at,$retrieved), "
+        "r.latest_retrieved_at=$retrieved, "
         "r.first_ingested_at=coalesce(r.first_ingested_at,$ingested), "
         "r.last_ingested_at=$ingested",
         {
@@ -93,9 +130,17 @@ async def merge_rel(src: str, rel: str, dst: str, props: dict, key_props: dict |
     )
 
 
-async def merge_artifact(aid: str, props: dict, about: str) -> None:
-    props = {k: v for k, v in props.items() if v is not None}
-    props.setdefault("retrieved_at", now_iso())
+async def merge_artifact(
+    aid: str,
+    props: dict,
+    about: str,
+    *,
+    retrievals: list[dict] | None = None,
+) -> None:
+    props = _with_retrieval_truth({k: v for k, v in props.items() if v is not None}, retrievals)
+    props.setdefault("retrieval_mode", _seed_retrieval_mode)
+    retrieved_at = props.get("retrieved_at") or now_iso()
+    props.setdefault("retrieved_at", retrieved_at)
     ingested_at = now_iso()
     source_key = {"USAspending": "usaspending", "GDELT": "gdelt", "GLEIF": "gleif", "LittleSis": "littlesis",
                   "SEC EDGAR": "edgar", "OFAC SDN": "ofac", "OpenCorporates": "opencorporates",
@@ -103,14 +148,26 @@ async def merge_artifact(aid: str, props: dict, about: str) -> None:
     if source_key:
         for key, value in source_metadata(source_key).items():
             props.setdefault(key, value)
-        props.setdefault("source_status", "retrieved")
+        props.setdefault("source_status", "unknown")
         props.setdefault("simulated", False)
+    latest = {
+        "retrieval_status": props.get("retrieval_status") or props.get("source_status") or "unknown",
+        "retrieval_mode": props.get("retrieval_mode"),
+        "cache": bool(props.get("cache")),
+        "fallback": bool(props.get("fallback")),
+        "cache_age_s": props.get("cache_age_s"),
+    }
     await db.write(
         "MERGE (a:Artifact {id:$id}) "
-        "ON CREATE SET a += $p, a.first_ingested_at=$ingested "
-        "SET a.last_ingested_at=$ingested "
+        "ON CREATE SET a += $p, a.retrieved_at=$retrieved, a.first_ingested_at=$ingested "
+        "SET a.retrieved_at=coalesce(a.retrieved_at,$retrieved), "
+        "a.latest_retrieved_at=$retrieved, a.latest_retrieval_status=$latest.retrieval_status, "
+        "a.latest_retrieval_mode=$latest.retrieval_mode, a.latest_cache=$latest.cache, "
+        "a.latest_fallback=$latest.fallback, a.latest_cache_age_s=$latest.cache_age_s, "
+        "a.last_ingested_at=$ingested "
         "WITH a MATCH (e {id:$e}) MERGE (a)-[r:ABOUT]->(e) ON CREATE SET r.id=$rid",
-        {"id": aid, "p": props, "ingested": ingested_at, "e": about, "rid": edge_id()},
+        {"id": aid, "p": props, "latest": latest, "retrieved": retrieved_at,
+         "ingested": ingested_at, "e": about, "rid": edge_id()},
     )
 
 
@@ -132,14 +189,21 @@ async def seed_program(keywords: list[str], root_name: str, *, since: str, until
     by_recipient: dict[str, dict] = {}
     page = 1
     while len(by_recipient) < max_primes * 3 and page <= 4:
+        trace_start = len(_seed_retrieval_trace or [])
         res = await search_awards(keywords, start=since, end=until, agency=agency, limit=100, page=page)
+        page_retrievals = list((_seed_retrieval_trace or [])[trace_start:])
         rows = res.get("results", [])
         for a in rows:
             rid = a.get("recipient_id")
             if not rid:
                 continue
-            slot = by_recipient.setdefault(rid, {"awards": [], "total": 0.0, "name": a.get("Recipient Name")})
+            slot = by_recipient.setdefault(
+                rid,
+                {"awards": [], "total": 0.0, "name": a.get("Recipient Name"), "retrievals": []},
+            )
+            a["_retrievals"] = page_retrievals
             slot["awards"].append(a)
+            slot["retrievals"].extend(page_retrievals)
             slot["total"] += float(a.get("Award Amount") or 0)
         if not res.get("page_metadata", {}).get("hasNext"):
             break
@@ -149,15 +213,21 @@ async def seed_program(keywords: list[str], root_name: str, *, since: str, until
 
     prime_ids: dict[str, str] = {}  # recipient_id → entity id
     for rid, slot in ranked:
+        trace_start = len(_seed_retrieval_trace or [])
         rec = await recipient(rid)
+        rec_retrievals = list((_seed_retrieval_trace or [])[trace_start:])
+        prime_retrievals = [*slot["retrievals"], *rec_retrievals]
         uei = rec.get("uei")
         eid = entity_id(uei=uei, name=rec.get("name") or slot["name"])
         loc = _country(rec.get("location"))
         await merge_entity(eid, {"name": rec.get("name") or slot["name"], "kind": "organization", "uei": uei, "duns": rec.get("duns"),
                                  "aliases": rec.get("alternate_names") or [], "aliases_norm": [normalize_name(x) for x in rec.get("alternate_names") or []],
-                                 "business_types": rec.get("business_types") or [], "source_url": recipient_url(rid), **PROV})
+                                 "business_types": rec.get("business_types") or [], "source_url": recipient_url(rid), **PROV},
+                           retrievals=prime_retrievals)
         if loc:
-            await merge_rel(eid, "OPERATES_IN", await merge_location(loc), {**PROV, "source_url": recipient_url(rid), "detail": "recipient address"})
+            await merge_rel(eid, "OPERATES_IN", await merge_location(loc),
+                            {**PROV, "source_url": recipient_url(rid), "detail": "recipient address"},
+                            retrievals=prime_retrievals)
         prime_ids[rid] = eid
         # top awards → detail for competition + PSC/NAICS
         top = sorted(slot["awards"], key=lambda a: -float(a.get("Award Amount") or 0))[:3]
@@ -166,10 +236,14 @@ async def seed_program(keywords: list[str], root_name: str, *, since: str, until
             gid = a.get("generated_internal_id")
             if not gid:
                 continue
+            detail_trace_start = len(_seed_retrieval_trace or [])
             try:
                 det = await award_detail(gid)
             except Exception:
                 det = {}
+            detail_retrievals = list((_seed_retrieval_trace or [])[detail_trace_start:])
+            award_retrievals = [*a.get("_retrievals", []), *detail_retrievals]
+            prime_retrievals.extend(detail_retrievals)
             ltx = det.get("latest_transaction_contract_data") or {}
             psc = psc or ltx.get("product_or_service_code")
             naics = naics or ltx.get("naics")
@@ -178,35 +252,46 @@ async def seed_program(keywords: list[str], root_name: str, *, since: str, until
             await merge_artifact(artifact_id(award_url(gid)), {"kind": "award", "title": f"{a.get('Award ID')} — {(a.get('Description') or '')[:140]}", "url": award_url(gid),
                                                                  "source": "USAspending", "published_at": a.get("Start Date"), "amount": a.get("Award Amount"),
                                                                  "agency": a.get("Awarding Sub Agency"), "award_id": a.get("Award ID"), "psc": psc, "naics": naics,
-                                                                 "competition": (ltx.get("extent_competed_description") or None)}, eid)
+                                                                  "competition": (ltx.get("extent_competed_description") or None)}, eid,
+                                 retrievals=award_retrievals)
             pop = _country(det.get("place_of_performance")) if det else None
             if pop and pop != loc:
-                await merge_rel(eid, "OPERATES_IN", await merge_location(pop), {**PROV, "source_url": award_url(gid), "detail": "place of performance"})
+                await merge_rel(eid, "OPERATES_IN", await merge_location(pop),
+                                {**PROV, "source_url": award_url(gid), "detail": "place of performance"},
+                                retrievals=award_retrievals)
         cat = psc_category(psc)
         if cat:
-            await merge_rel(eid, "PROVIDES", cat, {**PROV, "confidence": 0.7, "detail": f"PSC {psc}"})
+            await merge_rel(eid, "PROVIDES", cat, {**PROV, "confidence": 0.7, "detail": f"PSC {psc}"},
+                            retrievals=prime_retrievals)
         await merge_rel(eid, "SUPPLIES", root_id, {"tier": 1, "sole_source": bool(sole_any), "competition": why, "amount": round(slot["total"], 2), "award_count": len(slot["awards"]),
                                                   "contract_ref": top[0].get("Award ID") if top else None, "psc": psc, "naics": naics, **PROV,
-                                                  "source_url": award_url(top[0]["generated_internal_id"]) if top and top[0].get("generated_internal_id") else None})
+                                                   "source_url": award_url(top[0]["generated_internal_id"]) if top and top[0].get("generated_internal_id") else None},
+                        retrievals=prime_retrievals)
         # USAspending parent recipient → OWNS
         puei = rec.get("parent_uei")
         if puei and puei != uei and rec.get("parent_name"):
             pid = entity_id(uei=puei)
-            await merge_entity(pid, {"name": rec["parent_name"], "kind": "organization", "uei": puei, "source_url": recipient_url(rec["parent_id"]) if rec.get("parent_id") else None, **PROV})
-            await merge_rel(pid, "OWNS", eid, {**PROV, "detail": "USAspending parent recipient"})
+            await merge_entity(pid, {"name": rec["parent_name"], "kind": "organization", "uei": puei, "source_url": recipient_url(rec["parent_id"]) if rec.get("parent_id") else None, **PROV},
+                               retrievals=prime_retrievals)
+            await merge_rel(pid, "OWNS", eid, {**PROV, "detail": "USAspending parent recipient"},
+                            retrievals=prime_retrievals)
     log(f"{len(prime_ids)} tier-1 suppliers written")
 
     # ---- subawards ------------------------------------------------------------
     subs_seen: dict[str, dict] = {}
     page = 1
     while len(subs_seen) < max_subs and page <= 5:
+        trace_start = len(_seed_retrieval_trace or [])
         res = await search_awards(keywords, start=since, end=until, agency=None, limit=100, page=page, subawards=True)
+        page_retrievals = list((_seed_retrieval_trace or [])[trace_start:])
         for s in res.get("results", []):
             key = (s.get("Sub-Awardee Name") or "").strip().upper()
             if not key:
                 continue
-            slot = subs_seen.setdefault(key, {"rows": [], "total": 0.0})
+            slot = subs_seen.setdefault(key, {"rows": [], "total": 0.0, "retrievals": []})
+            s["_retrievals"] = page_retrievals
             slot["rows"].append(s)
+            slot["retrievals"].extend(page_retrievals)
             slot["total"] += float(s.get("Sub-Award Amount") or 0)
         if not res.get("page_metadata", {}).get("hasNext"):
             break
@@ -223,41 +308,61 @@ async def seed_program(keywords: list[str], root_name: str, *, since: str, until
         display = r0.get("Sub-Awardee Name")
         loc = None
         src_url = f"https://www.usaspending.gov/award/{r0.get('prime_award_generated_internal_id')}"
+        sub_retrievals = list(slot["retrievals"])
         if sub_rid:
+            trace_start = len(_seed_retrieval_trace or [])
             try:
                 rec = await recipient(sub_rid)
                 uei, display, loc = rec.get("uei"), rec.get("name") or display, _country(rec.get("location"))
                 src_url = recipient_url(sub_rid)
             except Exception:
                 pass
+            sub_retrievals.extend((_seed_retrieval_trace or [])[trace_start:])
         sid = entity_id(uei=uei, name=display)
-        await merge_entity(sid, {"name": display, "kind": "organization", "uei": uei, "source_url": src_url, **PROV, "confidence": 0.9 if uei else 0.75, "method": "connector" if uei else "name_match"})
+        await merge_entity(sid, {"name": display, "kind": "organization", "uei": uei, "source_url": src_url, **PROV, "confidence": 0.9 if uei else 0.75, "method": "connector" if uei else "name_match"},
+                           retrievals=sub_retrievals)
         if loc:
-            await merge_rel(sid, "OPERATES_IN", await merge_location(loc), {**PROV, "source_url": src_url})
+            await merge_rel(sid, "OPERATES_IN", await merge_location(loc), {**PROV, "source_url": src_url},
+                            retrievals=sub_retrievals)
         # attach to each distinct prime
         primes_for_sub = defaultdict(float)
         for s in rows:
             primes_for_sub[(s.get("prime_award_recipient_id"), s.get("Prime Recipient Name"), s.get("prime_award_generated_internal_id"), s.get("Prime Award ID"))] += float(s.get("Sub-Award Amount") or 0)
         for (prid, pname, pgid, paward), amt in primes_for_sub.items():
+            award_retrievals = [
+                trace
+                for row in rows
+                if row.get("prime_award_recipient_id") == prid
+                for trace in row.get("_retrievals", [])
+            ]
             pid = prime_ids.get(prid)
             if not pid:
                 # prime not in the top-N — bring it in at tier 1 so the path to root exists
+                trace_start = len(_seed_retrieval_trace or [])
                 try:
                     prec = await recipient(prid) if prid else {}
                 except Exception:
                     prec = {}
+                prime_retrievals = [
+                    *award_retrievals,
+                    *list((_seed_retrieval_trace or [])[trace_start:]),
+                ]
                 pid = entity_id(uei=prec.get("uei"), name=prec.get("name") or pname)
-                await merge_entity(pid, {"name": prec.get("name") or pname, "kind": "organization", "uei": prec.get("uei"), "source_url": recipient_url(prid) if prid else None, **PROV})
-                await merge_rel(pid, "SUPPLIES", root_id, {"tier": 1, "sole_source": False, "contract_ref": paward, **PROV, "source_url": award_url(pgid) if pgid else None, "detail": "prime of a reported subaward"})
+                await merge_entity(pid, {"name": prec.get("name") or pname, "kind": "organization", "uei": prec.get("uei"), "source_url": recipient_url(prid) if prid else None, **PROV},
+                                   retrievals=prime_retrievals)
+                await merge_rel(pid, "SUPPLIES", root_id, {"tier": 1, "sole_source": False, "contract_ref": paward, **PROV, "source_url": award_url(pgid) if pgid else None, "detail": "prime of a reported subaward"},
+                                retrievals=prime_retrievals)
                 if prid:
                     prime_ids[prid] = pid
             await merge_rel(sid, "SUPPLIES", pid, {"tier": 2, "sole_source": False, "amount": round(amt, 2), "contract_ref": paward, "sub_award_ids": [s.get("Sub-Award ID") for s in rows if s.get("prime_award_recipient_id") == prid][:10],
-                                                  "description": (rows[0].get("Sub-Award Description") or "")[:200], **PROV, "source_url": award_url(pgid) if pgid else None})
+                                                  "description": (rows[0].get("Sub-Award Description") or "")[:200], **PROV, "source_url": award_url(pgid) if pgid else None},
+                            retrievals=award_retrievals)
             for s in rows[:2]:
                 if s.get("prime_award_generated_internal_id") == pgid:
                     aid = artifact_id(f"{award_url(pgid)}#{s.get('Sub-Award ID')}")
                     await merge_artifact(aid, {"kind": "award", "title": f"Subaward {s.get('Sub-Award ID')} — {(s.get('Sub-Award Description') or '')[:120]}", "url": award_url(pgid),
-                                               "source": "USAspending", "published_at": s.get("Sub-Award Date"), "amount": s.get("Sub-Award Amount"), "award_id": paward}, sid)
+                                               "source": "USAspending", "published_at": s.get("Sub-Award Date"), "amount": s.get("Sub-Award Amount"), "award_id": paward}, sid,
+                                         retrievals=s.get("_retrievals", []))
         n_sub += 1
     log(f"{n_sub} tier-2 suppliers written")
     return {"root_id": root_id, "root_name": root_name, "primes": len(prime_ids), "subs": n_sub}
@@ -403,13 +508,34 @@ async def stats() -> dict:
 
 
 async def main_async(args) -> None:
-    set_cache_dir(FIXTURES, read_only=args.offline)
+    global _seed_retrieval_mode, _seed_retrieval_trace
+    bootstrap = bool(getattr(args, "bootstrap", False))
+    if bootstrap and args.offline:
+        raise ValueError("--bootstrap cannot use offline fixtures")
+    _seed_retrieval_mode = "offline_fixture" if args.offline else "operational_live"
+    # A production bootstrap uses only the runtime cache. It must never read or
+    # mutate the committed fixture directory.
+    set_cache_dir(FIXTURES if args.offline else settings.data_dir / "http_cache",
+                  read_only=args.offline, fixture_store=args.offline)
     await ensure_schema()
+    if bootstrap:
+        # Rehearsal-only overlays must never survive into the operational view.
+        await db.write("MATCH ()-[r]->() WHERE coalesce(r.simulated,false)=true DELETE r")
+        await db.write("MATCH (n) WHERE coalesce(n.simulated,false)=true DETACH DELETE n")
     if args.reset:
         await reset_graph()
-    await seed_catalog_lineage()
-    info = await seed_program(args.keyword, args.root_name, since=args.since, until=args.until, max_primes=args.primes, max_subs=args.subs, agency=args.agency)
-    await seed_cached_gdelt()
+    if not bootstrap:
+        await seed_catalog_lineage()
+    # Retain the trace while records are merged, so runtime-cache results carry
+    # their real cache/live/fallback state and original response timestamp.
+    try:
+        with retrieval_context(_seed_retrieval_mode) as retrievals:
+            _seed_retrieval_trace = retrievals
+            info = await seed_program(args.keyword, args.root_name, since=args.since, until=args.until, max_primes=args.primes, max_subs=args.subs, agency=args.agency)
+    finally:
+        _seed_retrieval_trace = None
+    if not bootstrap:
+        await seed_cached_gdelt()
     # enrichment: authoritative connectors over every supplier; people/EDGAR over the biggest
     all_ids = [r["id"] for r in await db.read("MATCH (e:Entity) WHERE e.kind='organization' AND coalesce(e.simulated,false)=false RETURN e.id AS id")]
     top_ids = [r["id"] for r in await db.read(
@@ -428,6 +554,8 @@ async def main_async(args) -> None:
         await enrich_with(["littlesis"], top_ids + parents[:10], commit_open=True)
         await enrich_with(["edgar"], top_ids + parents[:10], commit_open=False)
     if args.scenario:
+        if bootstrap:
+            raise ValueError("--bootstrap cannot add a simulation scenario")
         await scenario(info["root_id"])
     seed_status = "complete" if info["primes"] > 0 and info["subs"] > 0 else "incomplete"
     await db.write(
@@ -458,6 +586,8 @@ def main() -> None:
     ap.add_argument("--offline", action="store_true", help="only read from committed fixtures")
     ap.add_argument("--scenario", action="store_true", help="add the simulated adversarial-tie overlay")
     ap.add_argument("--skip-enrich", action="store_true")
+    ap.add_argument("--bootstrap", action="store_true",
+                    help="live-only production recovery; never imports or writes committed fixtures")
     args = ap.parse_args()
     if not args.keyword:
         args.keyword = ["V-22"]

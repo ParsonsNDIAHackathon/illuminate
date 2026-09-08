@@ -1,8 +1,9 @@
-- [Neo4j on Replit](neo4j-on-replit.md) — Nix Neo4j needs a writable config and explicit APOC plugin wiring for this app.
+- [Neo4j on Replit](neo4j-on-replit.md) — Embedded Neo4j needs writable config, explicit APOC wiring, and a persistent single-instance deployment.
 - [Concurrent merge verification](concurrent-merge-verification.md) — re-check shared entry points after parallel task merges, immediately before completion.
 - [Main branch synchronization](main-replit-branch-sync.md) — compare explicit fresh refs and publish only the immutable commit already evaluated.
 - [Graph evidence truth](graph-evidence-truth.md) — consumers must resolve current backing-claim and artifact status; edge metadata alone can become stale.
-- [Readiness truth rules](readiness-truth-rules.md) — primary readiness requires stamped seed completion plus live mission coverage; optional services never gate it.
+- [Readiness truth rules](readiness-truth-rules.md) — rehearsal readiness and production live readiness are separate; only the database gates startup.
+- [Live observation identity](live-observation-identity.md) — idempotent refreshes key observations by upstream identity while preserving first-seen and latest-retrieval truth separately.
 - [AI summary authority boundary](ai-summary-authority.md) — Models may prioritize approved findings, but deterministic code owns narrative, citations, scores, and fallback.
 - [NDIA catalog contract](ndia-catalog-contract.md) — event-3 read fields are public, but organizer-provided write routes must remain opt-in.
 - [Evidence lineage safety](evidence-lineage-safety.md) — connector diagnostics must be allowlisted, and shared artifact provenance must remain immutable.

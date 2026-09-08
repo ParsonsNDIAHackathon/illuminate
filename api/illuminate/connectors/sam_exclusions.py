@@ -20,7 +20,7 @@ import httpx
 from ..config import settings
 from ..ids import name_match_score, normalize_name
 from .base import ArtifactRef, Connector, Fact, NodeRef
-from .http import cache_dir
+from .http import cache_dir, current_retrieval_mode, record_retrieval
 
 LIST_URL = "https://sam.gov/api/prod/fileextractservices/v1/api/listfiles?domain=Exclusions/Public%20V2&privacy=Public"
 DL_URL = "https://sam.gov/api/prod/fileextractservices/v1/api/download/Exclusions/Public%20V2/{name}?privacy=Public"
@@ -29,11 +29,14 @@ MAX_AGE_S = 36 * 3600
 NAME_MATCH = 94
 
 _index: dict | None = None
+_index_mode: str | None = None
 
 
 def _index_paths() -> list[Path]:
-    # data dir first (fresh daily), then the fixture cache (committed, offline fallback)
-    return [settings.data_dir / INDEX_NAME, cache_dir() / INDEX_NAME]
+    # Committed fixture indexes are available only under explicit offline mode.
+    if current_retrieval_mode() == "offline_fixture":
+        return [cache_dir() / INDEX_NAME]
+    return [settings.data_dir / INDEX_NAME]
 
 
 async def _latest_extract_name() -> str | None:
@@ -63,10 +66,15 @@ def _slim(row: dict) -> dict | None:
 
 async def refresh_index(force: bool = False) -> dict:
     """Download today's extract and write the slim index. Returns the index."""
-    global _index
+    global _index, _index_mode
     target = _index_paths()[0]
     if not force and target.exists() and time.time() - target.stat().st_mtime < MAX_AGE_S:
+        record_retrieval("offline_fixture" if current_retrieval_mode() == "offline_fixture" else "cached",
+                         LIST_URL, age_s=max(0.0, time.time() - target.stat().st_mtime))
         return load_index()
+    if current_retrieval_mode() == "offline_fixture":
+        record_retrieval("fixture_miss", LIST_URL)
+        raise FileNotFoundError("SAM exclusions index is not in the offline fixture store")
     name = await _latest_extract_name()
     if not name:
         raise RuntimeError("SAM extract listing returned no files")
@@ -91,16 +99,20 @@ async def refresh_index(force: bool = False) -> dict:
         except Exception:
             pass
     _index = idx
+    _index_mode = current_retrieval_mode()
+    record_retrieval("live", LIST_URL, age_s=0)
     return idx
 
 
 def load_index() -> dict:
-    global _index
-    if _index is not None:
+    global _index, _index_mode
+    mode = current_retrieval_mode()
+    if _index is not None and _index_mode == mode:
         return _index
     for p in _index_paths():
         if p.exists():
             _index = json.loads(gzip.decompress(p.read_bytes()))
+            _index_mode = mode
             return _index
     raise FileNotFoundError("no SAM exclusions index; run refresh_index()")
 
@@ -145,7 +157,13 @@ class SAMExclusionsConnector(Connector):
             await refresh_index()
         except Exception as e:
             try:
-                load_index()  # stale/committed index is better than none
+                paths = _index_paths()
+                age = max(0.0, time.time() - paths[0].stat().st_mtime)
+                if current_retrieval_mode() != "offline_fixture" and age > settings.connector_cache_fallback_max_age_s:
+                    raise FileNotFoundError("cached SAM exclusions index is beyond fallback age")
+                load_index()
+                record_retrieval("offline_fixture" if current_retrieval_mode() == "offline_fixture" else "stale_fallback",
+                                 LIST_URL, age_s=age)
             except FileNotFoundError:
                 raise RuntimeError(f"SAM exclusions extract unavailable: {e}")
         res = screen(entity["name"], entity.get("uei"), entity.get("cage"), entity.get("aliases"))

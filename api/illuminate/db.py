@@ -46,7 +46,9 @@ async def probe(timeout: float = 3.0) -> dict[str, Any]:
                 "properties(m)['completed_at'] AS seed_completed_at, "
                 "properties(m)['root_id'] AS seed_root_id, "
                 "properties(m)['primes'] AS seed_primes, "
-                "properties(m)['subs'] AS seed_subs",
+                "properties(m)['subs'] AS seed_subs, "
+                "properties(m)['offline'] AS seed_offline, "
+                "properties(m)['scenario'] AS seed_scenario",
                 timeout=timeout,
             ),
             timeout=timeout,
@@ -65,6 +67,8 @@ async def probe(timeout: float = 3.0) -> dict[str, Any]:
             "seed_root_id": row.get("seed_root_id"),
             "seed_primes": int(row.get("seed_primes", 0) or 0),
             "seed_subs": int(row.get("seed_subs", 0) or 0),
+            "seed_offline": bool(row.get("seed_offline")),
+            "seed_scenario": bool(row.get("seed_scenario")),
             "latency_ms": round((asyncio.get_running_loop().time() - started) * 1000),
         }
     except (asyncio.TimeoutError, TimeoutError):

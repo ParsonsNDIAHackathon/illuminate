@@ -6,6 +6,7 @@ import pytest
 from illuminate import db
 from illuminate.enrichment import claims, decisions
 from illuminate.routers import exports
+from illuminate.connectors.base import ArtifactRef, Fact, NodeRef
 
 
 async def _reachable():
@@ -56,6 +57,166 @@ async def test_concurrent_commit_and_reject_keep_status_and_graph_fact_consisten
         await db.write(
             "MATCH (n) WHERE n.id IN [$claim_id, $entity_id] DETACH DELETE n",
             {"claim_id": claim_id, "entity_id": entity_id},
+        )
+        await db.close_driver()
+
+async def test_repeat_live_observation_preserves_first_retrieval_and_refreshes_latest_fact():
+    if not await _reachable():
+        pytest.skip("neo4j not reachable")
+    supplier_id = "test_retrieval_supplier"
+    program_id = "test_retrieval_program"
+    artifact_url = "https://example.test/award/retrieval-regression"
+
+    def fact(amount: int, retrieved_at: str, status: str, cache: bool) -> Fact:
+        return Fact(
+            NodeRef("Entity", supplier_id, {"name": "Retrieval Supplier", "kind": "organization"}),
+            "SUPPLIES",
+            object=NodeRef("Entity", program_id, {"name": "Retrieval Program", "kind": "program"}),
+            props={
+                "amount": amount,
+                "retrieved_at": retrieved_at,
+                "retrieval_status": status,
+                "retrieval_mode": "operational_live",
+                "cache": cache,
+            },
+            artifact=ArtifactRef(
+                artifact_url,
+                "Award retrieval regression",
+                kind="award",
+                props={"source_identifier": "award-retrieval-regression"},
+            ),
+        )
+
+    first = "2026-08-19T12:00:00Z"
+    latest = "2026-09-08T12:00:00Z"
+    try:
+        first_id = await claims.stage(
+            fact(100, first, "cached", True),
+            source="usaspending",
+            trust="authoritative",
+        )
+        assert await claims.decide(first_id, trust="authoritative") == "committed"
+        second_id = await claims.stage(
+            fact(250, latest, "live", False),
+            source="usaspending",
+            trust="authoritative",
+        )
+        assert second_id == first_id
+        assert await claims.decide(second_id, trust="authoritative") == "committed"
+
+        rows = await db.read(
+            "MATCH (s:Entity {id:$supplier})-[r:SUPPLIES]->(p:Entity {id:$program}) "
+            "MATCH (c:Claim {id:$claim}) "
+            "MATCH (a:Artifact)-[e:EVIDENCES]->(c) "
+            "RETURN c.retrieved_at AS claim_first, c.latest_retrieved_at AS claim_latest, "
+            "r.retrieved_at AS edge_first, r.latest_retrieved_at AS edge_latest, r.amount AS amount, "
+            "a.retrieved_at AS artifact_first, a.latest_retrieved_at AS artifact_latest, "
+            "e.retrieved_at AS evidence_first, e.latest_retrieved_at AS evidence_latest",
+            {"supplier": supplier_id, "program": program_id, "claim": first_id},
+        )
+        assert rows == [{
+            "claim_first": first,
+            "claim_latest": latest,
+            "edge_first": first,
+            "edge_latest": latest,
+            "amount": 250,
+            "artifact_first": first,
+            "artifact_latest": first,
+            "evidence_first": first,
+            "evidence_latest": latest,
+        }]
+    finally:
+        await db.write(
+            "MATCH (n) WHERE n.id IN [$supplier,$program] DETACH DELETE n "
+            "WITH count(n) AS ignored MATCH (c:Claim) "
+            "WHERE c.subject_id=$supplier AND c.object_id=$program DETACH DELETE c",
+            {"supplier": supplier_id, "program": program_id},
+        )
+        await db.write(
+            "MATCH (a:Artifact {url:$url}) DETACH DELETE a",
+            {"url": artifact_url},
+        )
+        await db.close_driver()
+
+
+async def test_shared_url_preserves_artifact_lineage_and_scopes_each_evidence_observation():
+    if not await _reachable():
+        pytest.skip("neo4j not reachable")
+    entity_id = "test_shared_artifact_entity"
+    artifact_url = "https://example.test/news/shared-artifact-regression"
+
+    def fact(*, source: str, retrieved_at: str, simulated: bool) -> Fact:
+        return Fact(
+            NodeRef("Entity", entity_id, {"name": "Shared Artifact Entity", "kind": "organization"}),
+            "mention",
+            props={
+                "retrieved_at": retrieved_at,
+                "retrieval_status": "live",
+                "retrieval_mode": "operational_live",
+                "simulated": simulated,
+            },
+            artifact=ArtifactRef(
+                artifact_url,
+                f"{source} discovery title",
+                kind="news",
+                source=f"{source} publisher",
+                props={"connector_variant": source, "simulated": simulated},
+            ),
+        )
+
+    first = "2026-09-08T10:00:00Z"
+    second = "2026-09-08T11:00:00Z"
+    try:
+        first_id = await claims.stage(
+            fact(source="gdelt", retrieved_at=first, simulated=False),
+            source="gdelt",
+            trust="open",
+        )
+        second_id = await claims.stage(
+            fact(source="littlesis", retrieved_at=second, simulated=True),
+            source="littlesis",
+            trust="open",
+        )
+        assert first_id != second_id
+
+        rows = await db.read(
+            "MATCH (a:Artifact {url:$url})-[e:EVIDENCES]->(c:Claim) "
+            "RETURN a.source AS artifact_source, a.source_id AS artifact_source_id, "
+            "a.catalog_ids AS artifact_catalog_ids, a.connector_variant AS artifact_variant, "
+            "a.simulated AS artifact_simulated, a.retrieved_at AS artifact_retrieved_at, "
+            "c.source AS claim_source, e.source_id AS evidence_source_id, "
+            "e.catalog_ids AS evidence_catalog_ids, e.connector_variant AS evidence_variant, "
+            "e.simulated AS evidence_simulated, e.latest_retrieved_at AS evidence_retrieved_at "
+            "ORDER BY claim_source",
+            {"url": artifact_url},
+        )
+        assert len(rows) == 2
+        assert all(row["artifact_source"] == "gdelt publisher" for row in rows)
+        assert all(row["artifact_source_id"] == "gdelt-2.x" for row in rows)
+        assert all(row["artifact_catalog_ids"] == ["ndia:62"] for row in rows)
+        assert all(row["artifact_variant"] == "gdelt" for row in rows)
+        assert all(row["artifact_simulated"] is False for row in rows)
+        assert all(row["artifact_retrieved_at"] == first for row in rows)
+        assert rows[0]["claim_source"] == "gdelt"
+        assert rows[0]["evidence_source_id"] == "gdelt-2.x"
+        assert rows[0]["evidence_catalog_ids"] == ["ndia:62"]
+        assert rows[0]["evidence_variant"] == "gdelt"
+        assert rows[0]["evidence_simulated"] is False
+        assert rows[0]["evidence_retrieved_at"] == first
+        assert rows[1]["claim_source"] == "littlesis"
+        assert rows[1]["evidence_source_id"] == "littlesis"
+        assert rows[1]["evidence_catalog_ids"] == []
+        assert rows[1]["evidence_variant"] == "littlesis"
+        assert rows[1]["evidence_simulated"] is True
+        assert rows[1]["evidence_retrieved_at"] == second
+    finally:
+        await db.write(
+            "MATCH (c:Claim {subject_id:$entity_id}) DETACH DELETE c",
+            {"entity_id": entity_id},
+        )
+        await db.write(
+            "MATCH (n) WHERE n.id=$entity_id OR (n:Artifact AND n.url=$url) DETACH DELETE n",
+            {"entity_id": entity_id, "url": artifact_url},
         )
         await db.close_driver()
 

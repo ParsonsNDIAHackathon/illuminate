@@ -282,11 +282,12 @@ def test_shared_artifact_lineage_is_not_rewritten():
     source = (Path(__file__).parents[1] / "illuminate" / "enrichment" / "claims.py").read_text()
     artifact_clause = source.split('"MERGE (a:Artifact {id:$aid})', 1)[1].split('"MERGE (a)-[re:EVIDENCES]', 1)[0]
     assert "ON CREATE SET" in artifact_clause
-    assert '"SET a +=' not in artifact_clause
+    assert artifact_clause.count("SET") == 1
     evidence_clause = source.split('"MERGE (a)-[re:EVIDENCES]', 1)[1].split('"MERGE (a)-[rb:ABOUT]', 1)[0]
     assert "re.source=$source" in evidence_clause
     assert "re.simulated=$simulated" in evidence_clause
     assert "re += $source_meta" in evidence_clause
+    assert "re += $aprops" in evidence_clause
 
 def test_seed_ingests_cached_gdelt_evidence():
     seed = (Path(__file__).parents[1] / "illuminate" / "seed" / "seed.py").read_text()

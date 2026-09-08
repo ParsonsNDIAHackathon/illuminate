@@ -20,14 +20,16 @@ from ..ids import artifact_id, claim_id, edge_id
 from ..schema import RELS
 from ..connectors.registry import source_metadata
 
-REL_PREDICATES = set(RELS) - {
-    "EVIDENCES", "ASSERTS", "TARGETS", "ABOUT", "DECISION_FOR",
-    "REVIEW_OF", "DECISION_PROGRAM", "DECISION_EVIDENCE",
-}
+REL_PREDICATES = set(RELS) - {"EVIDENCES", "ASSERTS", "TARGETS", "ABOUT"}
 ATTR_ALLOWLIST = {"uei", "cage", "lei", "registration_status", "public", "ticker", "cik", "legal_name", "employees", "website",
                   "board_size", "flagged", "littlesis_id", "opencorporates_id", "duns", "business_types", "naics_codes", "sam_registered",
                   "incorporation_date", "entity_status", "market_cap", "last_price", "price_change_12m", "registration_expires", "organization_structure"}
-SCREEN_PREDICATES = {"sanctions_screen", "exclusion_screen", "financial_screen", "adverse_media_screen", "registry_screen"}
+SCREEN_PREDICATES = {
+    "sanctions_screen", "exclusion_screen", "financial_screen", "adverse_media_screen", "registry_screen",
+    # Contextual adapters record dated source observations rather than overwrite a
+    # scalar entity property (one entity can have many CVEs, clauses, and places).
+    "vulnerability_screen", "far_clause_screen", "location_context_screen",
+}
 # 'mention' asserts only that an artifact is about the subject — the connector's own observation, committed on arrival.
 OBSERVATION_PREDICATES = SCREEN_PREDICATES | {"mention"}
 CORROBORATION_SOURCES = 2
@@ -77,11 +79,23 @@ async def stage(fact: Fact, *, source: str, trust: str, model: str | None = None
     if fact.object and fact.object.id == fact.subject.id and fact.predicate in REL_PREDICATES:
         # e.g. GLEIF says the entity is its own parent after resolution — nothing to assert
         return await _noop_claim(fact, source=source, trust=trust, simulated=simulated)
-    cid = claim_id()
+    cid = observation_key(fact, source)
     meta = source_metadata(source)
+    ingested_at = now_iso()
+    retrieved_at = fact.props.get("retrieved_at") or ingested_at
+    as_of = (
+        fact.props.get("as_of")
+        or (fact.artifact.published_at if fact.artifact else None)
+        or retrieved_at
+    )
     params: dict = {
         "cid": cid, "pred": fact.predicate, "source": source, "trust": trust, "method": fact.method, "model": model,
-        "conf": float(fact.confidence), "now": now_iso(), "value": fact.value, "detail": fact.detail,
+        "conf": float(fact.confidence), "now": ingested_at,
+        "retrieved_at": retrieved_at, "as_of": as_of,
+        "retrieval_status": fact.props.get("retrieval_status") or "unknown",
+        "retrieval_mode": fact.props.get("retrieval_mode") or "operational_live",
+        "cache": bool(fact.props.get("cache")), "fallback": bool(fact.props.get("fallback")),
+        "cache_age_s": fact.props.get("cache_age_s"), "value": fact.value, "detail": fact.detail,
         "rel_props_json": _json.dumps({k: v for k, v in fact.props.items() if v is not None}),
         "merge_keys_json": _json.dumps(list(fact.merge_keys)), "sid": fact.subject.id, "oid": fact.object.id if fact.object else None,
         "rid1": edge_id(), "rid2": edge_id(), "rid3": edge_id(), "rid4": edge_id(),
@@ -90,9 +104,13 @@ async def stage(fact: Fact, *, source: str, trust: str, model: str | None = None
     parts = [
         _merge_node("s", fact.subject, "s", params),
         "MERGE (c:Claim {id:$cid}) ON CREATE SET c.predicate=$pred, c.subject_id=$sid, c.object_id=$oid, c.object_value=$value, c.source=$source,",
-        "  c.trust=$trust, c.method=$method, c.model=$model, c.confidence=$conf, c.retrieved_at=$now, c.status='staged', c.source_status='staged', c.detail=$detail,",
+        "  c.trust=$trust, c.method=$method, c.model=$model, c.confidence=$conf, c.retrieved_at=$retrieved_at, c.as_of=$as_of, c.status='staged', c.source_status='staged', c.detail=$detail,",
         "  c.rel_props=$rel_props_json, c.merge_keys=$merge_keys_json, c.simulated=$simulated",
-        "SET c += $source_meta",
+        "SET c += $source_meta, c.method=$method, c.model=$model, c.confidence=$conf, c.detail=$detail, "
+        "c.rel_props=$rel_props_json, c.merge_keys=$merge_keys_json, c.retrieval_status=$retrieval_status, "
+        "c.retrieval_mode=$retrieval_mode, c.cache=$cache, c.fallback=$fallback, c.cache_age_s=$cache_age_s, "
+        "c.latest_retrieved_at=$retrieved_at, c.latest_as_of=$as_of, c.ingested_at=$now, "
+        "c.ingestion_count=coalesce(c.ingestion_count,0)+1",
         "MERGE (c)-[ra:ASSERTS]->(s) ON CREATE SET ra.id=$rid1",
     ]
     if fact.object:
@@ -100,14 +118,28 @@ async def stage(fact: Fact, *, source: str, trust: str, model: str | None = None
         parts.append("MERGE (c)-[rt:TARGETS]->(o) ON CREATE SET rt.id=$rid2")
     if fact.artifact:
         a = fact.artifact
+        artifact_observation_id = a.props.get("source_identifier")
         safe_url = scrub(a.url)
-        params.update({"aid": artifact_id(safe_url), "aurl": safe_url, "atitle": a.title[:300], "akind": a.kind, "asource": a.source or source, "apub": a.published_at,
-                       "aprops": {k: v for k, v in a.props.items() if v is not None}})
+        artifact_identity = f"{safe_url}#{artifact_observation_id}" if artifact_observation_id else safe_url
+        params.update({"aid": artifact_id(artifact_identity), "aurl": safe_url, "atitle": a.title[:300], "akind": a.kind, "asource": a.source or source, "apub": a.published_at,
+                        "aprops": {k: v for k, v in a.props.items() if v is not None and k not in {"source_status", "retrieval_status", "retrieval_mode", "retrieved_at", "latest_retrieved_at", "as_of", "latest_as_of", "cache", "fallback", "cache_age_s"}},
+                        "artifact_retrieval_status": a.props.get("retrieval_status") or params["retrieval_status"],
+                        "artifact_retrieval_mode": a.props.get("retrieval_mode") or params["retrieval_mode"],
+                        "artifact_cache": bool(a.props.get("cache", params["cache"])),
+                        "artifact_fallback": bool(a.props.get("fallback", params["fallback"])),
+                        "artifact_cache_age_s": a.props.get("cache_age_s", params["cache_age_s"])})
         parts += [
             "MERGE (a:Artifact {id:$aid}) ON CREATE SET a.url=$aurl, a.title=$atitle, a.kind=$akind, a.source=$asource, "
-            "a.published_at=$apub, a.retrieved_at=$now, a += $aprops, a += $source_meta, a.source_status='retrieved', a.simulated=$simulated",
-            "MERGE (a)-[re:EVIDENCES]->(c) ON CREATE SET re.id=$rid3, re.source=$source, re.retrieved_at=$now, "
-            "re.source_status='retrieved', re.simulated=$simulated, re += $source_meta",
+            "a.published_at=$apub, a.retrieved_at=$retrieved_at, a.as_of=$as_of, a.ingested_at=$now, "
+            "a.latest_retrieved_at=$retrieved_at, a.latest_as_of=$as_of, a.ingestion_count=1, "
+            "a += $aprops, a += $source_meta, "
+            "a.retrieval_status=$artifact_retrieval_status, a.retrieval_mode=$artifact_retrieval_mode, "
+            "a.cache=$artifact_cache, a.fallback=$artifact_fallback, a.cache_age_s=$artifact_cache_age_s, a.simulated=$simulated",
+            "MERGE (a)-[re:EVIDENCES]->(c) ON CREATE SET re.id=$rid3, re.retrieved_at=$retrieved_at, re.as_of=$as_of "
+            "SET re.source=$source, re.artifact_title=$atitle, re.artifact_kind=$akind, re.artifact_published_at=$apub, "
+            "re.ingested_at=$now, re.latest_retrieved_at=$retrieved_at, re.latest_as_of=$as_of, re.retrieval_status=$artifact_retrieval_status, "
+            "re.retrieval_mode=$artifact_retrieval_mode, re.cache=$artifact_cache, re.fallback=$artifact_fallback, "
+            "re.cache_age_s=$artifact_cache_age_s, re.simulated=$simulated, re += $aprops, re += $source_meta",
             "MERGE (a)-[rb:ABOUT]->(s) ON CREATE SET rb.id=$rid4",
         ]
     parts.append("RETURN c.id AS id")
@@ -116,16 +148,26 @@ async def stage(fact: Fact, *, source: str, trust: str, model: str | None = None
 
 
 async def _noop_claim(fact: Fact, *, source: str, trust: str, simulated: bool | None = None) -> str:
-    cid = claim_id()
+    cid = observation_key(fact, source)
     meta = source_metadata(source)
     simulated = bool(fact.props.get("simulated") or fact.subject.props.get("simulated")) if simulated is None else simulated
+    now = now_iso()
+    retrieved_at = fact.props.get("retrieved_at") or now
+    as_of = fact.props.get("as_of") or retrieved_at
     await db.write(
         "MERGE (c:Claim {id:$cid}) ON CREATE SET c.predicate=$pred, c.subject_id=$sid, c.object_id=$sid, c.source=$source, c.trust=$trust, c.method=$method, "
-        "c.confidence=$conf, c.retrieved_at=$now, c.status='rejected', c.source_status='rejected', c.simulated=$simulated, "
-        "c.decision_note='self-referential after entity resolution' SET c += $meta "
+        "c.confidence=$conf, c.retrieved_at=$retrieved_at, c.as_of=$as_of, c.status='rejected', c.source_status='rejected', c.simulated=$simulated, "
+        "c.decision_note='self-referential after entity resolution' SET c += $meta, c.ingested_at=$now, "
+        "c.latest_retrieved_at=$retrieved_at, c.latest_as_of=$as_of, c.retrieval_status=$retrieval_status, c.retrieval_mode=$retrieval_mode, "
+        "c.cache=$cache, c.fallback=$fallback, c.cache_age_s=$cache_age_s, c.ingestion_count=coalesce(c.ingestion_count,0)+1 "
         "WITH c MATCH (s {id:$sid}) MERGE (c)-[r:ASSERTS]->(s) ON CREATE SET r.id=$rid",
         {"cid": cid, "pred": fact.predicate, "sid": fact.subject.id, "source": source, "trust": trust, "method": fact.method,
-         "conf": float(fact.confidence), "now": now_iso(), "rid": edge_id(), "meta": meta, "simulated": simulated},
+         "conf": float(fact.confidence), "now": now, "retrieved_at": retrieved_at,
+         "as_of": as_of, "rid": edge_id(), "meta": meta, "simulated": simulated,
+         "retrieval_status": fact.props.get("retrieval_status") or "unknown",
+         "retrieval_mode": fact.props.get("retrieval_mode") or "operational_live",
+         "cache": bool(fact.props.get("cache")), "fallback": bool(fact.props.get("fallback")),
+         "cache_age_s": fact.props.get("cache_age_s")},
     )
     return cid
 
@@ -158,7 +200,7 @@ async def commit(cid: str, note: str | None = None, actor: str = "system") -> st
             tx,
             "MATCH (c:Claim {id:$id})-[:ASSERTS]->(s) "
             "OPTIONAL MATCH (c)-[:TARGETS]->(o) "
-            "SET c.decision_guard=coalesce(c.decision_guard,0)+1 "
+            "SET c.decision_lock=coalesce(c.decision_lock,0)+1 "
             "RETURN c{.*} AS c, s.id AS sid, head(labels(s)) AS slabel, "
             "o.id AS oid, head(labels(o)) AS olabel",
             {"id": cid},
@@ -170,10 +212,9 @@ async def commit(cid: str, note: str | None = None, actor: str = "system") -> st
         status = c.get("status")
         if status == "rejected":
             return "rejected"
-        if status == "committed":
-            return "committed"
-        if status != "staged":
+        if status not in {"staged", "committed"}:
             raise ValueError(f"claim {cid} cannot be committed from status {status!r}")
+        first_commit = status == "staged"
         pred = c["predicate"]
         rel_props = _json.loads(c.get("rel_props") or "{}") if c.get("rel_props") else {}
         simulated = bool(rel_props.get("simulated") or c.get("simulated"))
@@ -183,6 +224,8 @@ async def commit(cid: str, note: str | None = None, actor: str = "system") -> st
             for k in (
                 "source", "source_id", "catalog_ids", "retrieved_at", "usage_note",
                 "quality_note", "supports", "unknowns", "method", "confidence",
+                "retrieval_status", "retrieval_mode", "latest_retrieved_at",
+                "latest_as_of", "as_of", "cache", "fallback", "cache_age_s",
             )
         }
         prov["simulated"] = simulated
@@ -242,18 +285,33 @@ async def commit(cid: str, note: str | None = None, actor: str = "system") -> st
                     "SET s.flagged = true, s.flag_reason = $why",
                     {"sid": r["sid"], "why": f"{pred}: {c.get('detail') or 'hit'}"},
                 )
-        await _tx_rows(
-            tx,
-            "MATCH (c:Claim {id:$id}) "
-            "SET c.status='committed', c.source_status='committed', "
-            "c.decided_at=$now, c.decision_note=$note, c.decision_actor=$actor, "
-            "c.decision_version=coalesce(c.decision_version,0)+1 "
-            "CREATE (review:ClaimReview {id:$review_id, claim_id:$id, from_status:'staged', "
-            "to_status:'committed', rationale:$note, actor:$actor, decided_at:$now, "
-            "version:c.decision_version, simulated:coalesce(c.simulated,false)}) "
-            "CREATE (review)-[:REVIEW_OF]->(c)",
-            {"id": cid, "now": now_iso(), "note": note, "actor": actor, "review_id": review_id},
-        )
+        if first_commit:
+            await _tx_rows(
+                tx,
+                "MATCH (c:Claim {id:$id}) "
+                "SET c.status='committed', c.source_status='committed', "
+                "c.decided_at=$now, c.decision_note=$note, c.decision_actor=$actor, "
+                "c.decision_version=coalesce(c.decision_version,0)+1 "
+                "CREATE (review:ClaimReview {id:$review_id, claim_id:$id, from_status:'staged', "
+                "to_status:'committed', rationale:$note, actor:$actor, decided_at:$now, "
+                "version:c.decision_version, simulated:coalesce(c.simulated,false)}) "
+                "CREATE (review)-[:REVIEW_OF]->(c)",
+                {
+                    "id": cid,
+                    "now": now_iso(),
+                    "note": note,
+                    "actor": actor,
+                    "review_id": review_id,
+                },
+            )
+        else:
+            # A repeated live observation refreshes the materialized fact above
+            # but must not masquerade as a new analyst decision.
+            await _tx_rows(
+                tx,
+                "MATCH (c:Claim {id:$id}) SET c.source_status='committed'",
+                {"id": cid},
+            )
         return "committed"
 
     return await db.transactional_write(work)
@@ -276,7 +334,7 @@ async def reject(cid: str, note: str | None = None, actor: str = "system") -> st
         rows = await _tx_rows(
             tx,
             "MATCH (c:Claim {id:$id}) "
-            "SET c.decision_guard=coalesce(c.decision_guard,0)+1 "
+            "SET c.decision_lock=coalesce(c.decision_lock,0)+1 "
             "RETURN c.status AS status",
             {"id": cid},
         )
@@ -297,7 +355,13 @@ async def reject(cid: str, note: str | None = None, actor: str = "system") -> st
             "to_status:'rejected', rationale:$note, actor:$actor, decided_at:$now, "
             "version:c.decision_version, simulated:coalesce(c.simulated,false)}) "
             "CREATE (review)-[:REVIEW_OF]->(c)",
-            {"id": cid, "now": now_iso(), "note": note, "actor": actor, "review_id": review_id},
+            {
+                "id": cid,
+                "now": now_iso(),
+                "note": note,
+                "actor": actor,
+                "review_id": review_id,
+            },
         )
         return "rejected"
 
@@ -373,3 +437,19 @@ async def list_source_records(entity_id: str | None = None, limit: int = 200) ->
         "ORDER BY r.retrieved_at DESC LIMIT $limit",
         {"entity_id": entity_id, "limit": limit},
     )
+
+def observation_key(fact: Fact, source: str) -> str:
+    """Stable identity for the same upstream observation across worker restarts."""
+    props = fact.props or {}
+    upstream = next((props.get(k) for k in ("upstream_id", "source_id", "record_id", "award_id", "filing_id")
+                     if props.get(k) is not None), None)
+    if upstream is None and fact.artifact:
+        upstream = fact.artifact.props.get("source_identifier")
+    upstream = upstream or (fact.artifact.url if fact.artifact else None)
+    material = [source, str(upstream or ""), fact.subject.id, fact.predicate,
+                fact.object.id if fact.object else "", fact.value or ""]
+    # Connector-declared merge keys distinguish genuinely separate observations
+    # such as two board tenures. Aggregate facts such as SUPPLIES intentionally
+    # declare no keys, so a refresh updates the existing observation and edge.
+    material.extend([f"{key}={props.get(key)}" for key in fact.merge_keys])
+    return "clm_obs_" + hashlib.sha256(_json.dumps(material, separators=(",", ":"), default=str).encode()).hexdigest()[:32]

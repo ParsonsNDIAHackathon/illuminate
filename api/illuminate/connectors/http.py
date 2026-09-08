@@ -4,13 +4,15 @@ seed fixture store so the demo graph can be rebuilt offline."""
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
+from contextvars import ContextVar
 import hashlib
 import ipaddress
 import json
 import socket
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator, Literal
 
 import httpx
 
@@ -20,12 +22,24 @@ _last_call: dict[str, float] = {}
 _delays = {"efts.sec.gov": 0.15, "data.sec.gov": 0.15, "www.sec.gov": 0.15, "api.gdeltproject.org": 5.5, "littlesis.org": 0.5, "api.gleif.org": 0.2, "api.usaspending.gov": 0.2}
 _cache_dir: Path | None = None
 _read_only_cache = False
+_fixture_store = False
+
+RetrievalMode = Literal["operational_live", "offline_fixture"]
+_retrieval_mode: ContextVar[RetrievalMode] = ContextVar("retrieval_mode", default="operational_live")
+_retrieval_trace: ContextVar[list[dict] | None] = ContextVar("retrieval_trace", default=None)
 
 
-def set_cache_dir(p: Path | None, read_only: bool = False) -> None:
-    global _cache_dir, _read_only_cache
+def set_cache_dir(p: Path | None, read_only: bool = False, *, fixture_store: bool = False) -> None:
+    """Configure the process cache.
+
+    ``fixture_store`` is deliberately independent of ``read_only``: an online
+    fixture regeneration must not make committed fixtures an operational cache.
+    """
+    global _cache_dir, _read_only_cache, _fixture_store
     _cache_dir = p
     _read_only_cache = read_only
+    _fixture_store = fixture_store
+    _retrieval_mode.set("offline_fixture" if read_only else "operational_live")
     if p:
         p.mkdir(parents=True, exist_ok=True)
 
@@ -37,7 +51,19 @@ def cache_dir() -> Path:
         _cache_dir.mkdir(parents=True, exist_ok=True)
     return _cache_dir
 
-
+@contextmanager
+def retrieval_context(mode: RetrievalMode) -> Iterator[list[dict]]:
+    """Select retrieval policy for one async task and collect truthful outcomes."""
+    if mode not in ("operational_live", "offline_fixture"):
+        raise ValueError(f"unknown retrieval mode {mode!r}")
+    trace: list[dict] = []
+    mode_token = _retrieval_mode.set(mode)
+    trace_token = _retrieval_trace.set(trace)
+    try:
+        yield trace
+    finally:
+        _retrieval_trace.reset(trace_token)
+        _retrieval_mode.reset(mode_token)
 _SECRET_PARAMS = {
     "access_key", "access_token", "api_key", "api_token", "apikey",
     "authorization", "client_secret", "credential", "key", "key_id",
@@ -154,47 +180,77 @@ async def fetch_json(method: str, url: str, *, params: dict | None = None, json_
     full = str(req.url)
     key = _key(method, full, json_body)
     path = cache_dir() / f"{key}.json"
-    if ttl > 0 and path.exists():
+    stale_doc = None
+    if ttl > 0 and path.exists() and _can_read_cache():
         try:
             doc = json.loads(path.read_text())
-            if _read_only_cache or time.time() - doc.get("_ts", 0) < ttl:
+            age = max(0.0, time.time() - doc.get("_ts", 0))
+            stale_doc = doc
+            if _offline():
+                _record("offline_fixture", full, age_s=age)
+                return doc["body"]
+            if age < ttl:
+                _record("cached", full, age_s=age)
                 return doc["body"]
         except Exception:
             pass
-    if _read_only_cache:
+    if _offline():
+        _record("fixture_miss", full)
         raise HttpError(0, full, "not in fixture cache (offline mode)")
     await _throttle(req.url.host or "")
     hdrs = {"User-Agent": settings.illuminate_user_agent, "Accept": "application/json", **(headers or {})}
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        r = await client.request(method, full, json=json_body, headers=hdrs)
-    if r.status_code >= 400:
-        raise HttpError(r.status_code, full, r.text)
     try:
-        body = r.json()
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            r = await client.request(method, full, json=json_body, headers=hdrs)
+        if r.status_code >= 400:
+            raise HttpError(r.status_code, full, r.text)
+        try:
+            body = r.json()
+        except Exception:
+            raise HttpError(r.status_code, full, "non-JSON response")
     except Exception:
-        raise HttpError(r.status_code, full, "non-JSON response")
+        age = _fallback_age(stale_doc.get("_ts", 0)) if stale_doc else None
+        if age is not None:
+            _record("stale_fallback", full, age_s=age)
+            return stale_doc["body"]
+        _record("error", full)
+        raise
     if ttl > 0:
         try:
             path.write_text(json.dumps({"_ts": time.time(), "url": scrub(full), "body": body}))
         except Exception:
             pass
+    _record("live", full, age_s=0)
     return body
 
 
 async def fetch_text(url: str, *, ttl: float = 86400, timeout: float = 60.0, headers: dict | None = None) -> str:
     key = _key("GET", url, None)
     path = cache_dir() / f"{key}.txt"
-    if ttl > 0 and path.exists() and (_read_only_cache or time.time() - path.stat().st_mtime < ttl):
+    cached = path.exists() and _can_read_cache()
+    age = max(0.0, time.time() - path.stat().st_mtime) if cached else None
+    if ttl > 0 and cached and (_offline() or (age is not None and age < ttl)):
+        _record("offline_fixture" if _offline() else "cached", url, age_s=age)
         return path.read_text()
-    if _read_only_cache:
+    if _offline():
+        _record("fixture_miss", url)
         raise HttpError(0, url, "not in fixture cache (offline mode)")
     hdrs = {"User-Agent": settings.illuminate_user_agent, **(headers or {})}
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        r = await client.get(url, headers=hdrs)
-    if r.status_code >= 400:
-        raise HttpError(r.status_code, url, r.text)
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            r = await client.get(url, headers=hdrs)
+        if r.status_code >= 400:
+            raise HttpError(r.status_code, url, r.text)
+    except Exception:
+        fallback_age = _fallback_age(path.stat().st_mtime) if cached else None
+        if fallback_age is not None:
+            _record("stale_fallback", url, age_s=fallback_age)
+            return path.read_text()
+        _record("error", url)
+        raise
     if ttl > 0:
         path.write_text(r.text)
+    _record("live", url, age_s=0)
     return r.text
 
 
@@ -213,57 +269,82 @@ async def fetch_document(url: str, *, ttl: float = DOC_TTL, timeout: float = 60.
     large binary cannot exhaust memory. Every cache read, request, and redirect
     first passes the public-network destination policy.
     """
-    parsed = await ensure_public_http_url(url)
     max_bytes = max(1, min(int(max_bytes), MAX_DOC_BYTES))
     key = _key("GET", url, None)
     blob = cache_dir() / f"{key}.doc"
     meta = cache_dir() / f"{key}.doc.json"
-    if ttl > 0 and blob.exists() and meta.exists():
+    cached_meta = None
+    if ttl > 0 and blob.exists() and meta.exists() and _can_read_cache():
         try:
             m = json.loads(meta.read_text())
-            if _read_only_cache or time.time() - m.get("_ts", 0) < ttl:
+            cached_meta = m
+            age = max(0.0, time.time() - m.get("_ts", 0))
+            if _offline() or age < ttl:
                 cached_url = m.get("url") or url
                 await ensure_public_http_url(cached_url)
+                _record("offline_fixture" if _offline() else "cached", cached_url, age_s=age)
                 return {"url": cached_url, "content_type": m.get("content_type", ""), "body": blob.read_bytes(),
                         "retrieved_at": m.get("_ts"), "truncated": m.get("truncated", False)}
         except HttpError:
-            if not _read_only_cache:
+            if not _offline():
                 blob.unlink(missing_ok=True)
                 meta.unlink(missing_ok=True)
             raise
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
-            if not _read_only_cache:
+            if not _offline():
                 blob.unlink(missing_ok=True)
                 meta.unlink(missing_ok=True)
-            raise HttpError(0, url) from None
-    if _read_only_cache:
+    if _offline():
+        _record("fixture_miss", url)
         raise HttpError(0, url, "not in fixture cache (offline mode)")
+    parsed = await ensure_public_http_url(url)
     await _throttle(parsed.host or "")
     hdrs = {"User-Agent": settings.illuminate_user_agent, "Accept": "*/*"}
     chunks: list[bytes] = []
     size = 0
     truncated = False
     current = str(parsed)
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
-        for redirects in range(4):
-            await ensure_public_http_url(current)
-            async with client.stream("GET", current, headers=hdrs) as r:
-                if r.is_redirect:
-                    if redirects == 3 or not r.headers.get("location"):
+    x_frame_options = None
+    content_security_policy = None
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            for redirects in range(4):
+                await ensure_public_http_url(current)
+                async with client.stream("GET", current, headers=hdrs) as r:
+                    if r.is_redirect:
+                        if redirects == 3 or not r.headers.get("location"):
+                            raise HttpError(r.status_code, current)
+                        current = str(r.url.join(r.headers["location"]))
+                        continue
+                    if r.status_code >= 400:
                         raise HttpError(r.status_code, current)
-                    current = str(r.url.join(r.headers["location"]))
-                    continue
-                if r.status_code >= 400:
-                    raise HttpError(r.status_code, current)
-                ctype = (r.headers.get("content-type") or "application/octet-stream").strip().lower()
-                final = str(r.url)
-                async for chunk in r.aiter_bytes():
-                    chunks.append(chunk)
-                    size += len(chunk)
-                    if size >= max_bytes:
-                        truncated = True
-                        break
-                break
+                    ctype = (r.headers.get("content-type") or "application/octet-stream").strip().lower()
+                    final = str(r.url)
+                    x_frame_options = r.headers.get("x-frame-options")
+                    content_security_policy = r.headers.get("content-security-policy")
+                    async for chunk in r.aiter_bytes():
+                        chunks.append(chunk)
+                        size += len(chunk)
+                        if size >= max_bytes:
+                            truncated = True
+                            break
+                    break
+    except Exception:
+        age = _fallback_age(cached_meta.get("_ts", 0)) if cached_meta else None
+        if age is not None:
+            cached_url = cached_meta.get("url") or url
+            await ensure_public_http_url(cached_url)
+            _record("stale_fallback", cached_url, age_s=age)
+            return {
+                "url": cached_url,
+                "content_type": cached_meta.get("content_type", ""),
+                "body": blob.read_bytes(),
+                "retrieved_at": cached_meta.get("_ts"),
+                "truncated": cached_meta.get("truncated", False),
+                "stale": True,
+            }
+        _record("error", current)
+        raise
     body = b"".join(chunks)[:max_bytes]
     now = time.time()
     if ttl > 0:
@@ -272,12 +353,45 @@ async def fetch_document(url: str, *, ttl: float = DOC_TTL, timeout: float = 60.
             meta.write_text(json.dumps({"_ts": now, "url": scrub(final), "content_type": ctype, "truncated": truncated}))
         except Exception:
             pass
+    _record("live", final, age_s=0)
     return {
         "url": scrub(final),
         "content_type": ctype,
         "body": body,
         "retrieved_at": now,
         "truncated": truncated,
-        "x_frame_options": r.headers.get("x-frame-options"),
-        "content_security_policy": r.headers.get("content-security-policy"),
+        "x_frame_options": x_frame_options,
+        "content_security_policy": content_security_policy,
     }
+
+def current_retrieval_mode() -> RetrievalMode:
+    return _retrieval_mode.get()
+
+def _record(status: str, url: str, *, age_s: float | None = None) -> None:
+    trace = _retrieval_trace.get()
+    if trace is not None:
+        # Cache age describes the upstream response, not this ingestion.  Carry
+        # its original observed time so graph writers never replace it with now.
+        observed_at = time.time() - age_s if age_s is not None else time.time()
+        trace.append({
+            "source_status": status, "url": scrub(url), "cache_age_s": age_s,
+            "retrieved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(observed_at)),
+        })
+
+def record_retrieval(status: str, url: str, *, age_s: float | None = None) -> None:
+    """Record an outcome for connectors with specialized streaming clients."""
+    _record(status, url, age_s=age_s)
+
+def _can_read_cache() -> bool:
+    mode = _retrieval_mode.get()
+    return mode == "offline_fixture" or not _fixture_store
+
+def _offline() -> bool:
+    return _retrieval_mode.get() == "offline_fixture"
+
+def _fallback_age(timestamp: float) -> float | None:
+    try:
+        age = max(0.0, time.time() - float(timestamp))
+    except (TypeError, ValueError):
+        return None
+    return age if age <= settings.connector_cache_fallback_max_age_s else None

@@ -4,11 +4,12 @@
     <p class="text-body-2 mb-4" style="opacity:.75">Credentials are encrypted at rest and decrypted only inside the connector process; they never enter a prompt. Without an OpenAI key the app degrades to graph browsing and template queries.</p>
     <v-list lines="two">
       <v-list-item v-for="c in items" :key="c.name" :title="c.label" :subtitle="c.description">
-        <template #prepend><v-icon :icon="c.connected ? 'mdi-check-circle' : 'mdi-key-alert'" :color="c.connected ? 'success' : 'warning'" /></template>
+        <template #prepend><v-icon :icon="c.connected ? 'mdi-check-circle' : (c.needs_key ? 'mdi-key-alert' : 'mdi-alert-circle')" :color="c.connected ? 'success' : 'warning'" /></template>
         <template #append>
           <div class="d-flex align-center ga-2">
             <v-chip size="x-small" variant="tonal" :color="c.trust === 'authoritative' ? 'primary' : undefined">{{ c.trust }}</v-chip>
-            <span class="text-caption" style="min-width: 120px; text-align: right">{{ c.connected ? c.detail : 'Key needed' }}</span>
+            <v-chip size="x-small" :color="c.connected ? 'success' : 'warning'" variant="tonal">{{ state(c) }}</v-chip>
+            <span class="text-caption" style="min-width: 120px; text-align: right">{{ c.detail || reason(c) }}</span>
             <v-btn v-if="c.key_name" @click="open(c)">{{ c.connected ? 'Replace' : 'Add credential' }}</v-btn>
             <v-btn v-if="c.key_name && c.connected" icon="mdi-delete-outline" variant="text" @click="remove(c)" />
             <v-btn variant="text" @click="check(c)" :loading="checking[c.name]" :disabled="Boolean(c.key_name && !c.connected)">Test</v-btn>
@@ -20,6 +21,23 @@
             <v-icon size="small" :icon="checkResults[c.name].ok ? 'mdi-check-circle-outline' : 'mdi-alert-circle-outline'" />
             {{ checkResults[c.name].detail }}
           </div>
+        </template>
+      </v-list-item>
+    </v-list>
+    <h3 class="text-subtitle-1 mt-6 mb-2">Approved source coverage</h3>
+    <p class="text-body-2 mb-2" style="opacity:.75">Every approved source is listed, including sources that cannot be queried safely for the current workflow.</p>
+    <v-list lines="three" density="compact">
+      <v-list-item v-for="s in coverage" :key="s.source_id" :title="s.label">
+        <template #prepend>
+          <v-icon :icon="coverageIcon(s.policy_status)" :color="coverageColor(s.policy_status)" />
+        </template>
+        <template #subtitle>
+          <div>{{ sourceState(s.policy_status) }} · {{ s.limitations }}</div>
+          <div class="text-caption">Freshness: {{ s.freshness }} · Access: {{ s.access }}</div>
+          <div v-if="s.action" class="text-caption">{{ s.action }}</div>
+        </template>
+        <template #append>
+          <v-chip size="x-small" variant="tonal">{{ s.adapter ? 'query adapter' : 'not queried' }}</v-chip>
         </template>
       </v-list-item>
     </v-list>
@@ -40,8 +58,22 @@
 import { onMounted, ref } from 'vue'
 import { api, type ConnectorTestResult } from '../api/client'
 import { useChat } from '../stores/chat'
-const items = ref<any[]>([]); const dlg = ref(false); const editing = ref<any>(null); const value = ref(''); const checking = ref<Record<string, boolean>>({}); const checkResults = ref<Record<string, ConnectorTestResult>>({})
-async function load() { items.value = await api.get('/api/connectors') }
+const items = ref<any[]>([]); const coverage = ref<any[]>([]); const dlg = ref(false); const editing = ref<any>(null); const value = ref(''); const checking = ref<Record<string, boolean>>({}); const checkResults = ref<Record<string, ConnectorTestResult>>({})
+async function load() {
+  const [connectors, sources] = await Promise.all([api.get<any[]>('/api/connectors'), api.get<any[]>('/api/connectors/coverage')])
+  items.value = connectors
+  coverage.value = sources
+}
+function state(c: any) { return c.connected ? 'connected' : (c.needs_key ? 'credential required' : 'unavailable') }
+function reason(c: any) { return c.needs_key ? 'Add a credential to query this source' : 'Source is not currently reachable' }
+function sourceState(status: string) { return status === 'available' ? 'query adapter available' : status.replaceAll('_', ' ') }
+function coverageColor(status: string) { return status === 'available' ? 'primary' : (status === 'not_applicable' ? undefined : 'warning') }
+function coverageIcon(status: string) {
+  if (status === 'available') return 'mdi-check-circle-outline'
+  if (status === 'credential_required') return 'mdi-key-alert-outline'
+  if (status === 'not_applicable') return 'mdi-minus-circle-outline'
+  return 'mdi-alert-circle-outline'
+}
 function open(c: any) { editing.value = c; value.value = ''; dlg.value = true }
 async function save() { await api.put(`/api/connectors/${editing.value.name}/credential`, { value: value.value }); dlg.value = false; await load(); if (editing.value.name === 'openai' || editing.value.name === 'websearch') useChat().modelKey = true }
 async function remove(c: any) { await api.del(`/api/connectors/${c.name}/credential`); await load() }

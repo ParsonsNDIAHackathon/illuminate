@@ -99,6 +99,7 @@ class Connector:
         # while still exposing stable lineage metadata at the API boundary.
         from .registry import source_metadata
         return {"name": self.name, "label": self.label, "description": self.description, "trust": self.trust,
+                "kinds": list(self.kinds),
                 "key_name": self.key_name, "key_url": self.key_url, "key_note": self.key_note,
                 **source_metadata(self.name)}
 

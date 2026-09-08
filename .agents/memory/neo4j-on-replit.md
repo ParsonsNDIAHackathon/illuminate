@@ -13,12 +13,18 @@ Keep the generated development credential and the existing graph store on the sa
 
 **Why:** An existing Neo4j store retains its admin credential. Generating a different credential after the local credential state disappears prevents the workflow from restarting even though the graph data is still healthy.
 
-**How to apply:** If the local credential state is missing, preserve the graph data and reset the development admin credential in place through a bounded auth-recovery flow before restarting. Do not delete or reseed the store to work around authentication.
+**How to apply:** If the local credential state is missing, preserve the graph data and reset the development admin credential in place through a bounded auth-recovery flow before restarting. Verify authenticated Bolt access before persisting the credential hint, bound shutdown with escalation, and do not delete or reseed the store to work around authentication.
 
 Run any destructive reset-based QA against isolated temporary Neo4j directories, never the persisted workspace store.
 
 **Why:** Deterministic seed tests replace graph contents; using the normal workspace directories can erase analyst data while investigating an unrelated startup or journey defect.
 
 **How to apply:** Configure temporary data, log, run, transaction, plugin, and config directories, seed that disposable instance, and remove it after testing. Retest the real workflow without reset once its credential path is healthy.
+
+Use a persistent, single-instance VM deployment while Illuminate embeds Neo4j and stores its graph and worker checkpoints on the instance filesystem.
+
+**Why:** Autoscaled instances have independent ephemeral filesystems, so instance replacement can lose graph state and concurrent instances can diverge.
+
+**How to apply:** Keep the deployment target on an always-on VM unless graph state, analyst decisions, and checkpoints have first moved to an external durable database shared by every instance.
 
 For bounded multi-hop analytics, use internally limited path expansion with a sentinel, materialize graph values into scalar/map data before aggregation boundaries, and propagate truncation to downstream completeness claims.

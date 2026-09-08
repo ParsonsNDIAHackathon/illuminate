@@ -51,9 +51,28 @@
       <h4>Provenance</h4>
       <dl>
         <dt>Source</dt><dd>{{ p.source || '—' }} <a v-if="p.source_url" :href="p.source_url" target="_blank" rel="noopener">↗</a></dd>
-        <dt>Retrieved</dt><dd>{{ (p.retrieved_at || '').slice(0, 10) || '—' }}</dd>
+        <dt>Retrieved</dt><dd>{{ (p.latest_retrieved_at || p.retrieved_at || '').slice(0, 10) || '—' }}</dd>
         <dt>Method</dt><dd>{{ p.method || '—' }}<span v-if="p.confidence != null"> · confidence {{ p.confidence }}</span></dd>
       </dl>
+    </section>
+    <section v-if="sourceResults.length">
+      <h4>Source refresh</h4>
+      <div v-for="s in sourceResults" :key="s.name" class="source-row">
+        <div class="d-flex align-center ga-1">
+          <strong>{{ s.name }}</strong>
+          <v-chip size="x-small" variant="tonal" :color="sourceColor(s.status)">{{ sourceLabel(s.status) }}</v-chip>
+          <v-chip v-if="s.simulated" size="x-small" color="warning" variant="tonal">simulation</v-chip>
+          <v-chip v-if="s.cache" size="x-small" variant="tonal">cache</v-chip>
+        </div>
+        <div class="text-caption" style="opacity:.72">
+          {{ s.queried ? 'Queried' : 'Not queried' }}<span v-if="s.reason"> · {{ s.reason }}</span>
+          <span v-if="s.last_success_at"> · Last success {{ formatDate(s.last_success_at) }}</span>
+        </div>
+      </div>
+    </section>
+    <section v-if="sourceRefreshError">
+      <h4>Source refresh</h4>
+      <div class="text-caption text-warning">{{ sourceRefreshError }}</div>
     </section>
     <section v-if="node.label === 'Artifact'">
       <h4>Artifact</h4>
@@ -119,6 +138,32 @@ const node = computed(() => graph.selected)
 const p = computed(() => node.value?.props || {})
 const detail = ref<any>(null); const supplies = ref<any[]>([]); const personRoles = ref<any[]>([]); const enriching = ref(false); const focusing = ref(false)
 const isProgram = computed(() => node.value?.label === 'Entity' && p.value.kind === 'program')
+const sourceResults = computed(() => {
+  const job = node.value ? jobs.latestFor(node.value.id) : undefined
+  if (!job) return []
+  return Object.entries(job.results || {}).filter(([name, value]) => !name.startsWith('_') && typeof value === 'object')
+    .map(([name, value]: any) => ({
+      name, ...value,
+      status: value.status === 'running'
+        ? 'refreshing'
+        : (value.fallback === true || value.refresh_state === 'stale-fallback' || value.source_status === 'stale_fallback' || value.source_status === 'stale-fallback')
+          ? 'stale-fallback'
+        : value.refresh_state === 'not_retrieved'
+          ? 'unavailable'
+        : (value.availability && value.availability !== 'connected' ? value.availability : value.status),
+    }))
+})
+const sourceRefreshError = ref('')
+function sourceLabel(status: string) {
+  return ({ succeeded: 'current', empty: 'current', partial: 'partial', failed: 'unavailable', timed_out: 'timed out' } as Record<string, string>)[status] || status.replace('-', ' ')
+}
+function sourceColor(status: string) {
+  if (['succeeded', 'empty', 'current', 'connected'].includes(status)) return 'success'
+  if (['refreshing'].includes(status)) return 'info'
+  if (['not-applicable'].includes(status)) return undefined
+  return 'warning'
+}
+function formatDate(value: string) { return new Date(value).toLocaleString() }
 const discoverDlg = ref(false); const discovering = ref(false); const discoverError = ref('')
 const kw = ref<string[]>([]); const agency = ref(''); const maxSubs = ref<number | null>(null)
 watch(node, async (n) => {
@@ -131,6 +176,14 @@ watch(node, async (n) => {
       detail.value = { ...rep.geography, ...rep.control, categories: rep.categories, tier: rep.supply.tier_from_root, suppliers_count: rep.supply.suppliers_count }
       supplies.value = rep.supply.supplies
     } catch {}
+    // Program-scoped adapters (news, clauses, map/context signals) are bounded
+    // by the worker's applicability policy. Queue once without making opening
+    // the inspector wait for remote services or silently treating a cache as a
+    // live result.
+    if (n.props?.kind === 'program' && !jobs.latestFor(n.id)) {
+      sourceRefreshError.value = ''
+      void jobs.enqueue(n.id).catch(() => { sourceRefreshError.value = 'Live contextual refresh could not be queued. Retry from Enrich.' })
+    }
   } else if (n.label === 'Person') {
     personRoles.value = graph.edgeList.filter(e => e.type === 'HELD_ROLE' && e.source === n.id).map(e => ({ edge_id: e.id, entity: graph.nodes.get(e.target)?.name, ...e.props }))
   }
@@ -168,6 +221,7 @@ async function focusHere() {
 .name { font-size: 16px; line-height: 1.2; margin: 2px 0; }
 .ids { opacity: .7; }
 section { margin-top: 10px; }
+.source-row { margin: 5px 0; }
 h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; margin-bottom: 4px; }
 dl { display: grid; grid-template-columns: 90px 1fr; gap: 2px 8px; margin: 0; }
 dt { opacity: .6; } dd { margin: 0; }

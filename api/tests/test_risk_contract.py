@@ -102,6 +102,21 @@ def test_stale_fixture_keeps_risk_but_flags_freshness():
     assert any(f["code"] == "stale_evidence" for f in result["diligence_flags"])
 
 
+def test_refreshed_observation_uses_latest_retrieval_for_freshness():
+    refreshed = all_screens("medium", retrieved_at="2020-01-01")
+    for item in refreshed:
+        item["latest_retrieved_at"] = "2026-09-08"
+
+    result = evaluate_risk_contract(core(), supply(), refreshed, as_of=AS_OF)
+
+    assert result["freshness"] == "current"
+    assert not any(f["code"] == "stale_evidence" for f in result["diligence_flags"])
+    for category in result["categories"]:
+        for factor in category["factors"]:
+            if factor["rule_id"].endswith(".screen-result.v1"):
+                assert factor["provenance"]["retrieved_at"] == "2026-09-08"
+
+
 def test_repeated_fixture_projection_cannot_change_stale_graph_evidence():
     stale_supply = supply(sole=True)
     stale_supply["risk_evidence"][0]["retrieved_at"] = "2020-01-01"

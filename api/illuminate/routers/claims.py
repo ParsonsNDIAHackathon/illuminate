@@ -60,12 +60,21 @@ async def list_source_records(
 @router.post("/{claim_id}/commit")
 async def commit(claim_id: str, body: Note, user: str = Depends(user_id)):
     try:
-        touched = await claims.endpoints(claim_id)
-        status = await claims.commit(claim_id, body.note or "Approved after analyst review.", actor=user)
+        status = await claims.commit(
+            claim_id,
+            body.note or "Approved after analyst review.",
+            actor=user,
+        )
     except KeyError:
         raise HTTPException(404, "no such claim")
     except ValueError as exc:
         raise HTTPException(409, str(exc))
+    try:
+        touched = await claims.endpoints(claim_id)
+    except Exception:
+        # The decision already committed atomically. A best-effort live-update
+        # lookup must not turn that successful state change into a false 500.
+        touched = [claim_id]
     await events.announce(touched, reason="claim:commit", source="ui")
     return {"status": status}
 

@@ -100,7 +100,9 @@ async def entity_core(entity_id: str) -> dict | None:
         RETURN collect({
           id:coalesce(ps.id, elementId(ps)), claim_id:ps.claim_id,
           source:ps.source, source_url:ps.source_url,
-          retrieved_at:ps.retrieved_at, confidence:ps.confidence,
+          retrieved_at:coalesce(ps.latest_retrieved_at,ps.retrieved_at),
+          first_retrieved_at:ps.retrieved_at, latest_retrieved_at:ps.latest_retrieved_at,
+          confidence:ps.confidence,
           status:ps.status, simulated:coalesce(ps.simulated,false),
           seat_code:seat.code, seat_simulated:coalesce(seat.simulated,false),
           claim_status:pc.status, claim_method:pc.method, claim_simulated:coalesce(pc.simulated,false),
@@ -265,7 +267,9 @@ async def supply_position(entity_id: str, root_id: str | None) -> dict:
                 s.connector_error_type AS connector_error_type,
                 s.connector_error_status AS connector_error_status,
                 coalesce(s.id, elementId(s)) AS evidence_id, s.claim_id AS claim_id, s.status AS status,
-                s.retrieved_at AS retrieved_at, s.confidence AS confidence,
+                 coalesce(s.latest_retrieved_at,s.retrieved_at) AS retrieved_at,
+                 s.retrieved_at AS first_retrieved_at,
+                 s.latest_retrieved_at AS latest_retrieved_at, s.confidence AS confidence,
                 coalesce(s.simulated,false) OR coalesce(c.simulated,false) AS simulated
         ORDER BY coalesce(s.amount, 0) DESC LIMIT 50
         """,
@@ -286,7 +290,9 @@ async def supply_position(entity_id: str, root_id: str | None) -> dict:
           connector_error:s.connector_error, connector_error_type:s.connector_error_type,
           connector_error_status:s.connector_error_status,
           evidence_id:coalesce(s.id, elementId(s)), claim_id:s.claim_id,
-          status:s.status, retrieved_at:s.retrieved_at, confidence:s.confidence,
+          status:s.status, retrieved_at:coalesce(s.latest_retrieved_at,s.retrieved_at),
+          first_retrieved_at:s.retrieved_at, latest_retrieved_at:s.latest_retrieved_at,
+          confidence:s.confidence,
           method:coalesce(sc.method,s.method),
           simulated:coalesce(s.simulated,false),
           entity_simulated:coalesce(e.simulated,false) OR coalesce(c.simulated,false),
@@ -347,7 +353,9 @@ async def people(entity_id: str) -> dict:
             source_id:coalesce(r2.source_id,rc2.source_id),
             source_identifier:coalesce(r2.source_identifier,rc2.source_identifier),
             catalog_ids:coalesce(r2.catalog_ids,rc2.catalog_ids),
-            retrieved_at:coalesce(r2.retrieved_at,rc2.retrieved_at),
+            retrieved_at:coalesce(r2.latest_retrieved_at,rc2.latest_retrieved_at,r2.retrieved_at,rc2.retrieved_at),
+            first_retrieved_at:coalesce(r2.retrieved_at,rc2.retrieved_at),
+            latest_retrieved_at:coalesce(r2.latest_retrieved_at,rc2.latest_retrieved_at),
             usage_note:coalesce(r2.usage_note,rc2.usage_note),
             quality_note:coalesce(r2.quality_note,rc2.quality_note),
             supports:coalesce(r2.supports,rc2.supports),
@@ -364,7 +372,9 @@ async def people(entity_id: str) -> dict:
                coalesce(r.source_identifier,rc.source_identifier) AS source_identifier,
                coalesce(r.catalog_ids,rc.catalog_ids) AS catalog_ids,
                coalesce(r.source_url,head([(ra:Artifact)-[:EVIDENCES]->(rc) | ra.url])) AS source_url,
-               coalesce(r.retrieved_at,rc.retrieved_at) AS retrieved_at,
+               coalesce(r.latest_retrieved_at,rc.latest_retrieved_at,r.retrieved_at,rc.retrieved_at) AS retrieved_at,
+               coalesce(r.retrieved_at,rc.retrieved_at) AS first_retrieved_at,
+               coalesce(r.latest_retrieved_at,rc.latest_retrieved_at) AS latest_retrieved_at,
                coalesce(r.usage_note,rc.usage_note) AS usage_note,
                coalesce(r.quality_note,rc.quality_note) AS quality_note,
                coalesce(r.supports,rc.supports) AS supports,
@@ -412,11 +422,15 @@ async def screens(entity_id: str) -> list[dict]:
         WHERE c.predicate ENDS WITH '_screen'
         OPTIONAL MATCH (a:Artifact)-[evidences:EVIDENCES]->(c)
         WITH c, asserts, collect(DISTINCT a{.id,.title,.url,.source,.source_id,.source_identifier,
-          .catalog_ids,.retrieved_at,.usage_note,.quality_note,.supports,.unknowns,.source_status,
+          .catalog_ids,.retrieved_at,.latest_retrieved_at,.as_of,.latest_as_of,
+          .usage_note,.quality_note,.supports,.unknowns,.source_status,
           .connector_error,.connector_error_type,.connector_error_status,.simulated,
           evidence_edge_id:evidences.id, evidence_source:evidences.source,
           evidence_source_id:evidences.source_id, evidence_source_identifier:evidences.source_identifier,
-          evidence_catalog_ids:evidences.catalog_ids, evidence_retrieved_at:evidences.retrieved_at,
+           evidence_catalog_ids:evidences.catalog_ids,
+           evidence_retrieved_at:coalesce(evidences.latest_retrieved_at,evidences.retrieved_at),
+           evidence_first_retrieved_at:evidences.retrieved_at,
+           evidence_latest_retrieved_at:evidences.latest_retrieved_at,
           evidence_usage_note:evidences.usage_note, evidence_quality_note:evidences.quality_note,
           evidence_supports:evidences.supports, evidence_unknowns:evidences.unknowns,
           evidence_source_status:evidences.source_status,
@@ -424,7 +438,7 @@ async def screens(entity_id: str) -> list[dict]:
           evidence_connector_error_type:evidences.connector_error_type,
           evidence_connector_error_status:evidences.connector_error_status,
           evidence_simulated:coalesce(evidences.simulated,false)}) AS artifacts
-        ORDER BY c.retrieved_at DESC, c.id
+        ORDER BY coalesce(c.latest_retrieved_at,c.retrieved_at) DESC, c.id
         RETURN collect({
           claim_id:c.id, predicate:c.predicate, result:c.object_value, source:c.source, method:c.method,
           source_id:c.source_id, source_identifier:c.source_identifier, catalog_ids:c.catalog_ids,
@@ -434,7 +448,9 @@ async def screens(entity_id: str) -> list[dict]:
           connector_error_status:c.connector_error_status,
           confidence:c.confidence, status:c.status, asserts_edge_id:asserts.id,
           simulated:coalesce(c.simulated,false) OR coalesce(asserts.simulated,false),
-          retrieved_at:c.retrieved_at, artifacts:artifacts, detail:c.detail
+          retrieved_at:coalesce(c.latest_retrieved_at,c.retrieved_at),
+          first_retrieved_at:c.retrieved_at, latest_retrieved_at:c.latest_retrieved_at,
+          as_of:coalesce(c.latest_as_of,c.as_of), artifacts:artifacts, detail:c.detail
         }) AS screens
         """,
         {"id": entity_id},
@@ -465,7 +481,8 @@ def _factor_freshness(value: str | None, max_age_days: int, as_of: date) -> str:
         return "unavailable"
     return "stale" if (as_of - retrieved).days > max_age_days else "current"
 
-
+def _retrieval_time(item: dict) -> str | None:
+    return item.get("latest_retrieved_at") or item.get("retrieved_at")
 def _severity(value: str | None) -> str | None:
     value = (value or "").lower()
     if value in SEVERITY_WEIGHT:
@@ -501,7 +518,7 @@ def _eligible_graph_fact(fact: dict, *nodes: dict) -> bool:
     elif (
         fact.get("status") not in (None, "committed")
         or not fact.get("source")
-        or not fact.get("retrieved_at")
+        or not _retrieval_time(fact)
         or fact.get("confidence") is None
     ):
         return False
@@ -542,7 +559,7 @@ def evaluate_risk_contract(
             and not core.get("e", {}).get("simulated")
             and _severity(s.get("result")) is not None
         ]
-        approved.sort(key=lambda s: str(s.get("retrieved_at") or ""), reverse=True)
+        approved.sort(key=lambda s: str(_retrieval_time(s) or ""), reverse=True)
         factors: list[dict] = []
 
         # Ownership and supply criticality can also be established by approved graph facts.
@@ -557,10 +574,10 @@ def evaluate_risk_contract(
                 factors.append({"rule_id": "ownership.foreign-parent.v1", "severity": severity,
                                 "evidence_refs": refs, "truth_status": "committed",
                                  "claim_status": evidence.get("claim_status") if evidence.get("claim_id") else None,
-                                 "freshness": _factor_freshness(evidence.get("retrieved_at"), spec["max_age_days"], as_of),
+                                 "freshness": _factor_freshness(_retrieval_time(evidence), spec["max_age_days"], as_of),
                                 "provenance": {
                                     "source": evidence.get("source") or "graph",
-                                    "retrieved_at": evidence.get("retrieved_at"),
+                                    "retrieved_at": _retrieval_time(evidence),
                                      "confidence": _confidence(evidence.get("confidence"), default=0.0),
                                      "method": evidence.get("claim_method"),
                                 },
@@ -578,9 +595,9 @@ def evaluate_risk_contract(
                 factors.append({"rule_id": "supply.sole-source.v1", "severity": severity,
                                 "evidence_refs": refs, "truth_status": "committed",
                                  "claim_status": ref.get("claim_status") if ref.get("claim_id") else None,
-                                 "freshness": _factor_freshness(ref.get("retrieved_at"), spec["max_age_days"], as_of),
+                                 "freshness": _factor_freshness(_retrieval_time(ref), spec["max_age_days"], as_of),
                                 "provenance": {"source": ref.get("source") or "graph",
-                                               "retrieved_at": ref.get("retrieved_at"),
+                                               "retrieved_at": _retrieval_time(ref),
                                                "confidence": _confidence(ref.get("confidence"), default=0.0),
                                                "method": ref.get("method")},
                                 "explanation": "A sole-source supply relationship exists." if ref["sole_source"] else "The supply relationship is explicitly recorded as non-sole-source."})
@@ -597,8 +614,8 @@ def evaluate_risk_contract(
                 "evidence_refs": refs or [f"claim:{item.get('predicate')}"],
                 "truth_status": "committed",
                 "claim_status": item.get("status"),
-                "freshness": _factor_freshness(item.get("retrieved_at"), spec["max_age_days"], as_of),
-                "provenance": {"source": item.get("source"), "retrieved_at": item.get("retrieved_at"),
+                "freshness": _factor_freshness(_retrieval_time(item), spec["max_age_days"], as_of),
+                "provenance": {"source": item.get("source"), "retrieved_at": _retrieval_time(item),
                                "confidence": _confidence(item.get("confidence"), default=0.0),
                                "method": item.get("method")},
                 "explanation": item.get("detail") or f"{item.get('predicate')} returned {item.get('result')}.",
@@ -702,10 +719,12 @@ async def artifacts(entity_id: str, limit: int = 50) -> list[dict]:
         WITH collect(DISTINCT a1) + collect(DISTINCT a2) AS arts
         UNWIND arts AS a
         WITH DISTINCT a WHERE a IS NOT NULL
-        RETURN a.id AS id, a.kind AS kind, a.title AS title, a.url AS url, a.source AS source, a.retrieved_at AS retrieved_at,
+        RETURN a.id AS id, a.kind AS kind, a.title AS title, a.url AS url, a.source AS source,
+               coalesce(a.latest_retrieved_at,a.retrieved_at) AS retrieved_at,
+               a.retrieved_at AS first_retrieved_at, a.latest_retrieved_at AS latest_retrieved_at,
                coalesce(a.simulated,false) AS simulated,
                a.published_at AS published_at, a.sentiment AS sentiment, a.amount AS amount, a.summary AS summary
-        ORDER BY coalesce(a.published_at, a.retrieved_at) DESC LIMIT $limit
+        ORDER BY coalesce(a.published_at, a.latest_retrieved_at, a.retrieved_at) DESC LIMIT $limit
         """,
         {"id": entity_id, "limit": limit},
     )
