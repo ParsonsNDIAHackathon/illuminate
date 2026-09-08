@@ -13,3 +13,4 @@
 - [Headless phone viewport checks](headless-phone-viewports.md) — Chromium window sizing may crop rather than emulate sub-500px CSS viewports; use device metrics.
 - [Atomic claim decisions](atomic-claim-decisions.md) — terminal review state and its materialized graph effects must commit in one claim-locked transaction.
 - [Scoped decision concurrency](scoped-decision-concurrency.md) — scope-visible versions and entity-wide chronology require separate counters.
+- [Nested Docker verification](nested-docker-verification.md) — keep Replit daemon workarounds temporary; verify the committed portable Compose path separately.

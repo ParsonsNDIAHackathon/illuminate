@@ -21,7 +21,7 @@ help:
 	@echo "make test-sync-main     test synchronization using disposable local repositories"
 
 up:
-	$(COMPOSE) up --build -d
+	$(COMPOSE) up --build --wait -d
 
 down:
 	$(COMPOSE) down

@@ -103,15 +103,19 @@ def main() -> int:
                 return 2
 
         try:
-            workspace_req = urllib.request.Request(args.base_url.rstrip("/") + "/api/workspace")
-            with urllib.request.urlopen(workspace_req, timeout=timeout_s) as response:
-                workspace = json.load(response)
-            root_id = workspace.get("root_id")
+            _, status, content = request(args.base_url, "GET", "/api/health?refresh=true", None, timeout_s)
+            health = json.loads(content)
+            if status != 200 or not health.get("primary_workflow_ready"):
+                raise RuntimeError(f"deterministic fixture is not ready after reset: {health}")
             expected_fixture = config["fixture"]
-            if root_id != expected_fixture["root_id"] or workspace.get("root_label") != expected_fixture["root_label"]:
+            root_id = health.get("required", {}).get("seed", {}).get("root_id")
+            _, status, content = request(args.base_url, "GET", f"/api/entities/{root_id}/report", None, timeout_s)
+            entity = json.loads(content).get("entity", {}) if status == 200 else {}
+            root_label = entity.get("name")
+            if root_id != expected_fixture["root_id"] or root_label != expected_fixture["root_label"]:
                 raise RuntimeError(
                     f"expected deterministic fixture {expected_fixture['root_label']} ({expected_fixture['root_id']}), "
-                    f"got {workspace.get('root_label')} ({root_id}); pass --reset-fixture"
+                    f"got {root_label} ({root_id}); pass --reset-fixture"
                 )
         except Exception as exc:
             print(f"FAIL fixture discovery: {exc}", file=sys.stderr)

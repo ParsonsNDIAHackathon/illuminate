@@ -74,9 +74,12 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import json, urllib.request; assert json.load(urllib.request.urlopen('http://localhost:8000/api/health', timeout=2))['ok']\""]
+      # Database readiness is separate from judged-workflow readiness. A fresh graph
+      # may report primary_workflow_ready=false until `make seed`, but `ok` confirms
+      # the API can reach Neo4j with the configured credentials.
+      test: ["CMD-SHELL", "python -c \"import json, urllib.request; h=json.load(urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)); assert h['ok']\""]
       interval: 5s
-      timeout: 3s
+      timeout: 7s
       retries: 12
 
   web:
@@ -87,6 +90,11 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/ | grep -q '<div id=\"app\"></div>'"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
 
 volumes:
   neo4j-data:

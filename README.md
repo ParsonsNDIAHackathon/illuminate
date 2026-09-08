@@ -29,6 +29,8 @@ Python ≥ 3.12 and Node ≥ 20.
 ## Start
 
 ```bash
+export NEO4J_PASSWORD='choose-a-unique-password'
+export SESSION_SECRET='choose-a-different-long-random-value'
 make up          # neo4j + api + web in containers
 ```
 
@@ -45,11 +47,36 @@ make seed        # V-22 Osprey (PMA-275) from cached public data, ~1 min
 Seeding runs inside the api container when the stack is up, so it needs no host Python;
 under `make dev` it uses the host venv instead.
 
+`make up` waits for Neo4j, database-aware API health, and the web server. API health and
+mission readiness are intentionally separate: before the first seed,
+`/api/health?refresh=true` returns HTTP 200 with `primary_workflow_ready: false` and an
+operator action. After `make seed`, it must report `ok: true` and
+`primary_workflow_ready: true`.
+
 Other addresses: API and docs at http://localhost:8000/docs, Neo4j browser at
 http://localhost:7474. Set unique `NEO4J_PASSWORD` and `SESSION_SECRET` environment
 values before `make up`; the username is `neo4j`. `make down` stops everything and keeps
 the data. `make dev` runs Neo4j in Docker with the API and web on the host with hot reload
 (web on http://localhost:5173).
+
+
+### Docker operations
+
+- **Configuration:** Compose injects the same `NEO4J_*`, `SESSION_SECRET`,
+  `ILLUMINATE_DATA_DIR`, and CORS settings used by the host launchers. Keep secrets in
+  the environment or an uncommitted `.env`; never add them to an image or the repository.
+- **Persistence:** the graph lives in the `neo4j-data` volume. Workspace settings,
+  encrypted connector keys, and caches live in `api/data/`. Both survive `make down`.
+  `docker compose down -v` deliberately deletes the graph volume and is not a routine
+  shutdown command.
+- **Seed and schema:** the API applies idempotent schema setup on startup. `make seed`
+  resets and stamps the deterministic offline mission fixture; it is destructive to the
+  current graph.
+- **Shutdown:** `make down` asks all containers to stop and preserves state. Use
+  `docker compose logs api neo4j web` when a service fails or becomes unhealthy.
+- **Recovery:** if a retained graph rejects the configured password, restore the original
+  password or restore a known backup; changing only the environment cannot change an
+  existing Neo4j store password. See **Restart from a backup** below.
 
 ## Back up
 
@@ -125,3 +152,18 @@ To redeploy, merge the desired revision to `main`, open Replit Publishing, and
 publish again. After publishing, verify `/api/health?refresh=true` reports
 `ok: true` and `primary_workflow_ready: true`, then load the root page and start
 the V-22 mission from the guided entry screen.
+
+### Replit development operations
+
+The configured `UC7 Illuminate` workflow runs `scripts/replit-dev.sh`: Nix Neo4j with
+APOC, the host API on port 8000, and the Vite UI on port 8080. It generates a protected
+local Neo4j password when none is supplied, stores Neo4j state under `.neo4j/`, and uses
+the same `api/data/` workspace state as Compose. Run `make seed` to reset the deterministic
+fixture, then verify `/api/health?refresh=true` as above. Stopping or restarting the
+workflow terminates all three child processes; their state remains on disk.
+
+If `.neo4j/` predates the protected local credential file, export that store's current
+`NEO4J_PASSWORD` once so the launcher can adopt it. A missing or unusable APOC plugin,
+Neo4j exit, API exit, web exit, or 180-second readiness timeout is printed to the workflow
+log and terminates startup instead of silently serving a partial process tree. Set
+`ILLUMINATE_STARTUP_TIMEOUT_SECONDS` to override that deadline.
