@@ -9,7 +9,7 @@
       </v-card-title>
       <v-card-subtitle class="d-flex flex-wrap ga-3">
         <span v-if="art?.source">{{ art.source }}</span>
-        <a v-if="art?.url" :href="art.url" target="_blank" rel="noopener">source page ↗</a>
+        <a v-if="art?.url" :href="art.url" target="_blank" rel="noopener" @click="openFrame($event, art.url)">source page ↗</a>
         <span v-if="art?.published_at">published {{ String(art.published_at).slice(0, 10) }}</span>
         <span v-if="art?.retrieved_at">retrieved {{ String(art.retrieved_at).slice(0, 10) }}</span>
         <span class="mono">{{ artifactId }}</span>
@@ -44,7 +44,7 @@
                 <template v-for="f in sec.fields" :key="f.label">
                   <dt>{{ f.label }}</dt>
                   <dd>
-                    <a v-if="f.href" :href="f.href" target="_blank" rel="noopener">{{ f.value }}</a>
+                    <a v-if="f.href" :href="f.href" target="_blank" rel="noopener" @click="openFrame($event, f.href)">{{ f.value }}</a>
                     <span v-else :class="f.emphasis === 'warn' ? 'warn' : ''">{{ f.value }}</span>
                   </dd>
                 </template>
@@ -66,7 +66,7 @@
                   <v-btn value="rendered" size="x-small">Rendered</v-btn>
                   <v-btn value="text" size="x-small">Text</v-btn>
                 </v-btn-toggle>
-                <v-btn v-if="doc.url" size="x-small" variant="text" :href="doc.url" target="_blank" rel="noopener" append-icon="mdi-open-in-new">open source</v-btn>
+                <v-btn v-if="doc.url" size="x-small" variant="text" :href="doc.url" target="_blank" rel="noopener" append-icon="mdi-open-in-new" @click="openFrame($event, doc.url)">open source</v-btn>
               </div>
 
               <iframe v-if="doc.render === 'html' && htmlView === 'rendered'" class="frame" sandbox="" referrerpolicy="no-referrer" :srcdoc="doc.html" title="Source document" />
@@ -81,7 +81,7 @@
               </p>
               <p v-if="doc.status !== 'ok'" class="text-body-2" style="opacity:.75">
                 {{ doc.note }}
-                <a v-if="doc.url" :href="doc.url" target="_blank" rel="noopener" class="ml-1">open the source page ↗</a>
+                <a v-if="doc.url" :href="doc.url" target="_blank" rel="noopener" class="ml-1" @click="openFrame($event, doc.url)">open the source page ↗</a>
               </p>
             </template>
           </v-window-item>
@@ -106,13 +106,17 @@
         </v-window>
       </v-card-text>
     </v-card>
+    <SourceFrame v-if="frameUrl" :url="frameUrl" @close="frameUrl = null" />
   </v-dialog>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { api } from '../api/client'
+import SourceFrame from './SourceFrame.vue'
+import { useSourceFrame } from '../composables/sourceFrame'
 const props = defineProps<{ artifactId: string | null }>()
+const { frameUrl, openFrame } = useSourceFrame()
 defineEmits<{ (e: 'close'): void }>()
 
 const data = ref<any>(null); const loading = ref(false); const error = ref('')
