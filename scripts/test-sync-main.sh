@@ -70,11 +70,17 @@ make_auth_git_wrapper() {
 set -euo pipefail
 if [[ "${1:-}" == "-c" && "${2:-}" == "credential.helper=" &&
       "${3:-}" == "-c" && "${4:-}" == "credential.username=x-access-token" &&
-      ( "${5:-}" == fetch || "${5:-}" == push ) ]]; then
-  operation="$5"
-  shift 5
+      "${5:-}" == "-c" && "${6:-}" == core.hooksPath=* &&
+      ( "${7:-}" == fetch || "${7:-}" == push ) ]]; then
+  hooks_path="${6#core.hooksPath=}"
+  operation="$7"
+  shift 7
+  [[ -z "${GITHUB_KEY:-}" ]]
+  [[ "${GIT_TRACE_REDACT:-}" == 1 ]]
   [[ "${GIT_TERMINAL_PROMPT:-}" == 0 ]]
   [[ -x "${GIT_ASKPASS:-}" ]]
+  [[ -d "$hooks_path" ]]
+  [[ -z "$(find "$hooks_path" -mindepth 1 -print -quit)" ]]
   username="$("$GIT_ASKPASS" 'Username for https://github.com:')"
   password="$("$GIT_ASKPASS" 'Password for https://github.com:')"
   [[ "$username" == x-access-token ]]
@@ -85,10 +91,10 @@ if [[ "${1:-}" == "-c" && "${2:-}" == "credential.helper=" &&
   printf '%s\n' "$operation" >>"$AUTH_TRACE"
   if [[ "$operation" == fetch ]]; then
     [[ "${1:-}" == --no-tags && "${2:-}" == origin ]]
-    exec "$REAL_GIT" fetch --no-tags "$AUTH_REMOTE" "${@:3}"
+    exec "$REAL_GIT" -c core.hooksPath="$hooks_path" fetch --no-tags "$AUTH_REMOTE" "${@:3}"
   fi
   [[ "${1:-}" == origin ]]
-  exec "$REAL_GIT" push "$AUTH_REMOTE" "${@:2}"
+  exec "$REAL_GIT" -c core.hooksPath="$hooks_path" push "$AUTH_REMOTE" "${@:2}"
 fi
 exec "$REAL_GIT" "$@"
 EOF
@@ -183,7 +189,7 @@ git -C "$TMP/secret_auth/work" remote set-url origin https://github.com/example/
 run_ok "Replit HTTPS fetch uses ephemeral GITHUB_KEY authentication" \
   env PATH="$TMP/secret_auth/bin:$PATH" REAL_GIT="$real_git" \
     AUTH_REMOTE="$TMP/secret_auth/origin.git" AUTH_TRACE="$TMP/secret_auth/trace" \
-    EXPECTED_GITHUB_KEY="$secret" GITHUB_KEY="$secret" REPL_ID=test-repl \
+    EXPECTED_GITHUB_KEY="$secret" GITHUB_KEY="$secret" GIT_TRACE_REDACT=0 REPL_ID=test-repl \
     bash -c "cd '$TMP/secret_auth/work' && '$SYNC' --check"
 grep -Fx fetch "$TMP/secret_auth/trace" >/dev/null
 assert_secret_absent "$secret" "$TMP/secret_auth/work"
@@ -203,6 +209,30 @@ run_ok "Replit HTTPS publish uses ephemeral GITHUB_KEY authentication" \
     bash -c "cd '$TMP/secret_push/work' && '$SYNC' --publish"
 [[ "$(grep -c '^fetch$' "$TMP/secret_push/trace")" == 2 ]]
 grep -Fx push "$TMP/secret_push/trace" >/dev/null
+assert_secret_absent "$secret" "$TMP/secret_push/work"
+
+hook_leak="$TMP/secret_push/hook-leak"
+cat >"$TMP/secret_push/work/.git/hooks/pre-push" <<'EOF'
+#!/usr/bin/env bash
+set +x
+{
+  if [[ -n "${GITHUB_KEY_FD:-}" ]]; then
+    cat <&"$GITHUB_KEY_FD" || true
+  fi
+  if [[ -x "${GIT_ASKPASS:-}" ]]; then
+    "$GIT_ASKPASS" 'Password for https://github.com:' || true
+  fi
+} >"${HOOK_LEAK:?}"
+EOF
+chmod +x "$TMP/secret_push/work/.git/hooks/pre-push"
+printf 'hook isolation\n' >>"$TMP/secret_push/work/history.txt"
+git -C "$TMP/secret_push/work" commit -am "hook isolation" >/dev/null
+run_ok "Replit secret authentication cannot reach repository hooks" \
+  env PATH="$TMP/secret_push/bin:$PATH" REAL_GIT="$real_git" \
+    AUTH_REMOTE="$TMP/secret_push/origin.git" AUTH_TRACE="$TMP/secret_push/trace" \
+    EXPECTED_GITHUB_KEY="$secret" GITHUB_KEY="$secret" HOOK_LEAK="$hook_leak" REPL_ID=test-repl \
+    bash -c "cd '$TMP/secret_push/work' && '$SYNC' --publish"
+[[ ! -e "$hook_leak" ]]
 assert_secret_absent "$secret" "$TMP/secret_push/work"
 
 new_fixture missing_secret

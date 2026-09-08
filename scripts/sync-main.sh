@@ -31,6 +31,14 @@ fail() {
   exit 1
 }
 
+is_replit=false
+github_key=
+if [[ -n "${REPL_ID:-}${REPL_SLUG:-}${REPLIT_DEV_DOMAIN:-}" ]]; then
+  is_replit=true
+  github_key="${GITHUB_KEY:-}"
+  unset GITHUB_KEY
+fi
+
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
   fail "run this command from inside the Illuminate Git repository."
 
@@ -50,8 +58,8 @@ git remote get-url origin >/dev/null 2>&1 ||
   fail "remote 'origin' is missing. Restore the GitHub origin before synchronizing."
 
 origin_url="$(git remote get-url origin)"
-git_command=(git)
 askpass_dir=
+auth_with_github_key=false
 
 cleanup() {
   if [[ -n "$askpass_dir" ]]; then
@@ -60,35 +68,56 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-is_replit=false
-if [[ -n "${REPL_ID:-}${REPL_SLUG:-}${REPLIT_DEV_DOMAIN:-}" ]]; then
-  is_replit=true
-fi
-
 if [[ "$is_replit" == true && "$origin_url" == https://github.com/* ]]; then
-  [[ -n "${GITHUB_KEY:-}" ]] ||
+  [[ -n "$github_key" ]] ||
     fail "GITHUB_KEY is unavailable in this Replit workspace. Add or restore the existing Replit secret, then rerun; never paste it into a remote URL or Git configuration."
+  auth_with_github_key=true
 
   askpass_dir="$(mktemp -d "${TMPDIR:-/tmp}/illuminate-git-askpass.XXXXXX")" ||
     fail "could not create temporary Git authentication files."
   chmod 700 "$askpass_dir"
+  mkdir -m 700 "$askpass_dir/hooks"
   cat >"$askpass_dir/askpass.sh" <<'EOF'
 #!/usr/bin/env bash
 set +x
 case "${1:-}" in
   *sername*) printf '%s\n' 'x-access-token' ;;
-  *assword*) printf '%s\n' "${GITHUB_KEY:?}" ;;
+  *assword*)
+    IFS= read -r github_key <&"${GITHUB_KEY_FD:?}"
+    printf '%s\n' "$github_key"
+    ;;
   *) exit 1 ;;
 esac
 EOF
   chmod 700 "$askpass_dir/askpass.sh"
-  export GIT_ASKPASS="$askpass_dir/askpass.sh"
-  export GIT_TERMINAL_PROMPT=0
-  git_command=(git -c credential.helper= -c credential.username=x-access-token)
 fi
 
+run_git() {
+  if [[ "$auth_with_github_key" != true ]]; then
+    git "$@"
+    return
+  fi
+
+  local credential_fd rc
+  exec {credential_fd}<<<"$github_key"
+  if GITHUB_KEY_FD="$credential_fd" \
+      GIT_ASKPASS="$askpass_dir/askpass.sh" \
+      GIT_TERMINAL_PROMPT=0 \
+      GIT_TRACE_REDACT=1 \
+      git -c credential.helper= \
+          -c credential.username=x-access-token \
+          -c core.hooksPath="$askpass_dir/hooks" \
+          "$@"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  exec {credential_fd}<&-
+  return "$rc"
+}
+
 fetch_main() {
-  "${git_command[@]}" fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+  run_git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
 }
 
 printf 'sync-main: fetching origin/main...\n'
@@ -133,7 +162,7 @@ fi
 
 if (( ahead > 0 )); then
   printf 'sync-main: pushing %s reviewed commit(s) to origin/main...\n' "$ahead"
-  if ! "${git_command[@]}" push origin "$evaluated_oid:refs/heads/main"; then
+  if ! run_git push origin "$evaluated_oid:refs/heads/main"; then
     fail "push was rejected or failed. Do not force-push. Fetch again, satisfy branch protection/checks or use the required pull-request workflow, then rerun."
   fi
 fi
