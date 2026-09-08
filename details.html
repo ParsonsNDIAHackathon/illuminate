@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Illuminate</title>
+<meta name="description" content="Supplier-network intelligence for the NDIA Global Defense Hackathon 2026: what Illuminate is, what is in its demo graph, and how the proposal's design decisions show up in code.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100,500;100,700;100,800;125,800&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Dark-first: the app itself is dark (Vuetify theme in web/src/plugins/vuetify.ts). */
+  :root {
+    --bg: #0e1013; --surface: #15181d; --raise: #1b1f26; --line: #262b33; --line-strong: #363c47;
+    --ink: #e5e8ee; --ink-2: #b4bcc8; --muted: #8b95a3;
+    --program: #60a5fa; --person: #2dd4bf; --category: #a78bfa; --claim: #f472b6;
+    --location: #d6a26b; --artifact: #9ca3af; --entity: #cbd5e1; --simulated: #fb923c;
+    --bar: #60a5fa; --code-bg: #0a0c0f;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f6f7f9; --surface: #ffffff; --raise: #ffffff; --line: #dce0e6; --line-strong: #c3c9d2;
+      --ink: #131820; --ink-2: #3a4351; --muted: #5b6573;
+      --program: #1d4ed8; --person: #0f766e; --category: #7c3aed; --claim: #be185d;
+      --location: #92400e; --artifact: #6b7280; --entity: #334155; --simulated: #ea580c;
+      --bar: #1d4ed8; --code-bg: #eef1f5;
+      color-scheme: light;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f7f9; --surface: #ffffff; --raise: #ffffff; --line: #dce0e6; --line-strong: #c3c9d2;
+    --ink: #131820; --ink-2: #3a4351; --muted: #5b6573;
+    --program: #1d4ed8; --person: #0f766e; --category: #7c3aed; --claim: #be185d;
+    --location: #92400e; --artifact: #6b7280; --entity: #334155; --simulated: #ea580c;
+    --bar: #1d4ed8; --code-bg: #eef1f5;
+    color-scheme: light;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+    font-size: 17px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--program); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--program); outline-offset: 3px; }
+  code, kbd, pre, .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code { font-size: 0.88em; background: var(--code-bg); border: 1px solid var(--line); border-radius: 3px; padding: 0.05em 0.35em; }
+  pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 4px; padding: 14px 16px; overflow-x: auto; font-size: 0.86em; line-height: 1.55; margin: 0; }
+  pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+
+  .display { font-family: "Archivo", "Helvetica Neue", Arial, sans-serif; }
+  .eyebrow {
+    font-family: "Archivo", "Helvetica Neue", Arial, sans-serif; font-weight: 700; font-size: 11.5px;
+    letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted);
+  }
+  h1, h2, h3 { font-family: "Archivo", "Helvetica Neue", Arial, sans-serif; text-wrap: balance; margin: 0; line-height: 1.1; }
+  h2 { font-size: 28px; font-weight: 800; letter-spacing: -0.01em; }
+  h3 { font-size: 18px; font-weight: 700; margin: 32px 0 10px; }
+  p { margin: 0 0 1em; max-width: 68ch; }
+  ul, ol { max-width: 68ch; padding-left: 1.2em; margin: 0 0 1em; }
+  li { margin-bottom: 0.35em; }
+  li::marker { color: var(--muted); }
+  strong { font-weight: 500; color: var(--ink); }
+  em { font-style: italic; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 0; }
+
+  /* Frame: rail + column */
+  .frame { display: grid; grid-template-columns: 1fr; max-width: 1240px; margin: 0 auto; padding: 0 20px; }
+  @media (min-width: 1080px) {
+    .frame { grid-template-columns: 220px minmax(0, 1fr); column-gap: 56px; }
+    .rail { position: sticky; top: 0; align-self: start; height: 100vh; padding-top: 40px; overflow-y: auto; }
+  }
+  .rail { display: none; }
+  @media (min-width: 1080px) { .rail { display: block; } }
+  .rail .wordmark { font-family: "Archivo", sans-serif; font-weight: 700; letter-spacing: 0.32em; font-size: 15px; text-transform: uppercase; color: var(--ink); margin-bottom: 28px; }
+  .rail nav { display: flex; flex-direction: column; gap: 2px; }
+  .rail nav a { color: var(--ink-2); text-decoration: none; font-family: "Archivo", sans-serif; font-size: 13px; padding: 5px 10px; border-left: 2px solid var(--line); }
+  .rail nav a:hover { color: var(--ink); border-left-color: var(--line-strong); }
+  .rail nav a.here { color: var(--ink); border-left-color: var(--program); }
+  .rail .foot { margin-top: 28px; font-size: 12px; color: var(--muted); font-family: "Archivo", sans-serif; line-height: 1.5; }
+
+  main { min-width: 0; padding-bottom: 96px; }
+  section { padding: 56px 0; border-top: 1px solid var(--line); }
+  section:first-of-type { border-top: 0; }
+  .sec-head { display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; }
+
+  /* Hero */
+  .hero { padding: 64px 0 48px; }
+  .hero h1 { font-size: clamp(48px, 8vw, 88px); font-weight: 800; font-stretch: 125%; letter-spacing: -0.02em; line-height: 0.95; }
+  .hero .thesis { font-size: clamp(22px, 3vw, 30px); font-family: "IBM Plex Serif", serif; font-weight: 400; max-width: 24ch; margin: 22px 0 10px; line-height: 1.25; text-wrap: balance; }
+  .hero .lede { color: var(--ink-2); max-width: 62ch; }
+  .uc { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-top: 32px; }
+  .uc > div { background: var(--surface); padding: 20px 22px; display: grid; gap: 6px; }
+  .uc .tag { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 26px; letter-spacing: -0.01em; }
+  .uc .name { font-family: "Archivo", sans-serif; font-weight: 700; font-size: 14px; color: var(--ink); }
+  .uc .how { color: var(--muted); font-size: 15px; margin: 0; }
+
+  /* Tables */
+  .tablewrap { overflow-x: auto; margin: 8px 0 20px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line); }
+  th { font-family: "Archivo", sans-serif; font-weight: 700; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  td:first-child { white-space: nowrap; }
+  td .d { font-family: "Archivo", sans-serif; font-weight: 800; color: var(--ink); }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* Figures */
+  figure { margin: 24px 0; }
+  figure img { width: 100%; height: auto; display: block; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
+  figcaption { font-size: 14px; color: var(--muted); margin-top: 10px; max-width: 78ch; }
+  figcaption b { font-family: "Archivo", sans-serif; font-weight: 700; color: var(--ink-2); }
+  .gallery { display: grid; grid-template-columns: 1fr; gap: 28px; }
+  @media (min-width: 900px) { .gallery.two { grid-template-columns: 1fr 1fr; } }
+  .gallery figure { margin: 0; }
+
+  /* Node-count chart: one measure, one hue; identity carried by the glyph + label. */
+  .chart { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; column-gap: 14px; row-gap: 9px; align-items: center; margin: 12px 0 8px; max-width: 720px; }
+  .chart .lab { display: flex; align-items: center; gap: 9px; font-family: "Archivo", sans-serif; font-size: 14px; font-weight: 500; }
+  .chart .gl { width: 11px; height: 11px; display: inline-block; flex: none; }
+  .gl.circle { border-radius: 50%; } .gl.square { border-radius: 2px; }
+  .gl.diamond { transform: rotate(45deg) scale(0.85); border-radius: 1px; }
+  .gl.hex { clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%); }
+  .gl.doc { clip-path: polygon(0 0, 70% 0, 100% 30%, 100% 100%, 0 100%); }
+  .chart .track { height: 10px; position: relative; }
+  .chart .bar { position: absolute; inset: 0 auto 0 0; background: var(--bar); border-radius: 0 3px 3px 0; }
+  .chart .val { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; text-align: right; }
+  .chart .note { grid-column: 1 / -1; font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+  /* Stat row */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 20px 0 8px; }
+  .stats > div { background: var(--surface); padding: 14px 16px; }
+  .stats .n { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 28px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+  .stats .l { font-size: 12.5px; color: var(--muted); margin-top: 6px; font-family: "Archivo", sans-serif; }
+
+  /* Scenario chain */
+  .chain { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 18px 0 6px; }
+  .chain .node { border: 1px solid var(--line-strong); background: var(--surface); padding: 10px 12px; min-width: 150px; flex: 1 1 150px; display: grid; gap: 3px; }
+  .chain .node .t { font-family: "Archivo", sans-serif; font-weight: 700; font-size: 13.5px; line-height: 1.25; }
+  .chain .node .s { font-size: 12.5px; color: var(--muted); }
+  .chain .node.sim { border-color: var(--simulated); border-style: dashed; }
+  .chain .node.root { border-color: var(--program); }
+  .chain .edge { align-self: center; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); white-space: nowrap; padding: 0 2px; }
+  .chain .edge.sim { color: var(--simulated); }
+  .badge { display: inline-block; font-family: "Archivo", sans-serif; font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; padding: 2px 7px; border: 1px solid currentColor; border-radius: 2px; }
+  .badge.sim { color: var(--simulated); }
+
+  /* Decision list */
+  .decisions { display: grid; gap: 0; border-top: 1px solid var(--line); }
+  .decisions > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 18px; padding: 20px 0; border-bottom: 1px solid var(--line); }
+  .decisions .id { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 22px; color: var(--program); line-height: 1.1; }
+  .decisions .ttl { font-family: "Archivo", sans-serif; font-weight: 700; font-size: 16px; margin-bottom: 6px; }
+  .decisions p { margin: 0; font-size: 15.5px; color: var(--ink-2); max-width: 74ch; }
+
+  /* Architecture diagram (D1) */
+  .arch { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: center; gap: 10px; margin: 22px 0 10px; max-width: 860px; font-family: "Archivo", sans-serif; }
+  .arch .col { display: grid; gap: 8px; }
+  .arch .box { border: 1px solid var(--line-strong); background: var(--surface); padding: 10px 12px; font-size: 13px; font-weight: 500; }
+  .arch .box small { display: block; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); margin-top: 3px; font-weight: 400; }
+  .arch .box.key { border-color: var(--program); }
+  .arch .arrow { font-size: 18px; color: var(--muted); text-align: center; }
+  @media (max-width: 640px) { .arch { grid-template-columns: 1fr; } .arch .arrow { transform: rotate(90deg); } }
+
+  .prompts { display: grid; gap: 8px; max-width: 720px; margin: 12px 0 8px; }
+  .prompts div { border: 1px solid var(--line); border-radius: 999px; padding: 8px 16px; font-size: 15px; background: var(--surface); }
+  .prompts div span { color: var(--muted); font-size: 13px; font-family: "Archivo", sans-serif; }
+
+  .callout { border-left: 3px solid var(--program); padding: 4px 0 4px 16px; margin: 20px 0; color: var(--ink-2); max-width: 68ch; }
+  .callout.warn { border-left-color: var(--simulated); }
+  .two { display: grid; grid-template-columns: 1fr; gap: 24px; }
+  @media (min-width: 860px) { .two { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<div class="frame">
+  <aside class="rail">
+    <div class="wordmark">Illuminate</div>
+    <nav aria-label="Sections">
+      <a href="#idea">The idea</a>
+      <a href="#stack">Stack</a>
+      <a href="#graph">The demo graph</a>
+      <a href="#tour">Tour</a>
+      <a href="#decisions">Design decisions</a>
+      <a href="#api">API and MCP</a>
+      <a href="#ask">Ask it</a>
+      <a href="#limits">Honest limits</a>
+      <a href="#ops">Running it</a>
+    </nav>
+    <div class="foot">NDIA Global Defense Hackathon<br>Washington DC · 8–10 Sep 2026<br><br>Start, back up, restore: <a href="README.md">README</a></div>
+  </aside>
+
+  <main>
+    <section class="hero">
+      <div class="eyebrow">NDIA Global Defense Hackathon · Washington DC · 8–10 September 2026</div>
+      <h1>Illuminate</h1>
+      <div class="thesis">One graph, any consumer.</div>
+      <p class="lede">A supplier-network intelligence platform that does not know it is about defense. Model any consumer's dependency graph, attach evidence to every edge, and ask it questions in plain language. Point it at a DoD program and it answers one use case; point it at the government as a buying organisation and it answers the other.</p>
+      <div class="uc">
+        <div>
+          <div class="tag display">UC-7</div>
+          <div class="name">Defense Supply Chain Illumination</div>
+          <p class="how">Root = a program. Walk suppliers tier by tier, surface foreign control, sole-source chokepoints and shared people.</p>
+        </div>
+        <div>
+          <div class="tag display">UC-11</div>
+          <div class="name">Automated Vendor Risk Assessment</div>
+          <p class="how">Root = the buying organisation. One vendor report: identity, geography, control, people, six risk families with citations.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="idea">
+      <div class="sec-head"><div class="eyebrow">Premise</div><h2>The graph is the product</h2></div>
+      <p>Every answer Illuminate gives is a subgraph. Questions typed into the chat rail become either a named template query or validated, generated Cypher, the store returns nodes and edges, and the canvas draws exactly what came back. The executed query is always shown, so a reader can check the work.</p>
+      <p>Nothing is asserted without a record behind it. Facts from connectors are staged as <em>claims</em>, each pointing at the artifact that evidences it, and only trusted sources commit directly. The same tool contract serves the in-app model and any external agent over MCP, so the permission gate in front of writes applies to both.</p>
+      <div class="callout">The tool flags; it does not accuse. An interlock is a lead, not a finding, and every fuzzy match records its method and confidence.</div>
+    </section>
+
+    <section id="stack">
+      <div class="sec-head"><div class="eyebrow">Stack</div><h2>What it is built from</h2></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Layer</th><th>Stack</th><th>Where</th></tr></thead>
+        <tbody>
+          <tr><td>Store</td><td>Neo4j 5 with APOC</td><td><code>docker-compose.yml</code></td></tr>
+          <tr><td>Backend</td><td>FastAPI, neo4j async driver, OpenAI SDK, MCP SDK</td><td><code>api/illuminate/</code></td></tr>
+          <tr><td>Frontend</td><td>Vue 3 · Vuetify 3 · Cytoscape.js (fcose) · Pinia</td><td><code>web/src/</code></td></tr>
+          <tr><td>Model access</td><td>User-supplied OpenAI key, encrypted at rest; two tiers (strong, fast)</td><td>Settings › Connectors</td></tr>
+          <tr><td>Agent surface</td><td>In-app tool calling <em>and</em> MCP (stdio + streamable HTTP) over one handler module</td><td><code>api/illuminate/tools/</code>, <code>mcp_server.py</code></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="graph">
+      <div class="sec-head"><div class="eyebrow">Data</div><h2>The demo graph: V-22 Osprey Program (PMA-275)</h2></div>
+      <p>The seed builds the program from live public sources and caches every response as a fixture, so the graph rebuilds offline in about a minute. Everything below is real, published data, with one exception that is labelled as such.</p>
+
+      <div class="stats">
+        <div><div class="n num">811</div><div class="l">nodes</div></div>
+        <div><div class="n num">1,714</div><div class="l">relationships</div></div>
+        <div><div class="n num">253</div><div class="l">cached API responses</div></div>
+        <div><div class="n num">33,861</div><div class="l">SAM exclusion records screened locally</div></div>
+        <div><div class="n num">7 <span style="font-size:14px;color:var(--simulated)">sim</span></div><div class="l">simulated nodes, all badged</div></div>
+      </div>
+
+      <h3>Nodes by label</h3>
+      <div class="chart" role="img" aria-label="Node counts by label: Claim 467, Artifact 186, Entity 66, Person 45, Location 24, Category 23">
+        <div class="lab"><span class="gl diamond" style="background:var(--claim)"></span>Claim</div><div class="track"><div class="bar" style="width:100%"></div></div><div class="val">467</div>
+        <div class="lab"><span class="gl doc" style="background:var(--artifact)"></span>Artifact</div><div class="track"><div class="bar" style="width:39.8%"></div></div><div class="val">186</div>
+        <div class="lab"><span class="gl circle" style="background:var(--entity)"></span>Entity</div><div class="track"><div class="bar" style="width:14.1%"></div></div><div class="val">66</div>
+        <div class="lab"><span class="gl diamond" style="background:var(--person)"></span>Person</div><div class="track"><div class="bar" style="width:9.6%"></div></div><div class="val">45</div>
+        <div class="lab"><span class="gl square" style="background:var(--location)"></span>Location</div><div class="track"><div class="bar" style="width:5.1%"></div></div><div class="val">24</div>
+        <div class="lab"><span class="gl hex" style="background:var(--category)"></span>Category</div><div class="track"><div class="bar" style="width:4.9%"></div></div><div class="val">23</div>
+        <div class="note">Glyphs match the canvas legend. Claims outnumber entities seven to one because every screen, ownership link and role is a reified assertion with its own evidence.</div>
+      </div>
+
+      <h3>Sources</h3>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Source</th><th class="num">Cached calls</th><th>Contributes</th></tr></thead>
+        <tbody>
+          <tr><td><span class="d">USAspending</span></td><td class="num">92</td><td>Top-20 prime recipients by obligated amount since FY2020 (UEI, business types, address, place of performance, PSC/NAICS, competition → <code>sole_source</code>) plus all reported sub-awardees at tier 2. Awards are <code>Artifact {kind:'award'}</code> nodes.</td></tr>
+          <tr><td><span class="d">GLEIF</span></td><td class="num">77</td><td>LEI, legal jurisdiction (<code>INCORPORATED_IN</code>), level-2 direct and ultimate parents (<code>OWNS</code>, <code>ULTIMATE_PARENT_OF</code>, <code>PARENT_SEATED_IN</code>). Real finding: eight tier-1 suppliers resolve to a foreign ultimate parent, Subaru to Japan and Canadian Commercial Corporation to Canada among them.</td></tr>
+          <tr><td><span class="d">LittleSis</span></td><td class="num">71</td><td>Officers and directors as <code>Person</code> nodes with one tenured <code>HELD_ROLE</code> edge per term.</td></tr>
+          <tr><td><span class="d">SEC EDGAR</span></td><td class="num">6</td><td>Tickers, CIKs and filings for the listed firms.</td></tr>
+          <tr><td><span class="d">SAM.gov Entity</span></td><td class="num">5</td><td>Registration status, CAGE, incorporation, NAICS per vendor. The personal-key tier allows about ten calls a day, so this fills in slowly.</td></tr>
+          <tr><td><span class="d">OFAC SDN</span></td><td class="num">bulk</td><td>Sanctions screen on every entity, matched locally by UEI, CAGE and strict name; recorded as claims with the matched rows as detail.</td></tr>
+          <tr><td><span class="d">SAM.gov Exclusions</span></td><td class="num">bulk</td><td>Debarment and suspension screen against the public daily extract, 33,861 firm and special-entity records. No key, no quota spent.</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>The one simulated tie</h3>
+      <p>The brief allows a simulated or historical adversarial relationship. The <code>--scenario</code> flag adds exactly one, attached sole-source at tier 3, with a former director of its tier-2 customer on its board. Every synthetic node and edge carries <code>simulated: true</code> and the UI badges it. Seven nodes and fourteen edges in total.</p>
+      <div class="chain" aria-label="Simulated ownership chain">
+        <div class="node root"><div class="t">V-22 Osprey Program (PMA-275)</div><div class="s">root · consumer</div></div>
+        <div class="edge">← SUPPLIES tier 1</div>
+        <div class="node"><div class="t">Tier-1 prime</div><div class="s">real · USAspending</div></div>
+        <div class="edge">← SUPPLIES tier 2</div>
+        <div class="node"><div class="t">Tier-2 sub-awardee</div><div class="s">real · USAspending</div></div>
+        <div class="edge sim">← SUPPLIES sole-source</div>
+        <div class="node sim"><div class="t">Ningbo Precision Castings Ltd</div><div class="s">Delaware shell · manufactures in CN</div><span class="badge sim">simulated</span></div>
+        <div class="edge sim">← OWNS 100 %</div>
+        <div class="node sim"><div class="t">HK intermediary</div><div class="s">holding company</div><span class="badge sim">simulated</span></div>
+        <div class="edge sim">← ULTIMATE_PARENT_OF</div>
+        <div class="node sim"><div class="t">CN state group</div><div class="s">ultimate parent · seated in CN</div><span class="badge sim">simulated</span></div>
+      </div>
+    </section>
+
+    <section id="tour">
+      <div class="sec-head"><div class="eyebrow">Tour</div><h2>What the app looks like</h2></div>
+      <figure>
+        <img src="docs/screenshots/01-explorer.png" alt="Explorer canvas showing the V-22 program at the centre with suppliers, people, categories and one simulated node laid out by fcose" loading="lazy">
+        <figcaption><b>Explorer.</b> The program sits at the centre; suppliers by tier, people as teal diamonds, categories as violet hexagons. Orange edges are the simulated tie. The chat rail offers template questions when no model key is present.</figcaption>
+      </figure>
+      <div class="gallery two">
+        <figure>
+          <img src="docs/screenshots/02-chat-sole-source.png" alt="Chat answer highlighting sole-source suppliers on the canvas" loading="lazy">
+          <figcaption><b>Sole-source suppliers.</b> A template answer: the model picks the intent, the store returns the subgraph, the canvas styles it.</figcaption>
+        </figure>
+        <figure>
+          <img src="docs/screenshots/03-chat-goods-services.png" alt="Canvas with goods highlighted in purple and services in yellow after a chat instruction" loading="lazy">
+          <figcaption><b>Encoding is data.</b> "Highlight goods in purple and services in yellow" becomes style operations on element ids; the legend is derived from them.</figcaption>
+        </figure>
+        <figure>
+          <img src="docs/screenshots/04-permission-dialog.png" alt="Permission dialog for a write with a real impact count and approve, edit and refuse options" loading="lazy">
+          <figcaption><b>Ask before writing.</b> The write runs inside a rolled-back transaction to get real counters, then waits for approval, edit or refusal.</figcaption>
+        </figure>
+        <figure>
+          <img src="docs/screenshots/08-connectors.png" alt="Settings connectors page listing sources, key status and trust level" loading="lazy">
+          <figcaption><b>Connectors.</b> Each source with its trust level and key status. Keys are encrypted server-side and never enter a prompt.</figcaption>
+        </figure>
+      </div>
+      <h3>The vendor report (UC-11)</h3>
+      <div class="gallery two">
+        <figure>
+          <img src="docs/screenshots/05-report-overview.png" alt="Vendor report overview with identity and geography" loading="lazy">
+          <figcaption><b>Overview.</b> Identity, geography and control, each line with its source.</figcaption>
+        </figure>
+        <figure>
+          <img src="docs/screenshots/06-report-risk.png" alt="Vendor report risk section with six risk families and citations" loading="lazy">
+          <figcaption><b>Risk.</b> Six risk families with citations, and honest <em>no data</em> rows where a source was not available.</figcaption>
+        </figure>
+        <figure>
+          <img src="docs/screenshots/07-report-people.png" alt="Vendor report people section listing officers and directors with tenure" loading="lazy">
+          <figcaption><b>People.</b> Officers and directors with tenure, and interlocks across the supplier set.</figcaption>
+        </figure>
+        <figure>
+          <img src="docs/screenshots/09-people.png" alt="People view showing shared directors across suppliers on the canvas" loading="lazy">
+          <figcaption><b>Shared directors.</b> People who hold roles at more than one supplier, drawn as leads to investigate, not findings.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="decisions">
+      <div class="sec-head"><div class="eyebrow">Architecture</div><h2>How the proposal's decisions show up in code</h2></div>
+      <p>The solution proposal fixed eight design decisions, D1 to D8. Each maps onto a specific module.</p>
+
+      <div class="arch" aria-label="One tool contract, two transports">
+        <div class="col">
+          <div class="box">Chat rail<small>llm/chat.py · OpenAI tool calling</small></div>
+          <div class="box">External agent<small>mcp_server.py · stdio or streamable HTTP</small></div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="col">
+          <div class="box key">One tool contract<small>tools/contract.py · nine tools</small></div>
+          <div class="box key">dispatch + permission gate<small>tools/handlers.py · tools/permissions.py</small></div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="col">
+          <div class="box">Validated Cypher<small>cypher/validator.py · cypher/templates.py</small></div>
+          <div class="box">Neo4j<small>read session with timeout; writes held</small></div>
+        </div>
+      </div>
+
+      <div class="decisions">
+        <div><div class="id">D1</div><div><div class="ttl">One contract, two transports</div><p><code>tools/contract.py</code> defines nine tools once. The chat module hands them to the model and the MCP server publishes the identical list. Both call the same dispatch, so the permission gate applies to external agents too.</p></div></div>
+        <div><div class="id">D2</div><div><div class="ttl">Graph-first retrieval</div><p>Templates and generated Cypher return real subgraphs through <code>graphio.py</code>; the canvas draws what the query returned. A vector index over filings is a stated post-hackathon cut.</p></div></div>
+        <div><div class="id">D3</div><div><div class="ttl">Validated Cypher</div><p>The validator classifies every statement READ, WRITE, DESTRUCTIVE or SCHEMA, enforces the label, relationship and APOC allowlist, caps variable-length hops at 6, appends or clamps <code>LIMIT</code>, and rejects <code>CALL db.*</code>, <code>LOAD CSV</code>, admin commands and multi-statements. Reads run under a read session with a timeout. The executed Cypher is always shown in the UI.</p></div></div>
+        <div><div class="id">D4</div><div><div class="ttl">Ask before writing</div><p>A WRITE or DESTRUCTIVE statement executes inside a transaction that is rolled back to obtain real counters, then is held for the user: approve once, approve this shape for the session, edit, or refuse. Destructive statements require the affected count to be acknowledged and never auto-approve. Refusals return to the model as tool results.</p></div></div>
+        <div><div class="id">D5</div><div><div class="ttl">Enrichment proposes, trust commits</div><p>Connectors propose facts. <code>enrichment/claims.py</code> stages each as a claim with its artifact; the trust rule commits authoritative-connector facts, holds open-source facts until a human or a second independent source agrees, and writes the direct relationship with a <code>claim_id</code> for fast traversal.</p></div></div>
+        <div><div class="id">D6</div><div><div class="ttl">Encoding is data</div><p>Style operations reference element ids. Fill and stroke are palette <em>names</em> resolved to theme-tested tokens; unknown names fall back to neutral with a warning; the legend is derived from the operations.</p></div></div>
+        <div><div class="id">D7</div><div><div class="ttl">Credentials stay server-side</div><p><code>vault.py</code> encrypts keys per user with Fernet. The model receives tool results, never keys.</p></div></div>
+        <div><div class="id">D8</div><div><div class="ttl">Two tiers, cached prefix</div><p>The client picks a strong or fast model per task. Prompts keep the schema, tools and taxonomy prefix constant, around 1.9k tokens and above OpenAI's cache threshold, and append per-turn context separately.</p></div></div>
+      </div>
+
+      <h3>Two modelling choices visible in the schema</h3>
+      <div class="two">
+        <div><p><strong>Country is not one field.</strong> Incorporation, operations, manufacturing and the seat of the parent are four different relationships to <code>Location</code> nodes: <code>INCORPORATED_IN</code>, <code>OPERATES_IN</code>, <code>MANUFACTURES_IN</code>, <code>PARENT_SEATED_IN</code>. A Delaware shell that manufactures in China is representable without a lie.</p></div>
+        <div><p><strong>Evidence attaches to assertions.</strong> Claims are reified nodes with <code>ASSERTS</code> and <code>TARGETS</code> edges, and an <code>Artifact</code> evidences a claim. The direct relationship is written alongside for traversal speed, carrying the claim id.</p></div>
+      </div>
+    </section>
+
+    <section id="api">
+      <div class="sec-head"><div class="eyebrow">Surface</div><h2>API and MCP</h2></div>
+      <p>REST under <code>/api</code> with OpenAPI at <code>/docs</code>: graph, search and subgraph; entities and their report (the UC-11 profile); people; artifacts; claims with commit and reject; query (cypher, template, validate, styles); permissions with approve and refuse; connectors and credentials; enrichment jobs; workspace settings.</p>
+      <p>Chat runs over a websocket at <code>/ws/chat</code>; permission requests and job updates are broadcast on the same socket. MCP is served at <code>POST /mcp/</code> as stateless streamable HTTP, and as <code>illuminate-mcp</code> over stdio, for Claude Desktop or Claude Code:</p>
+      <pre><code>{ "mcpServers": { "illuminate": { "command": "/path/to/api/.venv/bin/illuminate-mcp" } } }</code></pre>
+    </section>
+
+    <section id="ask">
+      <div class="sec-head"><div class="eyebrow">Try</div><h2>Things to ask it</h2></div>
+      <div class="prompts">
+        <div>for all of the program's vendors, highlight goods in purple and services in yellow</div>
+        <div>highlight all entities that rely on manufacturing in CN, include tier 2 and below</div>
+        <div>which suppliers have a foreign ultimate parent?</div>
+        <div>show sole-source suppliers</div>
+        <div>shared directors across suppliers</div>
+        <div>add Acme Castings as a tier-3 supplier to AVIAN, LLC <span>→ permission dialog with a real impact count</span></div>
+      </div>
+      <p style="margin-top:14px">With an OpenAI key the model chooses between templates and generated Cypher and can call the enrichment tools. Without one, typed questions are matched to templates by intent. The app degrades; it does not fail.</p>
+    </section>
+
+    <section id="limits">
+      <div class="sec-head"><div class="eyebrow">Candour</div><h2>Honest limits</h2></div>
+      <p>Entity resolution is the whole game. UEI, CAGE and LEI carry it; the residue is name matching with a matcher tuned to refuse the subset trap, and every fuzzy merge records its method and confidence. Sub-award coverage is uneven, so tier depth varies by program.</p>
+      <p>Text-to-Cypher fails in ways that look like answers, which is why templates are the default and the query is always shown. People are harder to resolve than companies and coverage is skewed to large listed firms.</p>
+      <p>SAM.gov's personal-key tier allows about ten Entity API calls a day, so per-vendor registration details fill in slowly unless a federal or system-account key is used. The exclusion screen does not depend on it because it runs against the public daily extract.</p>
+      <div class="callout warn">Cut on purpose for the three days: a vector index over filings, multi-tenant auth, adverse-media and financial-health scoring (shown as no-data instead), and market data (wired, keyed off).</div>
+    </section>
+
+    <section id="ops">
+      <div class="sec-head"><div class="eyebrow">Operations</div><h2>Running it</h2></div>
+      <p>The <a href="README.md">README</a> is the short version: <code>make up</code> to start, <code>make backup</code> to archive the Neo4j volume and <code>api/data</code>, <code>make restore BACKUP=latest</code> or <code>BACKUP=&lt;archive&gt; make up</code> to boot from a backup.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Where</th><th>Address</th></tr></thead>
+        <tbody>
+          <tr><td>Web (compose)</td><td>http://localhost:8080</td></tr>
+          <tr><td>Web (host dev)</td><td>http://localhost:5173</td></tr>
+          <tr><td>API and OpenAPI docs</td><td>http://localhost:8000/docs · MCP at /mcp</td></tr>
+          <tr><td>Neo4j browser</td><td>http://localhost:7474 · bolt://localhost:7687 · <code>neo4j</code> / <code>illuminate-dev</code></td></tr>
+        </tbody>
+      </table></div>
+      <h3>Keys</h3>
+      <p>USAspending, GLEIF, OFAC, LittleSis, SEC EDGAR, GDELT and the SAM exclusions extract need no key. OpenAI (chat and generation) and SAM.gov Entity (registration details, personal tier throttled) are entered in Settings › Connectors and stored encrypted in <code>api/data/</code>. Details and registration links are in <code>docs/ACCOUNTS.md</code>.</p>
+      <h3>Tests</h3>
+      <pre><code>cd api &amp;&amp; .venv/bin/python -m pytest -q   # validator + templates (pure); gate + WS (live Neo4j, skipped if down)
+cd web &amp;&amp; npm run build</code></pre>
+    </section>
+  </main>
+</div>
+<script>
+  // Highlight the section in view in the rail. Progressive: the page reads fine without it.
+  (function () {
+    var links = Array.prototype.slice.call(document.querySelectorAll('.rail nav a'));
+    if (!links.length || !('IntersectionObserver' in window)) return;
+    var byId = {};
+    links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        links.forEach(function (a) { a.classList.remove('here'); });
+        var a = byId[e.target.id]; if (a) a.classList.add('here');
+      });
+    }, { rootMargin: '-30% 0px -60% 0px' });
+    Object.keys(byId).forEach(function (id) { var s = document.getElementById(id); if (s) obs.observe(s); });
+  })();
+</script>
+</body>
+</html>
