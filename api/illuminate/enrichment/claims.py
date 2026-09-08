@@ -146,53 +146,105 @@ async def decide(cid: str, *, trust: str) -> str:
 
 
 async def commit(cid: str, note: str | None = None) -> str:
-    rows = await db.read(
-        "MATCH (c:Claim {id:$id})-[:ASSERTS]->(s) OPTIONAL MATCH (c)-[:TARGETS]->(o) "
-        "RETURN c{.*} AS c, s.id AS sid, head(labels(s)) AS slabel, o.id AS oid, head(labels(o)) AS olabel", {"id": cid})
-    if not rows:
-        raise KeyError(cid)
-    r = rows[0]
-    c = r["c"]
-    status = c.get("status")
-    if status == "rejected":
-        return "rejected"
-    if status == "committed":
-        return "committed"
-    if status != "staged":
-        raise ValueError(f"claim {cid} cannot be committed from status {status!r}")
-    pred = c["predicate"]
-    rel_props = _json.loads(c.get("rel_props") or "{}") if c.get("rel_props") else {}
-    simulated = bool(rel_props.get("simulated") or c.get("simulated"))
-    rel_props["simulated"] = simulated
-    prov = {k: c.get(k) for k in ("source", "source_id", "catalog_ids", "retrieved_at", "usage_note", "quality_note",
-                                  "supports", "unknowns", "method", "confidence")}
-    prov["simulated"] = simulated
-    prov.update({"source_url": None, "source_status": "committed", "connector_error": c.get("connector_error"), "claim_id": cid})
-    art = await db.read("MATCH (a:Artifact)-[:EVIDENCES]->(c:Claim {id:$id}) RETURN a.url AS url LIMIT 1", {"id": cid})
-    if art:
-        prov["source_url"] = art[0]["url"]
-
-    if pred in REL_PREDICATES and r["oid"]:
-        declared = _json.loads(c["merge_keys"]) if c.get("merge_keys") is not None else list(LEGACY_MERGE_KEYS.get(pred, ()))
-        keys = [k for k in declared if k in rel_props]
-        key_clause = " {" + ", ".join(f"{k}: $rp.{k}" for k in keys) + "}" if keys else ""
-        await db.write(
-            f"MATCH (s {{id:$sid}}), (o {{id:$oid}}) MERGE (s)-[r:{pred}{key_clause}]->(o) "
-            "ON CREATE SET r.id=$rid SET r += $rp, r += $prov",
-            {"sid": r["sid"], "oid": r["oid"], "rp": rel_props, "prov": prov, "rid": edge_id()},
+    async def work(tx) -> str:
+        rows = await _tx_rows(
+            tx,
+            "MATCH (c:Claim {id:$id})-[:ASSERTS]->(s) "
+            "OPTIONAL MATCH (c)-[:TARGETS]->(o) "
+            "SET c.decision_version=coalesce(c.decision_version,0)+1 "
+            "RETURN c{.*} AS c, s.id AS sid, head(labels(s)) AS slabel, "
+            "o.id AS oid, head(labels(o)) AS olabel",
+            {"id": cid},
         )
-    elif pred.startswith("attr:"):
-        name = pred[5:]
-        if name in ATTR_ALLOWLIST:
-            val = c.get("object_value")
-            if val in ("true", "false"):
-                val = val == "true"
-            await db.write(f"MATCH (s {{id:$sid}}) SET s.{name} = $v, s.{name}_claim_id = $cid", {"sid": r["sid"], "v": val, "cid": cid})
-    elif pred == "sanctions_screen" or pred == "exclusion_screen":
-        if c.get("object_value") == "hit":
-            await db.write("MATCH (s {id:$sid}) SET s.flagged = true, s.flag_reason = $why", {"sid": r["sid"], "why": f"{pred}: {c.get('detail') or 'hit'}"})
-    await db.write("MATCH (c:Claim {id:$id}) SET c.status='committed', c.source_status='committed', c.decided_at=$now, c.decision_note=$note", {"id": cid, "now": now_iso(), "note": note})
-    return "committed"
+        if not rows:
+            raise KeyError(cid)
+        r = rows[0]
+        c = r["c"]
+        status = c.get("status")
+        if status == "rejected":
+            return "rejected"
+        if status == "committed":
+            return "committed"
+        if status != "staged":
+            raise ValueError(f"claim {cid} cannot be committed from status {status!r}")
+        pred = c["predicate"]
+        rel_props = _json.loads(c.get("rel_props") or "{}") if c.get("rel_props") else {}
+        simulated = bool(rel_props.get("simulated") or c.get("simulated"))
+        rel_props["simulated"] = simulated
+        prov = {
+            k: c.get(k)
+            for k in (
+                "source", "source_id", "catalog_ids", "retrieved_at", "usage_note",
+                "quality_note", "supports", "unknowns", "method", "confidence",
+            )
+        }
+        prov["simulated"] = simulated
+        prov.update({
+            "source_url": None,
+            "source_status": "committed",
+            "connector_error": c.get("connector_error"),
+            "claim_id": cid,
+        })
+        art = await _tx_rows(
+            tx,
+            "MATCH (a:Artifact)-[:EVIDENCES]->(c:Claim {id:$id}) "
+            "RETURN a.url AS url LIMIT 1",
+            {"id": cid},
+        )
+        if art:
+            prov["source_url"] = art[0]["url"]
+
+        if pred in REL_PREDICATES and r["oid"]:
+            declared = (
+                _json.loads(c["merge_keys"])
+                if c.get("merge_keys") is not None
+                else list(LEGACY_MERGE_KEYS.get(pred, ()))
+            )
+            keys = [key for key in declared if key in rel_props]
+            key_clause = (
+                " {" + ", ".join(f"{key}: $rp.{key}" for key in keys) + "}"
+                if keys else ""
+            )
+            await _tx_rows(
+                tx,
+                f"MATCH (s {{id:$sid}}), (o {{id:$oid}}) "
+                f"MERGE (s)-[r:{pred}{key_clause}]->(o) "
+                "ON CREATE SET r.id=$rid SET r += $rp, r += $prov",
+                {
+                    "sid": r["sid"], "oid": r["oid"], "rp": rel_props,
+                    "prov": prov, "rid": edge_id(),
+                },
+            )
+        elif pred.startswith("attr:"):
+            name = pred[5:]
+            if name in ATTR_ALLOWLIST:
+                val = c.get("object_value")
+                if val in ("true", "false"):
+                    val = val == "true"
+                await _tx_rows(
+                    tx,
+                    f"MATCH (s {{id:$sid}}) "
+                    f"SET s.{name} = $v, s.{name}_claim_id = $cid",
+                    {"sid": r["sid"], "v": val, "cid": cid},
+                )
+        elif pred in {"sanctions_screen", "exclusion_screen"}:
+            if c.get("object_value") == "hit":
+                await _tx_rows(
+                    tx,
+                    "MATCH (s {id:$sid}) "
+                    "SET s.flagged = true, s.flag_reason = $why",
+                    {"sid": r["sid"], "why": f"{pred}: {c.get('detail') or 'hit'}"},
+                )
+        await _tx_rows(
+            tx,
+            "MATCH (c:Claim {id:$id}) "
+            "SET c.status='committed', c.source_status='committed', "
+            "c.decided_at=$now, c.decision_note=$note",
+            {"id": cid, "now": now_iso(), "note": note},
+        )
+        return "committed"
+
+    return await db.transactional_write(work)
 
 
 async def endpoints(cid: str) -> list[str]:
@@ -207,10 +259,37 @@ async def endpoints(cid: str) -> list[str]:
 
 
 async def reject(cid: str, note: str | None = None) -> str:
-    await db.write("MATCH (c:Claim {id:$id}) SET c.status='rejected', c.source_status='rejected', c.decided_at=$now, c.decision_note=$note", {"id": cid, "now": now_iso(), "note": note})
-    return "rejected"
+    async def work(tx) -> str:
+        rows = await _tx_rows(
+            tx,
+            "MATCH (c:Claim {id:$id}) "
+            "SET c.decision_version=coalesce(c.decision_version,0)+1 "
+            "RETURN c.status AS status",
+            {"id": cid},
+        )
+        if not rows:
+            raise KeyError(cid)
+        status = rows[0].get("status")
+        if status == "rejected":
+            return "rejected"
+        if status != "staged":
+            raise ValueError(f"claim {cid} cannot be rejected from status {status!r}")
+        await _tx_rows(
+            tx,
+            "MATCH (c:Claim {id:$id}) "
+            "SET c.status='rejected', c.source_status='rejected', "
+            "c.decided_at=$now, c.decision_note=$note",
+            {"id": cid, "now": now_iso(), "note": note},
+        )
+        return "rejected"
 
+    return await db.transactional_write(work)
 
+async def _tx_rows(tx, query: str, params: dict) -> list[dict]:
+    result = await tx.run(query, params)
+    rows = [record.data() for record in await result.fetch(50)]
+    await result.consume()
+    return rows
 async def record_connector_error(source: str, entity_id: str, error: Exception) -> str:
     """Persist a credential-free failed attempt so absence of claims is explainable downstream."""
     meta = source_metadata(source)

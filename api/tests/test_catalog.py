@@ -53,6 +53,36 @@ async def test_preview_and_confirmed_dry_run_are_schema_valid(catalog_env):
         assert not (tmp_path := catalog.settings.data_dir / "ndia-catalog.json").exists()
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"confirm": False, "confirmation": "PUBLISH EVENT 3", "confirmation_token": "x" * 20},
+        {"confirm": True, "confirmation": "publish", "confirmation_token": "x" * 20},
+        {"confirm": True, "confirmation": "PUBLISH EVENT 3", "confirmation_token": "short"},
+        {
+            "confirm": True,
+            "confirmation": "PUBLISH EVENT 3",
+            "confirmation_token": "x" * 20,
+            "unexpected": "server-only",
+        },
+    ],
+)
+async def test_malformed_submission_never_reaches_portal(catalog_env, monkeypatch, body):
+    calls = []
+
+    async def portal_request(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("malformed input must not reach the portal")
+
+    monkeypatch.setattr(catalog, "_portal_request", portal_request)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/catalog/ndia/submit", json=body)
+    assert response.status_code == 422
+    assert calls == []
+    assert "server-only" not in response.text
+
+
 async def test_missing_credential_fails_safe(catalog_env):
     preview = await catalog._preview("local")
     with pytest.raises(catalog.HTTPException) as exc:

@@ -62,7 +62,7 @@ _LAYER_LABELS = {"people": ["Person"], "countries": ["Location"], "categories": 
 
 @router.get("/graph/all")
 async def graph_all(people: bool = True, countries: bool = False, artifacts: bool = False, sources: bool = False, claims: bool = False,
-                    categories: bool = False, limit: int = Query(1500, le=5000)):
+                    categories: bool = False, limit: int = Query(1500, ge=1, le=5000)):
     """The whole graph, not one consumer's neighbourhood. A workspace holds several
     programs and the entities that supply them; the canvas shows all of it by default
     and narrows to a single consumer only when the user asks for that."""

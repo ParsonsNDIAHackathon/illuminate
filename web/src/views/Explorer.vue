@@ -100,7 +100,7 @@ async function applyRouteFocus() {
   const ids = String(route.query.focus || '').split(',').filter(Boolean)
   const vendor = String(route.query.vendor || '')
   if (vendor) {
-    if (ws.ws.root_id && !graph.nodes.has(ws.ws.root_id)) await graph.loadNeighbourhood(ws.ws.root_id, ws.depth, ws.ws.layers)
+    if (graph.focusId && !graph.nodes.has(graph.focusId)) await graph.loadNeighbourhood(graph.focusId, ws.depth, ws.ws.layers)
     // A report trace may reference people, locations, or evidence hidden by the normal workspace
     // layers. Merge those elements for the trace without changing the user's layer preferences.
     await graph.loadNeighbourhood(vendor, Math.max(2, ws.depth), {

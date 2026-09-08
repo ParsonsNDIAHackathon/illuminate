@@ -9,3 +9,4 @@
 - [Locked Python subprojects on Replit](locked-python-subprojects.md) — override Replit’s shared uv environment with an absolute subproject path for isolated locked builds.
 - [Seed evidence timestamps](seed-evidence-timestamps.md) — idempotent seed reruns must preserve retrieval time and track ingestion time separately.
 - [Headless phone viewport checks](headless-phone-viewports.md) — Chromium window sizing may crop rather than emulate sub-500px CSS viewports; use device metrics.
+- [Atomic claim decisions](atomic-claim-decisions.md) — terminal review state and its materialized graph effects must commit in one claim-locked transaction.

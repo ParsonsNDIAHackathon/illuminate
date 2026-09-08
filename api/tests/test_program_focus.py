@@ -3,6 +3,8 @@
 Programs share suppliers, so an unconfined walk crosses from one program into another
 through a shared supplier and the single-program view quietly becomes the whole graph.
 """
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -105,3 +107,57 @@ def test_workspace_holds_no_consumer(client):
     # a stale root in a saved workspace file is ignored rather than resurrected
     saved = client.put("/api/workspace", json={**{k: v for k, v in ws.items() if k != "defaults"}, "root_id": "ent_x"}).json()
     assert "root_id" not in saved
+
+
+async def test_seed_entry_completes_without_mutating_workspace_consumer(monkeypatch):
+    from illuminate.seed import seed
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    async def seed_program(*_args, **_kwargs):
+        return {
+            "root_id": "program-a",
+            "root_name": "Program A",
+            "primes": 1,
+            "subs": 1,
+        }
+
+    writes = []
+
+    async def write(query, params=None):
+        writes.append((query, params))
+
+    async def read(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(seed, "set_cache_dir", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(seed, "ensure_schema", noop)
+    monkeypatch.setattr(seed, "seed_catalog_lineage", noop)
+    monkeypatch.setattr(seed, "seed_program", seed_program)
+    monkeypatch.setattr(seed, "seed_cached_gdelt", noop)
+    monkeypatch.setattr(seed, "stats", lambda: noop())
+    monkeypatch.setattr(seed.db, "read", read)
+    monkeypatch.setattr(seed.db, "write", write)
+    monkeypatch.setattr(seed.db, "close_driver", noop)
+
+    args = SimpleNamespace(
+        offline=True,
+        reset=False,
+        keyword=["V-22"],
+        root_name="Program A",
+        since="2025-01-01",
+        until="2026-01-01",
+        primes=1,
+        subs=1,
+        agency="Department of Defense",
+        people=1,
+        skip_enrich=True,
+        scenario=False,
+    )
+
+    await seed.main_async(args)
+
+    metadata = next(params for query, params in writes if "SeedMetadata" in query)
+    assert metadata["root_id"] == "program-a"
+    assert metadata["status"] == "complete"

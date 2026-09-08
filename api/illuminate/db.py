@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
@@ -170,6 +171,22 @@ async def write(cypher: str, params: dict[str, Any] | None = None, timeout: floa
             return {"rows": rows, "counters": counters_dict(summary.counters)}
 
         return await s.execute_write(work)
+
+
+async def transactional_write(
+    work: Callable[[Any], Awaitable[Any]],
+    timeout: float | None = None,
+) -> Any:
+    """Run a multi-statement write as one retryable Neo4j transaction."""
+    from neo4j import unit_of_work
+
+    async with session(default_access_mode="WRITE") as s:
+
+        @unit_of_work(timeout=timeout or settings.cypher_write_timeout_s)
+        async def wrapped(tx):
+            return await work(tx)
+
+        return await s.execute_write(wrapped)
 
 
 async def dry_run(cypher: str, params: dict[str, Any] | None = None) -> dict[str, Any]:

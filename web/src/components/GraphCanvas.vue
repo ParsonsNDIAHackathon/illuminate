@@ -25,6 +25,7 @@ import { useWorkspace } from '../stores/workspace'
 import { applyStyleOps, clearStyleOps } from '../styles/styleOps'
 import { LABEL_COLORS } from '../styles/palette'
 import { relationshipFamily } from '../styles/relationshipFamilies'
+import { layerData, layerOf, layerVisible } from '../stores/graphLayers'
 
 cytoscape.use(fcose)
 cytoscape.use(cola)
@@ -142,7 +143,7 @@ function toElements() {
   const zoom = cy?.zoom() || 1
   const nodes = graph.nodeList.map(n => {
     const size = n.props?.kind === 'program' ? 56 : n.label === 'Entity' ? 34 : n.label === 'Person' ? 26 : 22
-    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, baseColor: baseColor(n), shape: shapeFor(n), size, simSize: size / zoom, simFont: 11 / zoom, simBorder: 3 / zoom, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
+    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, ...layerData(n), baseColor: baseColor(n), shape: shapeFor(n), size, simSize: size / zoom, simFont: 11 / zoom, simBorder: 3 / zoom, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
   })
   const edges = graph.edgeList.map(e => {
     const family = relationshipFamily(e.type)
@@ -229,7 +230,7 @@ function applyFindingFocus() {
   graph.setFocusUnavailable(graph.focusIds.filter(id => !graph.nodes.has(id) && !graph.edges.has(id)))
   const vendor = graph.focusVendorId
   if (!vendor || !graph.nodes.has(vendor)) return
-  const rootId = ws.ws.root_id
+  const rootId = graph.focusId
   const pathIds = new Set<string>([vendor])
   if (rootId && graph.nodes.has(rootId)) {
     stablePath(rootId, vendor, new Set(['SUPPLIES']), true).forEach(id => pathIds.add(id))
@@ -275,21 +276,12 @@ function keepSimulationVisible() {
 // The server names each node's layer (graphio.layer_of); the fallback mirrors it for nodes from
 // a route that predates the field. Artifacts split by kind: registry entries and source records
 // are "sources", documents (filings, news, awards, web pages) are "artifacts".
-const SOURCE_KINDS = new Set(['record', 'registry'])
-const LAYER_OF: Record<string, string> = { Person: 'people', Location: 'countries', Category: 'categories', Artifact: 'artifacts', Claim: 'claims' }
-const LAYER_DEFAULT: Record<string, boolean> = { people: true, countries: false, categories: false, artifacts: false, sources: false, claims: false }
-function layerOf(n: any): string | null {
-  if (n.layer !== undefined) return n.layer
-  if (n.label === 'Artifact') return SOURCE_KINDS.has(n.props?.kind || 'record') ? 'sources' : 'artifacts'
-  return LAYER_OF[n.label] || null
-}
 function applyLayers() {
   if (!cy) return
   const L = ws.ws.layers || {}
   cy.nodes().forEach(n => {
     const layer = n.data('layer')
-    const on = !layer || (L[layer] ?? LAYER_DEFAULT[layer])
-    n.toggleClass('layer-hide', !on)
+    n.toggleClass('layer-hide', !layerVisible(layer, L))
   })
 }
 

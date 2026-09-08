@@ -3,9 +3,10 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__, db, events
@@ -19,6 +20,8 @@ from .tools.permissions import gate
 from .routers import catalog, chat, claims, connectors, enrichment, exports, graph, permissions, query
 
 from .mcp_server import build_server
+
+
 class _MCPMount:
     """ASGI shim so the MCP transport (whose session manager runs once per
     lifespan) can be re-created each time the app starts — tests start it twice."""
@@ -58,7 +61,23 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Illuminate", version=__version__, lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(_request: Request, exc: RequestValidationError):
+    """Return useful field errors without reflecting rejected request values."""
+    detail = [
+        {key: error[key] for key in ("type", "loc", "msg") if key in error}
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 
 @app.get("/api/health", tags=["operations"])
