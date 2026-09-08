@@ -6,6 +6,7 @@
       <v-chip v-if="rep.identity.simulated" size="x-small" color="warning" variant="tonal">SIMULATED</v-chip>
       <v-chip v-if="rep.entity.flagged" size="x-small" color="error" variant="tonal">flagged</v-chip>
       <v-spacer />
+      <v-btn prepend-icon="mdi-compare-horizontal" :to="`/compare/vendors?left=${encodeURIComponent(props.id)}`">Compare</v-btn>
       <v-btn prepend-icon="mdi-graph" @click="openInGraph">Open in graph</v-btn>
       <v-btn prepend-icon="mdi-auto-fix" @click="enrich" :loading="enriching">Enrich</v-btn>
     </div>
