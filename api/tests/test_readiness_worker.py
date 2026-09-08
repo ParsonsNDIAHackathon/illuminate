@@ -550,14 +550,14 @@ async def test_readiness_never_treats_missing_retrieval_status_as_live(monkeypat
     assert source["unknown_records"] == 1
 
 
-def test_production_entrypoint_uses_live_recovery_not_fixtures():
+def test_production_entrypoint_uses_live_recovery_without_mandatory_fetch_cache():
     script = (Path(__file__).parents[2] / "scripts" / "replit-production.sh").read_text()
     assert "illuminate.seed.seed --bootstrap --skip-enrich" in script
     assert "--offline --scenario" not in script
     assert 'h.get("operational_refresh_required", True)' in script
-    assert "http://127.0.0.1:${PORT}" in script
-    assert "ILLUMINATE_FETCH_CACHE_REQUIRED=true" in script
-    assert "Verifying managed fetch-cache schema" in script
+    assert "ILLUMINATE_FETCH_CACHE_REQUIRED=true" not in script
+    assert "Verifying managed fetch-cache schema" not in script
+    assert "DATABASE_URL is required by the shared cache authority" not in script
 
 
 def test_development_entrypoint_recovers_and_verifies_retained_credentials():

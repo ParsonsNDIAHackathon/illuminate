@@ -22,5 +22,5 @@
 - [Judge-journey gates](judge-journey-gates.md) — rehearsal checks must assert conditional loaded outcomes through the browser origin, not static page chrome.
 - [Navigation context authority](navigation-context-authority.md) — mission scope and comparison mode are URL-owned so direct links and browser history reproduce the same decision state.
 - [Raw retrieval cache isolation](raw-retrieval-cache-isolation.md) — keep immutable payload storage outside any database reachable by analytical Cypher.
-- [Fetch-once cache scope](fetch-once-cache-scope.md) — production self-coordinates over loopback; task/dev live retrievals fail closed unless given their own authority.
+- [Optional fetch-once cache](fetch-once-cache-scope.md) — deployability must not depend on cache authority or managed PostgreSQL; ordinary live retrieval remains available.
 - [Guided result identity](guided-result-identity.md) — template result rows identify actual matches; returned subgraphs contain context and cannot safely name affected subjects.
