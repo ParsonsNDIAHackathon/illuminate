@@ -507,6 +507,21 @@ async def stats() -> dict:
     return {"nodes": {x["l"]: x["c"] for x in n}, "rels": {x["t"]: x["c"] for x in r}}
 
 
+async def mark_seed_started(args) -> None:
+    """Invalidate any prior completion stamp before reset or replay begins."""
+    await db.write(
+        "MERGE (m:SeedMetadata {id:'primary'}) "
+        "SET m.version=$version, m.status='running', m.started_at=$started, "
+        "m.completed_at=null, m.offline=$offline, m.scenario=$scenario",
+        {
+            "version": SEED_VERSION,
+            "started": now_iso(),
+            "offline": args.offline,
+            "scenario": args.scenario,
+        },
+    )
+
+
 async def main_async(args) -> None:
     global _seed_retrieval_mode, _seed_retrieval_trace
     bootstrap = bool(getattr(args, "bootstrap", False))
@@ -518,6 +533,7 @@ async def main_async(args) -> None:
     set_cache_dir(FIXTURES if args.offline else settings.data_dir / "http_cache",
                   read_only=args.offline, fixture_store=args.offline)
     await ensure_schema()
+    await mark_seed_started(args)
     if bootstrap:
         # Rehearsal-only overlays must never survive into the operational view.
         await db.write("MATCH ()-[r]->() WHERE coalesce(r.simulated,false)=true DELETE r")
