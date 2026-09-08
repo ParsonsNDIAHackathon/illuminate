@@ -27,9 +27,11 @@ const el = ref<HTMLElement>()
 const graph = useGraph()
 const ws = useWorkspace()
 let cy: Core | null = null
+let sameNameCollapsed: boolean | null = null
 const emit = defineEmits<{ (e: 'expand', id: string): void; (e: 'report', id: string): void }>()
 
 const EDGE_COLORS: Record<string, string> = { SUPPLIES: '#64748b', OWNS: '#ea580c', ULTIMATE_PARENT_OF: '#ea580c', HELD_ROLE: '#0f766e', BENEFICIAL_OWNER_OF: '#0f766e', PROVIDES: '#7c3aed', SUBCATEGORY_OF: '#7c3aed', INCORPORATED_IN: '#92400e', OPERATES_IN: '#92400e', MANUFACTURES_IN: '#b45309', PARENT_SEATED_IN: '#b45309', EVIDENCES: '#9ca3af', ASSERTS: '#be185d', TARGETS: '#be185d', ABOUT: '#9ca3af' }
+const SAME_NAME_COLLAPSE_ZOOM = 1
 
 function baseColor(n: any) {
   const t = ws.theme
@@ -46,6 +48,27 @@ function badgeFor(n: any) {
   if (p.simulated) bits.push('SIM')
   if (p.flagged) bits.push('⚑')
   return bits.join(' ')
+}
+
+/** Case-, accent- and punctuation-insensitive form: "Société L-3 Harris" → "societe l 3 harris". */
+function fold(s: string) { return s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim() }
+
+function sameNameCollapsedGroups() {
+  const beneficialOwnerIds = new Set(
+    graph.edgeList.filter(e => e.type === 'BENEFICIAL_OWNER_OF').map(e => e.source),
+  )
+  const nodesByTypeAndName = new Map<string, string[]>()
+  graph.nodeList.forEach(n => {
+    const isCollapsible = n.label === 'Entity' || (n.label === 'Person' && beneficialOwnerIds.has(n.id))
+    if (!isCollapsible) return
+    const name = fold(n.name || '')
+    if (!name) return
+    const key = `${n.label}:${name}`
+    const ids = nodesByTypeAndName.get(key) || []
+    ids.push(n.id)
+    nodesByTypeAndName.set(key, ids)
+  })
+  return [...nodesByTypeAndName.values()].filter(ids => ids.length > 1)
 }
 
 function styleSheet(): any[] {
@@ -79,6 +102,10 @@ function styleSheet(): any[] {
     { selector: '.q-dim', style: { opacity: 0.12, 'z-index': 0 } },
     { selector: 'node.q-match', style: { 'border-width': 3, 'border-color': dark ? '#fbbf24' : '#d97706', 'z-index': 20 } },
     { selector: 'edge.q-match', style: { width: 2.2, 'z-index': 20 } },
+    // Layout-only links pull same-name entities and owners together without drawing or merging them.
+    { selector: 'edge[?sameName]', style: { opacity: 0, width: 0, label: '', 'target-arrow-shape': 'none', events: 'no' } },
+    // At low zoom, only one node is painted while every grouped record and its edges share its position.
+    { selector: 'node.same-name-duplicate', style: { opacity: 0, label: '', events: 'no' } },
   ]
 }
 
@@ -86,7 +113,15 @@ function toElements() {
   const root = ws.ws.root_id
   const nodes = graph.nodeList.map(n => ({ group: 'nodes', data: { id: n.id, name: n.name, label: n.label, baseColor: baseColor(n), shape: shapeFor(n), size: n.props?.kind === 'program' ? 56 : n.label === 'Entity' ? 34 : n.label === 'Person' ? 26 : 22, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }))
   const edges = graph.edgeList.map(e => ({ group: 'edges', data: { id: e.id, source: e.source, target: e.target, type: e.type, color: EDGE_COLORS[e.type] || '#9ca3af', simulated: !!e.props?.simulated, label: e.type === 'SUPPLIES' && e.props?.tier ? `T${e.props.tier}${e.props.sole_source ? ' · sole' : ''}` : e.type === 'HELD_ROLE' ? (e.props?.title || '').slice(0, 18) : e.type === 'OWNS' && e.props?.pct ? `${e.props.pct}%` : '' } }))
-  return [...nodes, ...edges]
+  const sameNameEdges: any[] = []
+  sameNameCollapsedGroups().forEach(ids => {
+    const source = ids[0]
+    ids.slice(1).forEach((target, index) => sameNameEdges.push({
+      group: 'edges',
+      data: { id: `__same-name__${encodeURIComponent(source)}__${index}`, source, target, sameName: true, color: 'transparent', label: '' },
+    }))
+  })
+  return [...nodes, ...edges, ...sameNameEdges]
 }
 
 function sync() {
@@ -105,6 +140,7 @@ function sync() {
     stopLive()
   }
   restyle()
+  applyZoomGrouping(true)
 }
 function restyle() { if (!cy) return; clearStyleOps(cy); applyStyleOps(cy, graph.styleOps, ws.theme); applyFilter(); applyLayers() }
 
@@ -152,8 +188,35 @@ function seedNearNeighbours(ids: string[]) {
   }
 }
 
-/** Case-, accent- and punctuation-insensitive form: "Société L-3 Harris" → "societe l 3 harris". */
-function fold(s: string) { return s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim() }
+function applyZoomGrouping(force = false) {
+  if (!cy) return
+  const collapse = cy.zoom() < SAME_NAME_COLLAPSE_ZOOM
+  if (!force && collapse === sameNameCollapsed) return
+  const wasCollapsed = sameNameCollapsed
+  sameNameCollapsed = collapse
+  sameNameCollapsedGroups().forEach(ids => {
+    const members = ids.map(id => cy!.getElementById(id)).filter(n => n.nonempty())
+    if (members.length < 2) return
+    if (collapse) {
+      const position = members[0].position()
+      members.forEach((node, index) => {
+        node.position(position)
+        node.lock()
+        node.toggleClass('same-name-duplicate', index > 0)
+      })
+    } else {
+      const center = members[0].position()
+      members.forEach((node, index) => {
+        const angle = (Math.PI * 2 * index) / members.length
+        node.removeClass('same-name-duplicate')
+        node.unlock()
+        node.position({ x: center.x + Math.cos(angle) * 24, y: center.y + Math.sin(angle) * 24 })
+      })
+    }
+  })
+  if (wasCollapsed && !collapse) startLive()
+}
+
 /** Everything searchable about a node, folded: name, label and every scalar prop (UEI, CAGE, aliases, country…). */
 function haystack(n: any) {
   const parts = [n.name, n.label, ...Object.values(n.props || {}).filter(v => typeof v === 'string' || typeof v === 'number')]
@@ -182,7 +245,7 @@ function layout(fit = true) {
   stopLive()
   // A fresh canvas has every node at the origin; fcose must randomise from there or it collapses to a line.
   const l = cy.layout({ name: 'fcose', animate: true, animationDuration: 400, randomize: fit, fit, padding: 40, nodeRepulsion: () => 9000, idealEdgeLength: () => 90, quality: 'default' } as any)
-  l.one('layoutstop', () => startLive())
+  l.one('layoutstop', () => { applyZoomGrouping(true); startLive() })
   l.run()
 }
 function fit() { cy?.fit(undefined, 40) }
@@ -194,6 +257,7 @@ onMounted(() => {
   cy.on('tap', 'edge', (ev) => graph.selectEdge(ev.target.id()))
   cy.on('tap', (ev) => { if (ev.target === cy) { graph.select(null); graph.selectEdge(null) } })
   cy.on('dbltap', 'node', (ev) => { const n = graph.nodes.get(ev.target.id()); if (n && (n.label === 'Entity' || n.label === 'Person')) emit('expand', ev.target.id()) })
+  cy.on('zoom', () => applyZoomGrouping())
   sync()
 })
 onBeforeUnmount(() => { stopLive(); cy?.destroy() })
