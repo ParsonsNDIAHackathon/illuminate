@@ -15,8 +15,13 @@ findings, incremental retrieval, provenance, simulation handling, and the
 planned NDIA catalog contribution.
 
 **New contributor? Follow the [contributor onboarding guide](docs/ONBOARDING.md)**
-to create a task, work in a branch, open a merge request, and run Illuminate
+to create a task, work in a branch, open a pull request, and run Illuminate
 locally.
+
+GitHub `origin/main` is the canonical shared history. Before starting work on a
+clean Replit `main`, run `make sync-pre`. After reviewed, validated work reaches
+Replit `main`, run `make sync-publish`; see the
+[main-branch synchronization policy](docs/ONBOARDING.md#keep-replit-main-and-github-main-synchronized).
 
 Requires Docker and `make`. For the host-side dev loop (hot reload) you also need
 Python ≥ 3.12 and Node ≥ 20.

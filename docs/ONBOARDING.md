@@ -1,7 +1,7 @@
 # Illuminate contributor onboarding
 
 This guide takes a new contributor from a well-defined project task through a
-reviewed GitLab merge request (MR, also commonly called a pull request or PR).
+reviewed GitHub pull request (PR).
 It also explains how to run Illuminate and verify a change locally. No API
 credentials are required for the standard development workflow.
 
@@ -14,10 +14,10 @@ Use one task for one reviewable outcome:
 3. Make only the changes needed for that task.
 4. Validate the complete change locally.
 5. Commit and push the branch.
-6. Open a merge request, respond to review, and merge it.
+6. Open a pull request, respond to review, and merge it.
 7. Confirm the task is complete and remove the branch.
 
-Avoid combining unrelated fixes in one task or MR. Smaller changes are easier to
+Avoid combining unrelated fixes in one task or PR. Smaller changes are easier to
 review, test, merge, and reverse.
 
 ## Create a project task
@@ -60,17 +60,70 @@ git status
 git branch --show-current
 ```
 
-If you are working manually, update `main` and create a short, descriptive
+If you are working manually, synchronize `main` and create a short, descriptive
 branch:
 
 ```bash
 git switch main
-git pull --ff-only origin main
+make sync-pre
 git switch -c feature/<short-task-name>
 ```
 
 Use prefixes such as `feature/`, `fix/`, or `docs/`. Never develop directly on
 `main`, and do not mix changes from another task into the branch.
+
+## Keep Replit main and GitHub main synchronized
+
+GitHub `origin/main` is the canonical shared history, and the Replit workspace's
+local `main` must track it. Synchronization is intentionally separate from app
+startup, deployment, and post-merge dependency installation: an unattended
+runtime must never publish source changes.
+
+Use these checkpoints:
+
+```bash
+make sync-pre       # before task work; fetch and fast-forward only, never push
+make sync-publish   # after merge, review, and validation; may push local main
+make test-sync-main # exercise the policy against disposable local repositories
+```
+
+Both sync modes fetch `origin/main` first and require a clean, checked-out
+`main` whose upstream is `origin/main`. Their behavior is:
+
+- **Equal:** report the shared commit; rerunning is safe.
+- **Remote ahead:** fast-forward local `main` without creating a merge commit.
+- **Local ahead:** `sync-pre` reports that publishing remains; `sync-publish`
+  pushes the reviewed commits without force.
+- **Diverged:** stop. Inspect both histories, merge `origin/main` into local
+  `main` without rebasing, resolve conflicts deliberately, and validate the
+  result before rerunning. The command never discards either side or resolves
+  semantic conflicts automatically.
+- **Dirty tree or wrong branch:** stop. Commit intended task work on its isolated
+  branch or stash it; do not let synchronization absorb unrelated files.
+- **Fetch/authentication failure:** stop without changing history. In Replit,
+  make sure GitHub access is authorized for this repository; locally, use your
+  normal GitHub credential helper or SSH setup. Never put a token in the remote
+  URL or commit credentials.
+- **Rejected push:** preserve the local commits. Branch protection, required
+  reviews, or required checks may prohibit direct updates; use the repository's
+  pull-request workflow and rerun the check after GitHub accepts the change.
+  Never bypass protection with a force-push.
+
+Before final integration, fetch again because another task may have merged while
+you worked. Review `git status --short` and `git diff --cached`, commit only
+intended files, run all applicable validation, merge through the required review
+path, then run `make sync-publish` from Replit `main`.
+
+Verify agreement at any time with:
+
+```bash
+git fetch origin main
+test "$(git rev-parse main)" = "$(git rev-parse origin/main)"
+git status --short --branch
+```
+
+The first command must succeed, the comparison must exit zero, and status should
+show a clean `main` tracking `origin/main` with no ahead/behind count.
 
 ## Make and validate the change
 
@@ -112,21 +165,20 @@ git push -u origin HEAD
 Use a concise, imperative commit subject. Do not use `git add .` without first
 checking `git status`, because it can stage unrelated or sensitive files.
 
-## Open the merge request
+## Open the pull request
 
-The upstream repository is hosted on GitLab, where pull requests are called
-**merge requests**. After pushing, open the GitLab link printed by Git or:
+The upstream repository is hosted on GitHub. After pushing:
 
-1. Open the Illuminate project in GitLab.
-2. Choose **Merge requests** → **New merge request**.
+1. Open the Illuminate project in GitHub.
+2. Choose **Pull requests** → **New pull request**.
 3. Select your branch as the source and `main` as the target.
-4. Use the project task title as the MR title.
+4. Use the project task title as the PR title.
 5. In the description, explain the change, how it was validated, and any known
    limitations. Link the project task when a link is available.
 6. Review the **Changes** tab yourself before requesting review.
-7. Create the MR and assign the appropriate reviewer.
+7. Create the PR and assign the appropriate reviewer.
 
-A useful MR description is:
+A useful PR description is:
 
 ```markdown
 ## Summary
@@ -141,7 +193,7 @@ A useful MR description is:
 - Known limitations, follow-up work, or “None”
 ```
 
-Do not paste secrets, personal data, or private logs into the MR. If the change
+Do not paste secrets, personal data, or private logs into the PR. If the change
 includes screenshots, check them for credentials and personal information.
 
 ## Review, merge, and close the task
@@ -151,10 +203,10 @@ includes screenshots, check them for credentials and personal information.
   edits.
 - Resolve discussions only after the concern is addressed or agreed upon.
 - Merge only when required checks and approvals pass.
-- After merge, verify the MR reached `main`, delete the source branch, and mark
+- After merge, verify the PR reached `main`, delete the source branch, and mark
   the project task complete.
 - Create a separate follow-up task for valid work that is outside the current
-  task rather than silently expanding the MR.
+  task rather than silently expanding the PR.
 
 ## Before you run the application
 

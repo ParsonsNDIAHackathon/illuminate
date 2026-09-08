@@ -6,7 +6,7 @@ NAME    ?=
 export HOST_UID := $(shell id -u)
 export HOST_GID := $(shell id -g)
 
-.PHONY: help up down dev seed backup restore backups
+.PHONY: help up down dev seed backup restore backups sync-pre sync-publish test-sync-main
 
 help:
 	@echo "make up                 start everything in containers (web :8080, api :8000, neo4j :7474)"
@@ -16,6 +16,9 @@ help:
 	@echo "make backup [NAME=x]    stop neo4j, archive neo4j volume + api/data to backups/, restart neo4j"
 	@echo "make restore BACKUP=x   replace neo4j volume + api/data from backups/x (or BACKUP=latest)"
 	@echo "make backups            list archives in backups/"
+	@echo "make sync-pre           fetch and safely fast-forward canonical main; never push"
+	@echo "make sync-publish       fetch, reconcile, and publish reviewed canonical main"
+	@echo "make test-sync-main     test synchronization using disposable local repositories"
 
 up:
 	$(COMPOSE) up --build -d
@@ -51,3 +54,12 @@ restore:
 backups:
 	@ls -lh backups/*.tgz 2>/dev/null || echo "no backups yet — run make backup"
 	@[ ! -f backups/.latest ] || echo "latest: $$(cat backups/.latest)"
+
+sync-pre:
+	@scripts/sync-main.sh --check
+
+sync-publish:
+	@scripts/sync-main.sh --publish
+
+test-sync-main:
+	@scripts/test-sync-main.sh
