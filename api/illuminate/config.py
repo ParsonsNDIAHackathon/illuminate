@@ -15,7 +15,11 @@ class Settings(BaseSettings):
     """Process-level settings. Everything here comes from the environment; per-user
     things (API keys, model choice, permission mode) live in the data dir."""
 
-    model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
+    # Two dotenv paths, relative to the working directory. The host dev loop runs from
+    # api/, so "../.env" is the repo-root file compose also reads — one place to set
+    # NEO4J_PASSWORD for both. An optional api/.env overrides it, and real environment
+    # variables (what compose passes the container) override both.
+    model_config = SettingsConfigDict(env_prefix="", env_file=("../.env", ".env"), extra="ignore")
 
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
