@@ -55,35 +55,14 @@
           </v-window-item>
 
           <v-window-item value="document">
-            <div v-if="docLoading" class="py-6 text-center"><v-progress-circular indeterminate size="24" /><div class="text-caption mt-2">fetching the source document…</div></div>
-            <template v-else-if="doc">
-              <div class="d-flex align-center ga-2 mb-2 flex-wrap">
-                <v-chip size="x-small" variant="tonal">{{ doc.content_type || doc.status }}</v-chip>
-                <span v-if="doc.bytes" class="text-caption">{{ (doc.bytes / 1024).toFixed(0) }} KB</span>
-                <span v-if="doc.retrieved_at" class="text-caption">fetched {{ String(doc.retrieved_at).slice(0, 10) }}</span>
-                <v-spacer />
-                <v-btn-toggle v-if="doc.render === 'html'" v-model="htmlView" density="compact" variant="outlined" mandatory>
-                  <v-btn value="rendered" size="x-small">Rendered</v-btn>
-                  <v-btn value="text" size="x-small">Text</v-btn>
-                </v-btn-toggle>
-                <v-btn v-if="doc.url" size="x-small" variant="text" :href="doc.url" target="_blank" rel="noopener" append-icon="mdi-open-in-new" @click="openFrame($event, doc.url)">open source</v-btn>
-              </div>
-
-              <iframe v-if="doc.render === 'html' && htmlView === 'rendered'" class="frame" sandbox="" referrerpolicy="no-referrer" :srcdoc="doc.html" title="Source document" />
-              <pre v-else-if="doc.render === 'html'" class="doc">{{ doc.text || '(no text content)' }}</pre>
-              <embed v-else-if="doc.render === 'pdf'" class="frame" :src="fileUrl" type="application/pdf" />
-              <img v-else-if="doc.render === 'image'" :src="fileUrl" class="shot" alt="Source document" />
-              <pre v-else-if="doc.render === 'text'" class="doc">{{ doc.text }}</pre>
-              <p v-else-if="doc.render === 'binary'" class="text-body-2" style="opacity:.75">{{ doc.note }}</p>
-
-              <p v-if="doc.truncated || doc.text_truncated || doc.capped" class="text-caption mt-2" style="opacity:.6">
-                Document truncated for display — open the source link for the whole of it.
-              </p>
-              <p v-if="doc.status !== 'ok'" class="text-body-2" style="opacity:.75">
-                {{ doc.note }}
-                <a v-if="doc.url" :href="doc.url" target="_blank" rel="noopener" class="ml-1" @click="openFrame($event, doc.url)">open the source page ↗</a>
-              </p>
-            </template>
+            <SourceDocument :doc="doc" :file-url="fileUrl" :loading="docLoading">
+              <template #actions>
+                <v-btn v-if="doc?.url" size="x-small" variant="text" :href="doc.url" target="_blank" rel="noopener" append-icon="mdi-open-in-new" @click="openFrame($event, doc.url)">open source</v-btn>
+              </template>
+              <template #fallback-link>
+                <a v-if="doc?.url" :href="doc.url" target="_blank" rel="noopener" class="ml-1" @click="openFrame($event, doc.url)">open the source page ↗</a>
+              </template>
+            </SourceDocument>
           </v-window-item>
 
           <v-window-item value="raw">
@@ -114,6 +93,7 @@
 import { computed, ref, watch } from 'vue'
 import { api } from '../api/client'
 import SourceFrame from './SourceFrame.vue'
+import SourceDocument from './SourceDocument.vue'
 import { useSourceFrame } from '../composables/sourceFrame'
 const props = defineProps<{ artifactId: string | null }>()
 const { frameUrl, openFrame } = useSourceFrame()
@@ -121,7 +101,7 @@ defineEmits<{ (e: 'close'): void }>()
 
 const data = ref<any>(null); const loading = ref(false); const error = ref('')
 const doc = ref<any>(null); const docLoading = ref(false)
-const tab = ref('details'); const htmlView = ref<'rendered' | 'text'>('rendered')
+const tab = ref('details')
 const art = computed(() => data.value?.artifact)
 const fileUrl = computed(() => `/api/artifacts/${encodeURIComponent(props.artifactId || '')}/file`)
 
@@ -156,9 +136,5 @@ h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity:
 dl { display: grid; grid-template-columns: 190px 1fr; gap: 3px 12px; margin: 0; font-size: 13px; }
 dt { opacity: .6; } dd { margin: 0; overflow-wrap: anywhere; }
 .warn { color: rgb(var(--v-theme-warning)); font-weight: 600; }
-.json, .doc { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.45; max-height: 420px; overflow: auto; padding: 10px 12px; border-radius: 6px; background: rgba(128, 128, 128, .12); }
-.json { white-space: pre; }
-.doc { white-space: pre-wrap; max-height: 62vh; }
-.frame { width: 100%; height: 62vh; border: 1px solid rgba(128, 128, 128, .3); border-radius: 6px; background: #fff; }
-.shot { max-width: 100%; border-radius: 6px; }
+.json { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.45; max-height: 420px; overflow: auto; padding: 10px 12px; border-radius: 6px; background: rgba(128, 128, 128, .12); white-space: pre; }
 </style>
