@@ -14,6 +14,54 @@ HOME = "US"
 SEVERITY_WEIGHT = {"high": 3.0, "medium": 2.0, "low": 1.0, "clear": 0.0}
 
 
+"""How far up a control chain the ultimate-parent walk will go before giving up."""
+ULTIMATE_PARENT_DEPTH = 6
+
+
+async def ultimate_parents(entity_id: str) -> list[dict]:
+    """Who ultimately controls this entity, derived rather than asserted.
+
+    Nothing in the graph declares an ultimate parent — an :ULTIMATE_PARENT_OF edge only ever
+    arrives when a registry (GLEIF) states one outright. The answer is the root of the control
+    chain, so it is found by walking OWNS upstream to an owner nobody owns. That is what makes
+    an ownership risk *discoverable*: the chain is the evidence, and a party that only appears
+    two or three hops up is exactly the one a single-hop lookup would miss.
+
+    Simulation status propagates down the chain: a derived parent is simulated if any hop or
+    node along the path to it is. The path itself is returned as provenance, and every element
+    id on it goes into `relationship_ids` so a report can highlight the whole chain.
+    """
+    rows = await db.read(
+        f"""
+        MATCH path=(up:Entity)-[:OWNS|ULTIMATE_PARENT_OF*1..{ULTIMATE_PARENT_DEPTH}]->(e:Entity {{id:$id}})
+        WHERE up.id <> $id AND NOT EXISTS {{ (:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(up) }}
+        WITH up, path, relationships(path) AS hops, nodes(path) AS chain
+        // Shortest first: the nearest root wins when a node is reachable by several routes.
+        ORDER BY length(path), up.name
+        WITH up, head(collect({{hops: hops, chain: chain}})) AS best
+        RETURN up.id AS id, up.name AS name,
+               coalesce(up.simulated, false) AS simulated,
+               size(best.hops) AS hops,
+               [h IN best.hops | coalesce(h.id, elementId(h))] AS relationship_ids,
+               [n IN best.chain | n.name] AS chain,
+               coalesce(head(best.hops).id, elementId(head(best.hops))) AS relationship_id,
+               any(h IN best.hops WHERE coalesce(h.simulated, false))
+                 OR any(n IN best.chain WHERE coalesce(n.simulated, false)) AS relationship_simulated,
+               head([h IN best.hops WHERE h.claim_id IS NOT NULL | h.claim_id]) AS claim_id,
+               head([h IN best.hops WHERE h.source IS NOT NULL | h.source]) AS source,
+               head([h IN best.hops WHERE h.source_url IS NOT NULL | h.source_url]) AS source_url
+        ORDER BY hops, name
+        """,
+        {"id": entity_id},
+    )
+    for row in rows:
+        # A single stated hop is the registry's claim; anything longer is our inference, and the
+        # report should say so rather than borrow the top link's source as if it named the parent.
+        if row["hops"] > 1:
+            row["source"] = f"derived: ownership chain via {' → '.join(row['chain'][1:-1])}" if len(row["chain"]) > 2 else "derived: ownership chain"
+    return [r for r in rows if r.get("id")]
+
+
 async def entity_core(entity_id: str) -> dict | None:
     rows = await db.read(
         """
@@ -22,7 +70,6 @@ async def entity_core(entity_id: str) -> dict | None:
         OPTIONAL MATCH (e)-[:PARENT_SEATED_IN]->(seat:Location)
         OPTIONAL MATCH (e)-[:MANUFACTURES_IN]->(mfg:Location)
         OPTIONAL MATCH (e)-[:OPERATES_IN]->(ops:Location)
-        OPTIONAL MATCH (up:Entity)-[:ULTIMATE_PARENT_OF]->(e)
         OPTIONAL MATCH (dp:Entity)-[o:OWNS]->(e)
         OPTIONAL MATCH (e)-[:PROVIDES]->(c:Category)
         RETURN e{.*} AS e,
@@ -30,7 +77,6 @@ async def entity_core(entity_id: str) -> dict | None:
                seat{.code,.name} AS parent_seat,
                collect(DISTINCT mfg{.code,.name}) AS manufactures,
                collect(DISTINCT ops{.code,.name}) AS operates,
-               collect(DISTINCT up{.id,.name}) AS ultimate_parents,
                collect(DISTINCT {id: dp.id, name: dp.name, pct: o.pct}) AS direct_parents,
                collect(DISTINCT c{.id,.name,.kind}) AS categories
         LIMIT 1
@@ -41,7 +87,7 @@ async def entity_core(entity_id: str) -> dict | None:
         return None
     r = rows[0]
     r["direct_parents"] = [d for d in r["direct_parents"] if d.get("id")]
-    r["ultimate_parents"] = [d for d in r["ultimate_parents"] if d and d.get("id")]
+    r["ultimate_parents"] = await ultimate_parents(entity_id)
     r["manufactures"] = [d for d in r["manufactures"] if d and d.get("code")]
     r["operates"] = [d for d in r["operates"] if d and d.get("code")]
     r["categories"] = [d for d in r["categories"] if d and d.get("id")]
@@ -239,8 +285,13 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
     if seat:
         foreign = not seat.upper().startswith(HOME)
         detail = f"Ultimate parent seated in {seat}" + (f" — {ups[0]['name']}" if ups else "")
+        # The whole chain, not just its endpoints: highlighting a derived parent is only
+        # meaningful if the hops that lead to it light up with it.
+        ownership_ids = list(dict.fromkeys(
+            i for u in ups for i in (u.get("id"), *(u.get("relationship_ids") or ())) if i
+        ))
         inds.append(_ind("ownership", "Foreign ultimate parent" if foreign else "Domestic ultimate parent", "high" if foreign else "clear",
-                         e.get("ownership_source") or "GLEIF", detail, ids=[u["id"] for u in ups]))
+                         e.get("ownership_source") or "GLEIF", detail, ids=ownership_ids))
     elif ups:
         inds.append(_ind("ownership", "Ultimate parent known, jurisdiction unresolved", "low", "GLEIF", ups[0]["name"], ids=[ups[0]["id"]]))
     elif core.get("direct_parents"):
