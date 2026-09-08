@@ -22,16 +22,19 @@ from __future__ import annotations
 import html as htmllib
 import json
 import re
+import time
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 
 import httpx
 
+from .config import settings
 from .connectors.http import HttpError, fetch_document
 from .connectors.usaspending import is_sole_source
 
 MAX_HTML = 400_000
 MAX_TEXT = 80_000
+FRAME_TTL = 6 * 3600
 
 # Source pages that are a JavaScript shell — fetching them yields no document.
 NO_DOCUMENT = {
@@ -40,6 +43,36 @@ NO_DOCUMENT = {
     "sam.gov": "SAM.gov renders in the browser and refuses server-side fetches. The registration on the Details tab is the record.",
     "finnhub.io": "A quote is an API value rather than a page. The record on the Details tab is the document.",
 }
+
+# Whether a page lets itself be embedded, remembered per URL: X-Frame-Options and CSP
+# frame-ancestors are enforced by the browser, which reports nothing back to the page, so a
+# refusing site is a blank frame the UI cannot detect. Asking here is the only way to know.
+# Kept per URL rather than per host because the two differ — sam.gov refuses its front page
+# and allows an entity page.
+_frame_seen: dict[str, tuple[bool, float]] = {}
+
+
+async def frameable(url: str) -> bool:
+    """Can a browser embed this page? Conservative: a policy we cannot read as open is a no."""
+    seen = _frame_seen.get(url)
+    if seen and time.time() - seen[1] < FRAME_TTL:
+        return seen[0]
+    ok = False
+    try:
+        hdrs = {"User-Agent": settings.illuminate_user_agent, "Accept": "text/html,*/*"}
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            # Streamed so only the headers cross the wire; some hosts refuse HEAD outright.
+            async with client.stream("GET", url, headers=hdrs) as r:
+                xfo = (r.headers.get("x-frame-options") or "").lower()
+                csp = (r.headers.get("content-security-policy") or "").lower()
+                anc = re.search(r"frame-ancestors([^;]*)", csp)
+                ok = (r.status_code < 400
+                      and "deny" not in xfo and "sameorigin" not in xfo
+                      and (anc is None or "*" in anc.group(1)))
+    except Exception:  # unreachable, TLS, DNS — nothing to frame either way
+        ok = False
+    _frame_seen[url] = (ok, time.time())
+    return ok
 
 
 # --- paths and formatting ---------------------------------------------------------
@@ -601,15 +634,19 @@ async def document(props: dict) -> dict:
         host = (httpx.URL(url).host or "").lower()
     except Exception:
         return {"status": "unavailable", "url": url, "note": "The artifact's URL could not be parsed."}
+    # With no document to show, the UI's remaining option is to frame the live page — so
+    # say whether that will work rather than leaving it to render an empty frame.
     for suffix, note in NO_DOCUMENT.items():
         if host == suffix or host.endswith("." + suffix):
-            return {"status": "unavailable", "url": url, "note": note}
+            return {"status": "unavailable", "url": url, "note": note, "frameable": await frameable(url)}
     try:
         doc = await fetch_document(url)
     except HttpError as e:
-        return {"status": "error", "url": url, "note": f"The source would not serve the document: {e}"}
+        return {"status": "error", "url": url, "note": f"The source would not serve the document: {e}",
+                "frameable": await frameable(url)}
     except Exception as e:  # network down, DNS, TLS
-        return {"status": "error", "url": url, "note": f"Could not fetch the source document: {e}"}
+        return {"status": "error", "url": url, "note": f"Could not fetch the source document: {e}",
+                "frameable": await frameable(url)}
 
     ctype = doc["content_type"]
     mime = ctype.split(";")[0].strip()

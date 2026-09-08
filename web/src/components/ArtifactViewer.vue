@@ -37,21 +37,7 @@
                 <span v-for="c in data.claims" :key="c.id" class="mr-2">{{ c.predicate }}<span v-if="c.status !== 'committed'"> ({{ c.status }})</span></span>
               </div>
             </section>
-            <section v-for="(sec, i) in data.summary?.sections || []" :key="i">
-              <h4>{{ sec.title }}</h4>
-              <div v-if="sec.source_note" class="text-caption mb-1" style="opacity:.6">{{ sec.source_note }}</div>
-              <dl>
-                <template v-for="f in sec.fields" :key="f.label">
-                  <dt>{{ f.label }}</dt>
-                  <dd>
-                    <a v-if="f.href" :href="f.href" target="_blank" rel="noopener" @click="openFrame($event, f.href)">{{ f.value }}</a>
-                    <span v-else :class="f.emphasis === 'warn' ? 'warn' : ''">{{ f.value }}</span>
-                  </dd>
-                </template>
-              </dl>
-              <div v-if="sec.note" class="text-caption mt-1" style="opacity:.6">{{ sec.note }}</div>
-            </section>
-            <p v-if="!data.summary?.sections?.length" class="text-body-2" style="opacity:.7">This artifact carries no fields beyond its id.</p>
+            <ArtifactSummary :summary="data.summary" />
           </v-window-item>
 
           <v-window-item value="document">
@@ -94,6 +80,7 @@ import { computed, ref, watch } from 'vue'
 import { api } from '../api/client'
 import SourceFrame from './SourceFrame.vue'
 import SourceDocument from './SourceDocument.vue'
+import ArtifactSummary from './ArtifactSummary.vue'
 import { useSourceFrame } from '../composables/sourceFrame'
 const props = defineProps<{ artifactId: string | null }>()
 const { frameUrl, openFrame } = useSourceFrame()
