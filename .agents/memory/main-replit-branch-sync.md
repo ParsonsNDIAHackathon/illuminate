@@ -38,7 +38,8 @@ refreshes, while task-completion rebases can change the candidate commit history
 
 **How to apply:** Wait for active integrations to settle, use the platform conflict
 flow during completion, then rerun validation and GitHub synchronization against
-the rebased candidate. Never try to make the integration ref authoritative locally.
+the rebased candidate. Check the reflog before repeating an apparently vanished
+merge, and never try to make the integration ref authoritative locally.
 
 Treat any credential-delivery channel as readable by the whole Git process tree,
 not just the intended credential prompt.
