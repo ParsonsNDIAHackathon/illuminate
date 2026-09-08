@@ -20,7 +20,8 @@ import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 import { applyStyleOps, clearStyleOps } from '../styles/styleOps'
 import { nodeSize, supplierTiers } from '../styles/nodeSize'
-import { edgeColor, fillFor, glyphScaleFor, glyphYFor, iconFor, layerOf, shapeFor } from '../styles/nodeTypes'
+import { edgeColor, fillFor, glyphScaleFor, glyphYFor, iconFor, shapeFor } from '../styles/nodeTypes'
+import { hiddenNodeIds, layerData } from '../stores/graphLayers'
 
 cytoscape.use(fcose)
 cytoscape.use(cola)
@@ -86,7 +87,7 @@ function toElements() {
   const tiers = supplierTiers(graph.edgeList, graph.nodeList)
   const nodes = graph.nodeList.map(n => {
     const tier = tiers.get(n.id)
-    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, layer: layerOf(n), baseColor: fillFor(n, ws.theme), shape: shapeFor(n), icon: iconFor(n), glyphScale: glyphScaleFor(n), glyphY: glyphYFor(n), size: nodeSize(n, tier), tier, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
+    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, ...layerData(n), baseColor: fillFor(n, ws.theme), shape: shapeFor(n), icon: iconFor(n), glyphScale: glyphScaleFor(n), glyphY: glyphYFor(n), size: nodeSize(n, tier), tier, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
   })
   const edges = graph.edgeList.map(e => ({ group: 'edges', data: { id: e.id, source: e.source, target: e.target, type: e.type, color: edgeColor(e.type, ws.theme), simulated: !!e.props?.simulated, label: e.type === 'SUPPLIES' && e.props?.tier ? `T${e.props.tier}${e.props.sole_source ? ' · sole' : ''}` : e.type === 'HELD_ROLE' ? (e.props?.title || '').slice(0, 18) : e.type === 'OWNS' && e.props?.pct ? `${e.props.pct}%` : '' } }))
   return [...nodes, ...edges]
@@ -114,15 +115,17 @@ function restyle() { if (!cy) return; clearStyleOps(cy); applyStyleOps(cy, graph
 // Layer toggles gate what the server sends, but nodes can arrive by other routes (chat results,
 // generated Cypher, an API that predates the flag). The canvas enforces the toggles too, so an
 // unchecked layer is never drawn. Edges to hidden nodes are hidden by Cytoscape automatically.
-const LAYER_DEFAULT: Record<string, boolean> = { people: true, countries: false, categories: false, artifacts: false, sources: false, claims: false }
+// The server names each node's layer (graphio.layer_of); the fallback mirrors it for nodes from
+// a route that predates the field. Artifacts split by kind: registry entries and source records
+// are "sources", documents (filings, news, awards, web pages) are "artifacts".
+// Entities have no layer and are always fetched, so an organization that is in the graph only
+// through a hidden person would be left floating; graphLayers.hiddenNodeIds prunes those, and
+// with the "indirect orgs" toggle off it prunes every organization no entity chain joins to a
+// program or the root.
 function applyLayers() {
   if (!cy) return
-  const L = ws.ws.layers || {}
-  cy.nodes().forEach(n => {
-    const layer = n.data('layer')
-    const on = !layer || (L[layer] ?? LAYER_DEFAULT[layer])
-    n.toggleClass('layer-hide', !on)
-  })
+  const hidden = hiddenNodeIds(graph.nodeList, graph.edgeList, ws.ws.layers || {}, graph.focusId ? [graph.focusId] : [])
+  cy.nodes().forEach(n => n.toggleClass('layer-hide', hidden.has(n.id())))
 }
 
 // Layout strategy: fcose arranges a fresh canvas (it is the better static layout), then cola takes
