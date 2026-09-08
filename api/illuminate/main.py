@@ -16,7 +16,7 @@ from .routers.deps import user_id
 from .routers import settings as settings_router
 from .schema import ensure_schema
 from .tools.permissions import gate
-from .routers import chat, claims, connectors, enrichment, exports, graph, permissions, query
+from .routers import catalog, chat, claims, connectors, enrichment, exports, graph, permissions, query
 
 from .mcp_server import build_server
 
@@ -67,7 +67,8 @@ async def health(refresh: bool = False, user: str = Depends(user_id)):
     """Reusable readiness contract; always safe to expose and never returns secrets."""
     return await build_readiness(user, refresh=refresh)
 
-for r in (graph.router, query.router, permissions.router, claims.router, enrichment.router, connectors.router, exports.router, settings_router.router, chat.router):
+
+for r in (graph.router, query.router, permissions.router, claims.router, enrichment.router, connectors.router, exports.router, catalog.router, settings_router.router, chat.router):
     app.include_router(r)
 
 app.mount("/mcp", _mcp_mount)

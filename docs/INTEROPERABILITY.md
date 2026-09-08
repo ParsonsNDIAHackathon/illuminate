@@ -5,11 +5,11 @@ interface or its Neo4j representation. This guide describes how partner teams
 should consume the planned public export contract while preserving provenance,
 classification, quality, and simulation state.
 
-> **Implementation status:** the versioned export and NDIA catalog publisher are
-> planned work. Treat the paths and payloads below as consumption patterns, not
-> as a claim that those endpoints are available in the current build. Use the
-> running deployment's OpenAPI document and published export schema as the
-> authority.
+> **Implementation status:** the versioned export and human-confirmed NDIA
+> catalog publisher are available. The publisher validates the official event-3
+> dataset metadata shape and supports a dry run until organizer-provided write
+> endpoints and a public deployment URL are configured. Use the running
+> deployment's OpenAPI document and published export schema as the authority.
 
 ## Best-fit consumer journeys
 
@@ -153,13 +153,13 @@ Ownership and screening are supplemented by challenge-named or public sources
 including OpenCorporates, GLEIF, SEC EDGAR, LittleSis, OFAC, and SAM exclusions.
 Each source supports only the claims evidenced by its own records.
 
-The planned catalog contribution is a reusable, schema-valid Illuminate
-findings dataset for event ID 3. It will be previewed, explicitly confirmed,
-submitted server-side, and tracked by export identity/version and returned
-remote dataset ID. A dry run demonstrates the same metadata when portal access
-or write permission is unavailable. Until submission succeeds and a catalog
-identity is returned, describe it as a **planned or validated-dry-run
-contribution**, not a published dataset.
+The catalog contribution is a reusable, schema-valid Illuminate findings
+dataset for event ID 3. It is previewed, explicitly confirmed, submitted
+server-side, and tracked by export identity/version and returned remote dataset
+ID. A dry run demonstrates the same metadata when portal access or write
+permission is unavailable. Until submission succeeds and a catalog identity is
+returned, describe it as a **planned or validated-dry-run contribution**, not a
+published dataset.
 
 This satisfies the official 1% interoperability criterion narrowly: Illuminate
 consumes catalog datasets 1, 49, and 62 and makes derived findings retrievable by

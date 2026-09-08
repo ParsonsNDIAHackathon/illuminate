@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PermissionMode = Literal["ask_always", "auto_create", "session_allowlist"]
@@ -45,6 +45,21 @@ class Settings(BaseSettings):
     model_strong: str = "gpt-5"
     model_fast: str = "gpt-5-mini"
     openai_base_url: str | None = None
+    session_secret: SecretStr = SecretStr("illuminate-dev-confirmation")
+
+    # NDIA catalog publishing. Credentials remain process-only and are never
+    # included in API responses or workspace settings.
+    ndia_key: SecretStr | None = None
+    ndia_catalog_base_url: str = "https://hackathon.ndia.org"
+    # Write endpoints are intentionally opt-in because the public portal only
+    # documents its read contract. Set these to the organizer-provided paths.
+    ndia_catalog_contribution_path: str | None = None
+    ndia_catalog_lookup_path: str | None = None
+    ndia_catalog_status_path: str | None = None
+    ndia_catalog_api_key_header: str = "X-API-Key"
+    ndia_catalog_timeout_s: float = 20.0
+    ndia_catalog_operator_token: SecretStr | None = None
+    illuminate_public_url: str | None = None
 
     @property
     def cors_origins(self) -> list[str]:

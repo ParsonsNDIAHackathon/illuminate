@@ -3,3 +3,4 @@
 - [Graph evidence truth](graph-evidence-truth.md) — consumers must resolve current backing-claim and artifact status; edge metadata alone can become stale.
 - [Readiness truth rules](readiness-truth-rules.md) — primary readiness requires stamped seed completion plus live mission coverage; optional services never gate it.
 - [AI summary authority boundary](ai-summary-authority.md) — Models may prioritize approved findings, but deterministic code owns narrative, citations, scores, and fallback.
+- [NDIA catalog contract](ndia-catalog-contract.md) — event-3 read fields are public, but organizer-provided write routes must remain opt-in.

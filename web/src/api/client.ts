@@ -6,10 +6,10 @@ export interface EntitySummary {
   tier: number | string | null
   simulated: boolean
 }
-async function request<T = any>(method: string, path: string, body?: any): Promise<T> {
+async function request<T = any>(method: string, path: string, body?: any, headers?: Record<string, string>): Promise<T> {
   const r = await fetch(path, {
     method,
-    headers: { 'Content-Type': 'application/json', 'X-User': USER },
+    headers: { 'Content-Type': 'application/json', 'X-User': USER, ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (!r.ok) {
@@ -22,7 +22,7 @@ async function request<T = any>(method: string, path: string, body?: any): Promi
 
 export const api = {
   get: <T = any>(p: string) => request<T>('GET', p),
-  post: <T = any>(p: string, b?: any) => request<T>('POST', p, b ?? {}),
+  post: <T = any>(p: string, b?: any, headers?: Record<string, string>) => request<T>('POST', p, b ?? {}, headers),
   put: <T = any>(p: string, b?: any) => request<T>('PUT', p, b ?? {}),
   del: <T = any>(p: string) => request<T>('DELETE', p),
 }
@@ -30,6 +30,22 @@ export const api = {
 export const qs = (o: Record<string, any>) =>
   Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&')
 
+export interface CatalogDatasetMetadata {
+  event_id: 3
+  name: string
+  description: string
+  source_url: string
+  format: 'JSON'
+  size_estimate: string | null
+  update_frequency: string | null
+  access_requirements: string | null
+  license_info: string | null
+  api_documentation: string | null
+  sample_data_url: string | null
+  schema_description: string | null
+  quality_notes: string | null
+  tags: string[]
+}
 export type RiskEvidence = {
   id?: string
   claim_id?: string
@@ -177,4 +193,60 @@ export interface EntityRiskCategoryContract {
   confidence?: number | null
   freshness?: string | null
   [key: string]: unknown
+}
+
+export interface EntityRiskCategoryContract {
+  id?: string
+  category?: string
+  name?: string
+  severity?: string | number | null
+  score?: number | null
+  confidence?: number | null
+  freshness?: string | null
+  [key: string]: unknown
+}
+
+export const ndiaCatalog = {
+  preview: () => api.get<CatalogContributionPreview>('/api/catalog/ndia/preview'),
+  submit: (confirmationToken: string, dryRun = false, operatorToken?: string) =>
+    api.post<CatalogContributionResult>('/api/catalog/ndia/submit', {
+      confirm: true,
+      confirmation: 'PUBLISH EVENT 3',
+      confirmation_token: confirmationToken,
+      dry_run: dryRun,
+    }, operatorToken ? { 'X-Catalog-Operator': operatorToken } : undefined),
+  status: (refresh = false) =>
+    api.get<CatalogContributionResult>(`/api/catalog/ndia/status?${qs({ refresh })}`),
+}
+
+export interface CatalogContributionPreview {
+  export_id: string
+  export_version: string
+  export_watermark: string
+  event: {
+    id: 3
+    slug: 'ndia-global-defense-hackathon-main-event-washington-dc'
+    title: 'NDIA Global Defense Hackathon / Main Event: Washington, DC'
+  }
+  metadata: CatalogDatasetMetadata
+  confirmation_token: string
+  schema_valid: true
+  publication_ready: boolean
+  credential_configured: boolean
+  operator_authorization_configured: boolean
+  contribution_state: string
+  remote_dataset_id: string | null
+  message: string
+}
+
+export interface CatalogContributionResult {
+  export_id: string
+  export_version: string
+  dataset_id: string | null
+  contribution_state: string
+  message: string
+  dry_run: boolean
+  idempotent: boolean
+  submitted_at: string | null
+  metadata: CatalogDatasetMetadata
 }
