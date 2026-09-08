@@ -21,7 +21,14 @@ async def stats():
         "MATCH (n) WITH labels(n)[0] AS l, count(*) AS c RETURN collect({label:l, count:c}) AS nodes"
     )
     rels = await db.read("MATCH ()-[r]->() WITH type(r) AS t, count(*) AS c RETURN collect({type:t, count:c}) AS rels")
-    return {"nodes": rows[0]["nodes"] if rows else [], "rels": rels[0]["rels"] if rels else []}
+    # Scenario records are drawn and scored exactly like observed ones, so the app-bar badge
+    # is the workspace's only disclosure. It has to answer "does this workspace hold scenario
+    # material" — a property of the data, not of whatever the canvas happens to have loaded.
+    simulated = await db.read(
+        "RETURN EXISTS { MATCH (n) WHERE coalesce(n.simulated,false) } "
+        "OR EXISTS { MATCH ()-[r]->() WHERE coalesce(r.simulated,false) } AS simulated")
+    return {"nodes": rows[0]["nodes"] if rows else [], "rels": rels[0]["rels"] if rels else [],
+            "simulated": bool(simulated[0]["simulated"]) if simulated else False}
 
 
 @router.get("/graph/search")

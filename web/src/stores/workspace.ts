@@ -12,9 +12,15 @@ export const useWorkspace = defineStore('workspace', {
     depth: Number(localStorage.getItem('illuminate.depth') || 2),
     modelKey: false,
     loaded: false,
+    // Does this workspace hold scenario material at all? Scenario records are drawn and
+    // scored exactly like observed ones, so the app-bar badge is the only disclosure —
+    // which means it has to be a fact about the data, true on every page, not a property
+    // of whatever the canvas happens to have loaded.
+    simulated: false,
   }),
   actions: {
-    async load() { this.ws = await api.get('/api/workspace'); this.loaded = true },
+    async load() { this.ws = await api.get('/api/workspace'); this.loaded = true; this.loadSimulated() },
+    async loadSimulated() { try { this.simulated = Boolean((await api.get('/api/graph/stats')).simulated) } catch { /* the badge stays off rather than guessing */ } },
     async save(patch: Partial<Workspace>) { const body = { ...this.ws, ...patch }; delete (body as any).defaults; this.ws = await api.put('/api/workspace', body) },
     setLayer(k: string, v: boolean) { this.ws.layers = { ...this.ws.layers, [k]: v }; this.save({ layers: this.ws.layers }) },
     setTheme(t: 'light' | 'dark') { this.theme = t; localStorage.setItem('illuminate.theme', t) },

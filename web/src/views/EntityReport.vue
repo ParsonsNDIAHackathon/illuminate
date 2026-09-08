@@ -3,7 +3,6 @@
     <div class="d-flex align-center ga-2 mb-1">
       <v-btn icon="mdi-arrow-left" variant="text" @click="router.back()" />
       <h2 class="text-h6">{{ rep.identity.name }}</h2>
-      <v-chip v-if="rep.identity.simulated" size="x-small" color="warning" variant="tonal">SIMULATED</v-chip>
       <v-chip v-if="rep.entity.flagged" size="x-small" color="error" variant="tonal">flagged</v-chip>
       <v-spacer />
       <v-btn prepend-icon="mdi-graph" @click="openInGraph">Open in graph</v-btn>

@@ -7,8 +7,8 @@
       <v-checkbox v-model="flagged" label="flagged only" hide-details density="compact" />
       <v-spacer /><span class="text-caption">{{ total }} entities</span>
     </div>
-    <v-data-table :items="items" :headers="headers" density="compact" :items-per-page="50" :loading="loading" hover @click:row="(_: any, r: any) => router.push(`/entities/${r.item.id}`)">
-      <template #item.name="{ item }"><span>{{ item.name }}</span><v-chip v-if="item.simulated" size="x-small" color="warning" class="ml-1" variant="tonal">SIM</v-chip><v-chip v-if="item.flagged" size="x-small" color="error" class="ml-1" variant="tonal">flagged</v-chip></template>
+    <v-data-table class="entities-table" :items="items" :headers="headers" density="compact" :items-per-page="50" :loading="loading" hover @click:row="(_: any, r: any) => router.push(`/entities/${r.item.id}`)">
+      <template #item.name="{ item }"><span>{{ item.name }}</span><v-chip v-if="item.flagged" size="x-small" color="error" class="ml-1" variant="tonal">flagged</v-chip></template>
       <template #item.parent_seat="{ item }"><span :class="{ 'text-error': item.parent_seat && !item.parent_seat.startsWith('US') }">{{ item.parent_seat || '—' }}</span></template>
       <template #item.sole_source="{ item }"><v-icon v-if="item.sole_source" icon="mdi-alert-circle-outline" color="warning" size="16" /></template>
     </v-data-table>
