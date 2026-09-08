@@ -1,6 +1,13 @@
 <template>
   <div class="legend">
     <div class="legend-heading">
+      <strong>Node types</strong>
+      <span>Shape and tint; highlights sit on top</span>
+    </div>
+    <div class="type-row">
+      <span v-for="t in types" :key="t.key" class="type" :title="t.label"><i :class="t.shape" :style="{ background: t.fill }"></i>{{ t.label }}</span>
+    </div>
+    <div class="legend-heading">
       <strong>Relationship paths</strong>
       <span>Direction follows arrow</span>
     </div>
@@ -25,11 +32,18 @@
   </div>
 </template>
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 import { resolveSwatch } from '../styles/palette'
 import { RELATIONSHIP_FAMILIES, type RelationshipFamily } from '../styles/relationshipFamilies'
+import { NODE_TYPES, nodeType, type NodeType } from '../styles/nodeTypes'
 const graph = useGraph(); const ws = useWorkspace()
+/** Only the types currently drawn, in NODE_TYPES order. */
+const types = computed(() => {
+  const present = new Set(graph.nodeList.map(nodeType))
+  return (Object.keys(NODE_TYPES) as NodeType[]).filter(k => present.has(k)).map(k => ({ key: k, label: NODE_TYPES[k].label, shape: NODE_TYPES[k].shape, fill: NODE_TYPES[k].fill[ws.theme] }))
+})
 function familyColor(family: RelationshipFamily) { return ws.theme === 'dark' ? family.darkColor : family.color }
 function simulationColor() { return ws.theme === 'dark' ? '#f6c453' : '#b77900' }
 </script>
@@ -38,6 +52,14 @@ function simulationColor() { return ws.theme === 'dark' ? '#f6c453' : '#b77900' 
 .legend-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .legend-heading strong { font-size: 12px; letter-spacing: .035em; text-transform: uppercase; }
 .legend-heading span { opacity: .6; }
+.type-row { display: flex; flex-wrap: wrap; gap: 5px 12px; padding-bottom: 7px; border-bottom: 1px solid rgba(100,116,139,.2); }
+.type { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.type i { display: inline-block; width: 10px; height: 10px; flex: none; border-radius: 50%; }
+.type i.round-rectangle, .type i.rectangle, .type i.barrel { border-radius: 2px; }
+.type i.diamond { transform: rotate(45deg) scale(.85); border-radius: 1px; }
+.type i.hexagon { clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0 50%); }
+.type i.round-triangle { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.type i.tag { clip-path: polygon(0 0, 70% 0, 100% 50%, 70% 100%, 0 100%); }
 .family-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 14px; }
 .family { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
 .family i { width: 25px; flex: none; border-top: 3px solid var(--family-color); }

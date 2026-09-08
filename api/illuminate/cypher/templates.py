@@ -230,7 +230,15 @@ def _neighbourhood(p):
     d = _depth(p.get("depth", 2))
     membership_depth = MAX_DEPTH
     layers = p.get("layers") or {}
-    rel_filter = ["SUPPLIES", "OWNS", "ULTIMATE_PARENT_OF"]
+    rel_filter = [
+        "SUPPLIES",
+        "OWNS",
+        "ULTIMATE_PARENT_OF",
+        "MEMBER_OF",
+        "TRANSACTS_WITH",
+        "LOBBIES",
+        "DONATED_TO",
+    ]
     # A focused program first establishes membership through supply paths only.
     # Context then expands in one safe direction from those members so a shared
     # country, category, person, or artifact cannot bridge into another program.

@@ -4,9 +4,10 @@
     python -m illuminate.seed.seed --offline        # rebuild from committed fixtures
 
 Sources: USAspending (primes, subawards, recipients, competition), GLEIF (LEI,
-jurisdiction, parents), OFAC SDN (sanctions screen), LittleSis (people), EDGAR
-(listed parents). Every HTTP response is cached under seed/fixtures so the graph
-rebuilds offline. --scenario adds a clearly-labelled simulated adversarial tie,
+jurisdiction, parents), OFAC SDN (sanctions screen), LittleSis (people, their other
+seats, ownership, memberships, lobbying, transactions), EDGAR (listed parents). Every
+HTTP response is cached under seed/fixtures so the graph rebuilds offline; see
+seed/record.py to add fixtures when a connector grows. --scenario adds a clearly-labelled simulated adversarial tie,
 because the brief asks for one and real data rarely volunteers it.
 """
 from __future__ import annotations
@@ -451,7 +452,7 @@ def main() -> None:
     ap.add_argument("--agency", default="Department of Defense")
     ap.add_argument("--since", default="2019-10-01")
     ap.add_argument("--until", default="2026-09-30")
-    ap.add_argument("--primes", type=int, default=20)
+    ap.add_argument("--primes", type=int, default=100)
     ap.add_argument("--subs", type=int, default=60)
     ap.add_argument("--people", type=int, default=10, help="how many top suppliers get the people layer")
     ap.add_argument("--reset", action="store_true")

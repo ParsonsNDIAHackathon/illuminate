@@ -1,4 +1,4 @@
-export type RelationshipFamilyKey = 'supply' | 'control' | 'people' | 'location' | 'evidence' | 'classification'
+export type RelationshipFamilyKey = 'supply' | 'control' | 'people' | 'affiliation' | 'location' | 'evidence' | 'classification'
 
 export interface RelationshipFamily {
   key: RelationshipFamilyKey
@@ -10,13 +10,15 @@ export interface RelationshipFamily {
   types: readonly string[]
 }
 
+// Muted on purpose, like the node fills in nodeTypes.ts: each family takes the tint of the node type
+// it leads to, so highlighted paths, selection and search matches are the only saturated colour.
 export const RELATIONSHIP_FAMILIES: readonly RelationshipFamily[] = [
   {
     key: 'supply',
     label: 'Supply',
     description: 'Program and supplier flow',
-    color: '#2563eb',
-    darkColor: '#60a5fa',
+    color: '#5b7fb0',
+    darkColor: '#7f9fc6',
     lineStyle: 'solid',
     types: ['SUPPLIES'],
   },
@@ -24,8 +26,8 @@ export const RELATIONSHIP_FAMILIES: readonly RelationshipFamily[] = [
     key: 'control',
     label: 'Ownership & control',
     description: 'Direct, beneficial, and ultimate control',
-    color: '#c2410c',
-    darkColor: '#fb923c',
+    color: '#b48660',
+    darkColor: '#c4936a',
     lineStyle: 'solid',
     types: ['OWNS', 'ULTIMATE_PARENT_OF', 'BENEFICIAL_OWNER_OF'],
   },
@@ -33,17 +35,26 @@ export const RELATIONSHIP_FAMILIES: readonly RelationshipFamily[] = [
     key: 'people',
     label: 'People',
     description: 'Leadership and held roles',
-    color: '#0f766e',
-    darkColor: '#5eead4',
+    color: '#5f948b',
+    darkColor: '#7fb0a7',
     lineStyle: 'dashed',
     types: ['HELD_ROLE'],
+  },
+  {
+    key: 'affiliation',
+    label: 'Affiliations',
+    description: 'Memberships, business relationships, lobbying and giving',
+    color: '#5f8fa0',
+    darkColor: '#7fb0c0',
+    lineStyle: 'dashed',
+    types: ['MEMBER_OF', 'TRANSACTS_WITH', 'LOBBIES', 'DONATED_TO'],
   },
   {
     key: 'location',
     label: 'Location',
     description: 'Seat, operations, and manufacturing',
-    color: '#a16207',
-    darkColor: '#facc15',
+    color: '#9d8d65',
+    darkColor: '#b3a680',
     lineStyle: 'dashed',
     types: ['INCORPORATED_IN', 'OPERATES_IN', 'MANUFACTURES_IN', 'PARENT_SEATED_IN'],
   },
@@ -51,8 +62,8 @@ export const RELATIONSHIP_FAMILIES: readonly RelationshipFamily[] = [
     key: 'evidence',
     label: 'Evidence',
     description: 'Artifacts, claims, and subjects',
-    color: '#7e22ce',
-    darkColor: '#c084fc',
+    color: '#b07e97',
+    darkColor: '#c69bb2',
     lineStyle: 'dotted',
     types: ['EVIDENCES', 'ASSERTS', 'TARGETS', 'ABOUT'],
   },
@@ -60,8 +71,8 @@ export const RELATIONSHIP_FAMILIES: readonly RelationshipFamily[] = [
     key: 'classification',
     label: 'Classification',
     description: 'Products and category structure',
-    color: '#475569',
-    darkColor: '#94a3b8',
+    color: '#8c7eb0',
+    darkColor: '#a89bcb',
     lineStyle: 'dotted',
     types: ['PROVIDES', 'SUBCATEGORY_OF'],
   },

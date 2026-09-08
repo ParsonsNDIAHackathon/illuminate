@@ -19,14 +19,4 @@ export function resolveSwatch(name: string | null | undefined, theme: 'light' | 
   return PALETTE[n][theme]
 }
 
-// Base colours per node label, theme-aware
-export const LABEL_COLORS: Record<string, { light: string; dark: string }> = {
-  Entity: { light: '#334155', dark: '#cbd5e1' },
-  Program: { light: '#1d4ed8', dark: '#60a5fa' },
-  Person: { light: '#0f766e', dark: '#2dd4bf' },
-  Category: { light: '#7c3aed', dark: '#a78bfa' },
-  Location: { light: '#92400e', dark: '#d6a26b' },
-  Artifact: { light: '#6b7280', dark: '#9ca3af' },
-  Source: { light: '#0369a1', dark: '#7dd3fc' },   // an Artifact on the sources layer (registry entry / source record)
-  Claim: { light: '#be185d', dark: '#f472b6' },
-}
+// Node fills at rest live in nodeTypes.ts: muted on purpose, so these swatches read as highlights over them.
