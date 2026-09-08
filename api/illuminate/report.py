@@ -18,7 +18,7 @@ IMMUTABLE_AI_FIELDS = (
     "categories", "truth_status", "simulated",
 )
 
-RISK_CONTRACT_VERSION = "uc11.vendor-risk.v1"
+RISK_CONTRACT_VERSION = "uc11.vendor-risk.v2"
 RISK_CATEGORIES = {
     "ownership": {"weight": 15, "predicates": ("ownership_screen",), "max_age_days": 365},
     "financial": {"weight": 15, "predicates": ("financial_screen",), "max_age_days": 180},
@@ -27,6 +27,10 @@ RISK_CATEGORIES = {
     "cyber": {"weight": 15, "predicates": ("cyber_screen",), "max_age_days": 180},
     "adverse_media": {"weight": 10, "predicates": ("adverse_media_screen",), "max_age_days": 30},
     "supply_criticality": {"weight": 15, "predicates": ("supply_criticality_screen",), "max_age_days": 365},
+    # A person is a route into a vendor that the vendor's own record never shows. Scored from
+    # graph facts — who holds a role where — rather than from a screen, because no list
+    # publishes "this company employs someone who also sits inside a flagged organisation".
+    "personnel": {"weight": 15, "predicates": ("personnel_screen",), "max_age_days": 365},
 }
 RISK_BANDS = (
     {"id": "low", "min": 0, "max": 24},
@@ -263,7 +267,11 @@ async def people(entity_id: str) -> dict:
             connector_error:coalesce(r2.connector_error,rc2.connector_error),
             connector_error_type:coalesce(r2.connector_error_type,rc2.connector_error_type),
             connector_error_status:coalesce(r2.connector_error_status,rc2.connector_error_status),
-            source_url:coalesce(r2.source_url,head([(r2a:Artifact)-[:EVIDENCES]->(rc2) | r2a.url]))}) AS elsewhere
+            source_url:coalesce(r2.source_url,head([(r2a:Artifact)-[:EVIDENCES]->(rc2) | r2a.url])),
+            confidence:coalesce(r2.confidence,rc2.confidence),
+            status:coalesce(r2.status,rc2.status),
+            claim_status:rc2.status,
+            method:coalesce(r2.method,rc2.method)}) AS elsewhere
         RETURN p.id AS person_id, p.name AS name, coalesce(r.id,elementId(r)) AS edge_id,
                r.claim_id AS claim_id, r.title AS title, r.role_type AS role_type, r.from AS from, r.to AS to,
                coalesce(r.current, r.to IS NULL) AS current, coalesce(r.source,rc.source) AS source,
@@ -272,6 +280,10 @@ async def people(entity_id: str) -> dict:
                coalesce(r.catalog_ids,rc.catalog_ids) AS catalog_ids,
                coalesce(r.source_url,head([(ra:Artifact)-[:EVIDENCES]->(rc) | ra.url])) AS source_url,
                coalesce(r.retrieved_at,rc.retrieved_at) AS retrieved_at,
+               coalesce(r.confidence,rc.confidence) AS confidence,
+               coalesce(r.status,rc.status) AS status,
+               rc.status AS claim_status,
+               coalesce(r.method,rc.method) AS method,
                coalesce(r.usage_note,rc.usage_note) AS usage_note,
                coalesce(r.quality_note,rc.quality_note) AS quality_note,
                coalesce(r.supports,rc.supports) AS supports,
@@ -462,8 +474,8 @@ def _graph_fact_simulated(fact: dict) -> bool:
         or fact.get("artifact_simulated")
         or fact.get("evidence_simulated")
     )
-def _eligible_graph_fact(fact: dict, *nodes: dict) -> bool:
-    if _graph_fact_simulated(fact) or any(n.get("simulated") for n in nodes):
+def _eligible_graph_fact(fact: dict, *nodes: dict, include_simulated: bool = False) -> bool:
+    if not include_simulated and (_graph_fact_simulated(fact) or any(n.get("simulated") for n in nodes)):
         return False
     if fact.get("claim_id"):
         if fact.get("claim_status") != "committed":
@@ -491,10 +503,38 @@ def _screen_simulated(item: dict) -> bool:
     )
 
 
+def _has_simulated_evidence(core: dict, supply: dict, screens_data: list[dict], people_data: dict | None = None) -> bool:
+    """Is there scenario material here that the verified evaluation is refusing to score?
+
+    A vendor's own record can be entirely real while the only scenario material sits on a
+    person attached to it — which is exactly the insider case — so people are checked too.
+    """
+    people_data = people_data or {}
+    roster = list(people_data.get("current", [])) + list(people_data.get("former", []))
+    return bool(
+        core.get("e", {}).get("simulated")
+        or any(_screen_simulated(s) for s in screens_data)
+        or any(_graph_fact_simulated(f) for f in core.get("parent_seat_evidence", []))
+        or any(_graph_fact_simulated(f) for f in supply.get("risk_evidence", []))
+        or any(_graph_fact_simulated(f) for f in core.get("ultimate_parents", []))
+        or any(_graph_fact_simulated(p) for p in roster)
+        or any(_graph_fact_simulated(o) or o.get("simulated") for p in roster for o in p.get("elsewhere", []))
+    )
+
+
 def evaluate_risk_contract(
-    core: dict, supply: dict, screens_data: list[dict], *, as_of: date | None = None
+    core: dict, supply: dict, screens_data: list[dict], *, as_of: date | None = None,
+    include_simulated: bool = False, people_data: dict | None = None,
 ) -> dict:
-    """Pure, deterministic UC-11 evaluation. Missing evidence never reduces risk."""
+    """Pure, deterministic UC-11 evaluation. Missing evidence never reduces risk.
+
+    include_simulated is the scenario switch. Off, this is the verified evaluation:
+    scenario material cannot move a score, which is what keeps an exported finding
+    about a real company honest. On, simulated evidence scores like any other and the
+    policy block says so, which is what lets the demo show that the tool actually
+    catches what the scenario plants. Both are computed; neither is a substitute for
+    the other.
+    """
     as_of = as_of or datetime.now(timezone.utc).date()
     outputs: list[dict] = []
     diligence: list[dict] = []
@@ -508,8 +548,8 @@ def evaluate_risk_contract(
         approved = [
             s for s in candidates
             if s.get("status") == "committed"
-            and not _screen_simulated(s)
-            and not core.get("e", {}).get("simulated")
+            and (include_simulated or not _screen_simulated(s))
+            and (include_simulated or not core.get("e", {}).get("simulated"))
             and _severity(s.get("result")) is not None
         ]
         approved.sort(key=lambda s: str(s.get("retrieved_at") or ""), reverse=True)
@@ -520,7 +560,7 @@ def evaluate_risk_contract(
             for evidence in core.get("parent_seat_evidence", []):
                 seat = evidence.get("seat_code")
                 seat_node = {"simulated": evidence.get("seat_simulated")}
-                if not seat or not _eligible_graph_fact(evidence, core.get("e", {}), seat_node):
+                if not seat or not _eligible_graph_fact(evidence, core.get("e", {}), seat_node, include_simulated=include_simulated):
                     continue
                 severity = "high" if not seat.upper().startswith(HOME) else "clear"
                 refs = [x for x in (evidence.get("claim_id"), evidence.get("id")) if x]
@@ -535,12 +575,41 @@ def evaluate_risk_contract(
                                      "method": evidence.get("claim_method"),
                                 },
                                 "explanation": f"Ultimate parent jurisdiction is {seat}."})
+        elif category == "personnel" and people_data:
+            for person in list(people_data.get("current", [])) + list(people_data.get("former", [])):
+                if not _eligible_graph_fact(person, core.get("e", {}), include_simulated=include_simulated):
+                    continue
+                for other in person.get("elsewhere", []):
+                    if not other.get("flagged"):
+                        continue
+                    if not _eligible_graph_fact(other, include_simulated=include_simulated):
+                        continue
+                    # Concurrent is the sharp case: the person is inside both organisations
+                    # right now. A lapsed tie is still a lead, but it is not the same finding.
+                    concurrent = bool(person.get("current")) and bool(other.get("current"))
+                    refs = [str(x) for x in (person.get("claim_id"), person.get("edge_id"),
+                                             other.get("role_edge_id"), other.get("entity_id")) if x]
+                    factors.append({
+                        "rule_id": "personnel.flagged-affiliation.v1",
+                        "severity": "high" if concurrent else "medium",
+                        "evidence_refs": refs, "truth_status": "committed",
+                        "claim_status": person.get("claim_status") if person.get("claim_id") else None,
+                        "freshness": _factor_freshness(person.get("retrieved_at"), spec["max_age_days"], as_of),
+                        "provenance": {"source": person.get("source") or other.get("source") or "graph",
+                                       "retrieved_at": person.get("retrieved_at"),
+                                       "confidence": _confidence(person.get("confidence"), default=0.0),
+                                       "method": person.get("method")},
+                        "explanation": (
+                            f"{person.get('name') or 'A person'} holds a role at this entity and "
+                            f"{'concurrently ' if concurrent else 'previously '}at {other.get('entity') or 'a flagged entity'}, "
+                            "which is flagged."),
+                    })
         elif category == "supply_criticality" and supply.get("risk_evidence"):
             eligible_supply = [
                 s for s in supply["risk_evidence"]
                 if s.get("evidence_id")
                 and isinstance(s.get("sole_source"), bool)
-                and _eligible_graph_fact(s, core.get("e", {}))
+                and _eligible_graph_fact(s, core.get("e", {}), include_simulated=include_simulated)
             ]
             for ref in eligible_supply:
                 severity = "medium" if ref["sole_source"] else "clear"
@@ -604,7 +673,8 @@ def evaluate_risk_contract(
                                   "truth_status": s.get("status") or "unknown",
                                   "simulated": bool(_screen_simulated(s) or core.get("e", {}).get("simulated")),
                               } for s in candidates if s not in approved],
-                              "message": f"No approved, non-simulated evidence covers {category}."})
+                              "message": (f"No approved evidence covers {category}." if include_simulated
+                                          else f"No approved, non-simulated evidence covers {category}.")})
         total += contribution
         outputs.append({"id": category, "weight": spec["weight"], "severity": severity,
                         "contribution": round(contribution, 2), "confidence": round(category_confidence, 3),
@@ -656,7 +726,7 @@ def evaluate_risk_contract(
                 },
             },
             "eligible_truth_status": "committed",
-            "simulated_evidence_scores": False,
+            "simulated_evidence_scores": include_simulated,
             "missing_evidence_behavior": "zero contribution; reduce completeness; create diligence flag",
             "aggregate_behavior": "normalize observed contributions over covered category weights; no score when no categories are covered",
         },
@@ -1037,7 +1107,19 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
     nws = await news(entity_id)
     aff = await affiliations(entity_id)
     risk = await risk_indicators(entity_id, core, supply, ppl, scr, aff)
-    risk.update(evaluate_risk_contract(core, supply, scr))
+    risk.update(evaluate_risk_contract(core, supply, scr, people_data=ppl))
+    # A scenario is only worth planting if the tool is shown catching it. The verified
+    # score above deliberately cannot see simulated evidence — that is what keeps an
+    # exported finding about a real company honest — so the scenario evaluation is run
+    # alongside it and carried separately, labelled, for the demo to lead with.
+    if _has_simulated_evidence(core, supply, scr, ppl):
+        scenario = evaluate_risk_contract(core, supply, scr, include_simulated=True, people_data=ppl)
+        risk["scenario"] = {
+            **scenario,
+            "includes_simulated": True,
+            "verified_score": risk.get("score"),
+            "verified_band": risk.get("band"),
+        }
     e = core["e"]
     sources = sorted({s for s in [e.get("source")] + [a.get("source") for a in arts] + [p.get("source") for p in ppl["current"] + ppl["former"]] if s})
     report = {

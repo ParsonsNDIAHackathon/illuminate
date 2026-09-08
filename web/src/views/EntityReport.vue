@@ -143,6 +143,18 @@
           <b v-else>Risk score not assessed.</b>
           {{ rep.risk.note }}
         </v-alert>
+        <!-- Scenario material cannot move the verified score. Showing only that score would
+             hide what the tool actually found, so the scenario evaluation sits beside it. -->
+        <v-alert v-if="rep.risk.scenario" variant="tonal" density="compact" class="mt-2 scenario-score" type="warning">
+          <b>Including simulated scenario evidence: {{ rep.risk.scenario.score != null ? `${rep.risk.scenario.score}/100 · ${String(rep.risk.scenario.band || '').replaceAll('_', ' ')}` : 'not assessed' }}.</b>
+          Verified evidence alone scores {{ rep.risk.scenario.verified_score != null ? `${rep.risk.scenario.verified_score}/100` : 'nothing' }}.
+          Scenario material is excluded from the verified score and from exports; it is shown here so the findings it drives are visible.
+          <div v-if="scenarioDrivers.length" class="mt-1">
+            <div v-for="d in scenarioDrivers" :key="d.id + d.rule_id" class="text-caption">
+              <b>{{ labelize(d.id) }}</b> — {{ d.severity }}: {{ d.explanation }}
+            </div>
+          </div>
+        </v-alert>
         <p class="text-caption mt-2" style="opacity:.7">{{ rep.risk.disclaimer }}</p>
       </v-window-item>
       <v-window-item value="artifacts">
@@ -186,6 +198,14 @@ async function load() {
 const coveredCategories = computed(() => riskProfile.value?.categories.filter(category => category.factors.length > 0).length || 0)
 const recommendationLabel = computed(() => labelize(riskProfile.value?.disposition || 'Complete diligence'))
 function labelize(value: string) { return value.replaceAll('_', ' ').replaceAll('.', ' ') }
+// The categories the scenario evaluation actually scored, so the alert names what drove it
+// rather than only the number.
+const scenarioDrivers = computed(() => {
+  const cats = (rep.value as any)?.risk?.scenario?.categories || []
+  return cats
+    .filter((c: any) => c.severity && c.severity !== 'clear' && c.factors?.length)
+    .map((c: any) => ({ id: c.id, severity: c.severity, rule_id: c.factors[0].rule_id, explanation: c.factors[0].explanation }))
+})
 function formatDate(value?: string) { return value ? new Date(value).toLocaleString() : 'Unavailable' }
 function formatConfidence(value?: number | null) { return value == null ? 'Unavailable' : `${Math.round(value * 100)}%` }
 function formatPercent(value?: number | null) { return value == null ? 'Unavailable' : `${Math.round(value * 100)}%` }
