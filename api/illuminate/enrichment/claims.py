@@ -23,6 +23,10 @@ SCREEN_PREDICATES = {"sanctions_screen", "exclusion_screen", "financial_screen",
 # 'mention' asserts only that an artifact is about the subject — the connector's own observation, committed on arrival.
 OBSERVATION_PREDICATES = SCREEN_PREDICATES | {"mention"}
 CORROBORATION_SOURCES = 2
+# Which relationship props identify a *distinct* edge, for claims written before
+# Fact.merge_keys was carried through staging. A connector now says so per fact:
+# one HELD_ROLE per tenure, but one aggregate SUPPLIES edge per pair of entities.
+LEGACY_MERGE_KEYS = {"HELD_ROLE": ("from", "title"), "SUPPLIES": ("from", "title", "contract_ref")}
 
 
 def _merge_node(alias: str, ref: NodeRef, pfx: str, params: dict) -> str:
@@ -64,13 +68,15 @@ async def stage(fact: Fact, *, source: str, trust: str, model: str | None = None
     params: dict = {
         "cid": cid, "pred": fact.predicate, "source": source, "trust": trust, "method": fact.method, "model": model,
         "conf": float(fact.confidence), "now": now_iso(), "value": fact.value, "detail": fact.detail,
-        "rel_props_json": _json.dumps({k: v for k, v in fact.props.items() if v is not None}), "sid": fact.subject.id, "oid": fact.object.id if fact.object else None,
+        "rel_props_json": _json.dumps({k: v for k, v in fact.props.items() if v is not None}),
+        "merge_keys_json": _json.dumps(list(fact.merge_keys)), "sid": fact.subject.id, "oid": fact.object.id if fact.object else None,
         "rid1": edge_id(), "rid2": edge_id(), "rid3": edge_id(), "rid4": edge_id(),
     }
     parts = [
         _merge_node("s", fact.subject, "s", params),
         "MERGE (c:Claim {id:$cid}) ON CREATE SET c.predicate=$pred, c.subject_id=$sid, c.object_id=$oid, c.object_value=$value, c.source=$source,",
-        "  c.trust=$trust, c.method=$method, c.model=$model, c.confidence=$conf, c.retrieved_at=$now, c.status='staged', c.detail=$detail, c.rel_props=$rel_props_json",
+        "  c.trust=$trust, c.method=$method, c.model=$model, c.confidence=$conf, c.retrieved_at=$now, c.status='staged', c.detail=$detail,",
+        "  c.rel_props=$rel_props_json, c.merge_keys=$merge_keys_json",
         "MERGE (c)-[ra:ASSERTS]->(s) ON CREATE SET ra.id=$rid1",
     ]
     if fact.object:
@@ -139,7 +145,8 @@ async def commit(cid: str, note: str | None = None) -> str:
         prov["source_url"] = art[0]["url"]
 
     if pred in REL_PREDICATES and r["oid"]:
-        keys = [k for k in ("from", "title", "contract_ref") if k in rel_props] if pred in ("HELD_ROLE", "SUPPLIES") else []
+        declared = _json.loads(c["merge_keys"]) if c.get("merge_keys") is not None else list(LEGACY_MERGE_KEYS.get(pred, ()))
+        keys = [k for k in declared if k in rel_props]
         key_clause = " {" + ", ".join(f"{k}: $rp.{k}" for k in keys) + "}" if keys else ""
         await db.write(
             f"MATCH (s {{id:$sid}}), (o {{id:$oid}}) MERGE (s)-[r:{pred}{key_clause}]->(o) "

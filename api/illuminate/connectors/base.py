@@ -54,9 +54,16 @@ class Connector:
     key_name: str | None = None         # vault credential name, None when no key is needed
     key_url: str | None = None          # where a user registers for one
     key_note: str | None = None
+    # Entity kinds this source can say anything about. A registry, sanctions list or
+    # officer database speaks about companies; screening a *program* name against the
+    # SDN list only manufactures noise, so the default excludes them.
+    kinds: tuple[str, ...] = ("organization",)
 
     def needs_key(self) -> bool:
         return self.key_name is not None
+
+    def applies_to(self, entity: dict) -> bool:
+        return (entity.get("kind") or "organization") in self.kinds
 
     async def status(self, user: str) -> dict:
         from ..vault import vault
