@@ -64,6 +64,8 @@ def test_focused_neighbourhood_includes_only_one_hop_of_member_affiliations():
         if "CALL apoc.path.subgraphAll(member" in line
     )
     assert all(relationship not in context_walk for relationship in affiliations.split("|"))
+
+
 @pytest.fixture
 def client():
     from illuminate.main import app
@@ -202,6 +204,7 @@ async def test_seed_entry_completes_without_mutating_workspace_consumer(monkeypa
     )
     assert metadata["root_id"] == "program-a"
     assert metadata["status"] == "complete"
+
 
 async def test_focused_neighbourhood_does_not_cross_shared_context_or_foreign_program_affiliation():
     await db.close_driver()

@@ -336,8 +336,61 @@ async def people(entity_id: str) -> dict:
     seats = await db.read("MATCH (e:Entity {id:$id}) RETURN e.board_size AS n", {"id": entity_id})
     return {"current": current, "former": former, "board_size": seats[0]["n"] if seats else None, "resolved_current_count": len(current)}
 
+# Country and nationality tokens that suggest a counterparty is foreign when no jurisdiction is
+# resolved for it. A hint only: it feeds a "low" indicator that says so, never a finding.
+_FOREIGN_HINTS = re.compile(
+    r"\b(russia|russian|china|chinese|hong kong|iran|iranian|north korea|saudi|emirates|uae|qatar|turkey|turkish|israel|israeli|jordan|jordanian|"
+    r"egypt|egyptian|india|indian|pakistan|korea|korean|japan|japanese|taiwan|german|germany|france|french|british|united kingdom|italy|italian|"
+    r"spain|spanish|brazil|mexico|canada|canadian|australia|australian|singapore|malaysia|indonesia|vietnam|philippines|kuwait|bahrain|oman|iraq|"
+    r"afghanistan|ukraine|poland|polish|sweden|swedish|norway|norwegian|dutch|netherlands|belgium|swiss|switzerland|austria|greece|greek|royal)\b")
+
+
 def _foreign_hint(name: str | None) -> bool:
     return bool(_FOREIGN_HINTS.search((name or "").lower()))
+
+
+async def affiliations(entity_id: str) -> dict:
+    """The entity's recorded ties beyond supply and ownership: memberships, lobbying,
+    transactions and donations, with the counterparty's kind, jurisdiction and flag."""
+    rows = await db.read(
+        """
+        MATCH (e:Entity {id:$id})-[r:MEMBER_OF|TRANSACTS_WITH|LOBBIES|DONATED_TO]-(o:Entity)
+        OPTIONAL MATCH (o)-[:INCORPORATED_IN]->(inc:Location)
+        OPTIONAL MATCH (o)-[:PARENT_SEATED_IN]->(seat:Location)
+        RETURN type(r) AS type, r.id AS edge_id, startNode(r).id = e.id AS outbound, o.id AS entity_id, o.name AS entity, o.kind AS kind,
+               coalesce(o.federal,false) AS federal, coalesce(o.flagged,false) AS flagged, o.org_types AS org_types,
+               inc.code AS incorporated, seat.code AS parent_seat, r.from AS from, r.to AS to, coalesce(r.current, r.to IS NULL) AS current,
+               r.amount AS amount, r.description AS description, r.source AS source, r.source_url AS source_url
+        ORDER BY current DESC, coalesce(r.from,'') DESC LIMIT 200
+        """,
+        {"id": entity_id},
+    )
+    # Subsidiaries sit here too: the ownership family looks *up* the chain, and a unit
+    # seated abroad is exposure the parent chain never shows.
+    subs = await db.read(
+        """
+        MATCH (e:Entity {id:$id})-[r:OWNS]->(o:Entity)
+        OPTIONAL MATCH (o)-[:INCORPORATED_IN]->(inc:Location)
+        RETURN 'OWNS' AS type, r.id AS edge_id, true AS outbound, o.id AS entity_id, o.name AS entity, o.kind AS kind, false AS federal,
+               coalesce(o.flagged,false) AS flagged, o.org_types AS org_types, inc.code AS incorporated, null AS parent_seat,
+               r.from AS from, r.to AS to, coalesce(r.current, r.to IS NULL) AS current, r.pct AS amount, r.description AS description,
+               r.source AS source, r.source_url AS source_url
+        ORDER BY current DESC LIMIT 100
+        """,
+        {"id": entity_id},
+    )
+    rows += subs
+    for r in rows:
+        code = r.get("incorporated") or r.get("parent_seat")
+        r["foreign"] = (not code.upper().startswith(HOME)) if code else None
+        r["foreign_hint"] = r["foreign"] is None and _foreign_hint(r.get("entity"))
+    by_type: dict[str, list[dict]] = {"MEMBER_OF": [], "TRANSACTS_WITH": [], "LOBBIES": [], "DONATED_TO": [], "OWNS": []}
+    for r in rows:
+        by_type.setdefault(r["type"], []).append(r)
+    return {"memberships": by_type["MEMBER_OF"], "transactions": by_type["TRANSACTS_WITH"], "lobbying": by_type["LOBBIES"],
+            "donations": by_type["DONATED_TO"], "subsidiaries": by_type["OWNS"], "count": len(rows)}
+
+
 async def screens(entity_id: str) -> list[dict]:
     """Sanctions / exclusion / registry screens are Claims with predicate *_screen."""
     rows = await db.read(
@@ -786,6 +839,12 @@ def _int(v) -> int | None:
         return int(v) if v not in (None, "") else None
     except (TypeError, ValueError):
         return None
+def _tie_label(t: dict) -> str:
+    """'Membership: SHREC', 'Subsidiary: Raytheon Saudi Arabia'."""
+    word = {"MEMBER_OF": "Membership", "TRANSACTS_WITH": "Business relationship", "LOBBIES": "Lobbying", "DONATED_TO": "Donation", "OWNS": "Subsidiary"}.get(t.get("type") or "", "Tie")
+    return f"{word}: {t.get('entity')}"
+
+
 def _screen_refs(screen: dict) -> tuple[list[str], str | None, bool]:
     evidence = _screen_artifacts(screen)
     ids = [screen.get("claim_id"), screen.get("asserts_edge_id")]
@@ -1291,52 +1350,6 @@ def deterministic_summary(report: dict, reason: str | None = None) -> dict:
     findings = approved_summary_findings(report)
     notable_ids = [f["id"] for f in findings if not f["no_data"] and f.get("severity") in {"high", "medium", "low"}]
     return _render_summary(report, notable_ids[:3], "deterministic", None, reason)
-
-async def affiliations(entity_id: str) -> dict:
-    """The entity's recorded ties beyond supply and ownership: memberships, lobbying,
-    transactions and donations, with the counterparty's kind, jurisdiction and flag."""
-    rows = await db.read(
-        """
-        MATCH (e:Entity {id:$id})-[r:MEMBER_OF|TRANSACTS_WITH|LOBBIES|DONATED_TO]-(o:Entity)
-        OPTIONAL MATCH (o)-[:INCORPORATED_IN]->(inc:Location)
-        OPTIONAL MATCH (o)-[:PARENT_SEATED_IN]->(seat:Location)
-        RETURN type(r) AS type, r.id AS edge_id, startNode(r).id = e.id AS outbound, o.id AS entity_id, o.name AS entity, o.kind AS kind,
-               coalesce(o.federal,false) AS federal, coalesce(o.flagged,false) AS flagged, o.org_types AS org_types,
-               inc.code AS incorporated, seat.code AS parent_seat, r.from AS from, r.to AS to, coalesce(r.current, r.to IS NULL) AS current,
-               r.amount AS amount, r.description AS description, r.source AS source, r.source_url AS source_url
-        ORDER BY current DESC, coalesce(r.from,'') DESC LIMIT 200
-        """,
-        {"id": entity_id},
-    )
-    # Subsidiaries sit here too: the ownership family looks *up* the chain, and a unit
-    # seated abroad is exposure the parent chain never shows.
-    subs = await db.read(
-        """
-        MATCH (e:Entity {id:$id})-[r:OWNS]->(o:Entity)
-        OPTIONAL MATCH (o)-[:INCORPORATED_IN]->(inc:Location)
-        RETURN 'OWNS' AS type, r.id AS edge_id, true AS outbound, o.id AS entity_id, o.name AS entity, o.kind AS kind, false AS federal,
-               coalesce(o.flagged,false) AS flagged, o.org_types AS org_types, inc.code AS incorporated, null AS parent_seat,
-               r.from AS from, r.to AS to, coalesce(r.current, r.to IS NULL) AS current, r.pct AS amount, r.description AS description,
-               r.source AS source, r.source_url AS source_url
-        ORDER BY current DESC LIMIT 100
-        """,
-        {"id": entity_id},
-    )
-    rows += subs
-    for r in rows:
-        code = r.get("incorporated") or r.get("parent_seat")
-        r["foreign"] = (not code.upper().startswith(HOME)) if code else None
-        r["foreign_hint"] = r["foreign"] is None and _foreign_hint(r.get("entity"))
-    by_type: dict[str, list[dict]] = {"MEMBER_OF": [], "TRANSACTS_WITH": [], "LOBBIES": [], "DONATED_TO": [], "OWNS": []}
-    for r in rows:
-        by_type.setdefault(r["type"], []).append(r)
-    return {"memberships": by_type["MEMBER_OF"], "transactions": by_type["TRANSACTS_WITH"], "lobbying": by_type["LOBBIES"],
-            "donations": by_type["DONATED_TO"], "subsidiaries": by_type["OWNS"], "count": len(rows)}
-
-def _tie_label(t: dict) -> str:
-    """'Membership: SHREC', 'Subsidiary: Raytheon Saudi Arabia'."""
-    word = {"MEMBER_OF": "Membership", "TRANSACTS_WITH": "Business relationship", "LOBBIES": "Lobbying", "DONATED_TO": "Donation", "OWNS": "Subsidiary"}.get(t.get("type") or "", "Tie")
-    return f"{word}: {t.get('entity')}"
 
 def _ownership_record(row: dict, *, relationship_present: bool) -> dict:
     artifacts = [a for a in (row.get("artifacts") or []) if a and a.get("id")]

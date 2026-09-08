@@ -4,9 +4,10 @@
     python -m illuminate.seed.seed --offline        # rebuild from committed fixtures
 
 Sources: USAspending (primes, subawards, recipients, competition), GLEIF (LEI,
-jurisdiction, parents), OFAC SDN (sanctions screen), LittleSis (people), EDGAR
-(listed parents). Every HTTP response is cached under seed/fixtures so the graph
-rebuilds offline. --scenario adds a clearly-labelled simulated adversarial tie,
+jurisdiction, parents), OFAC SDN (sanctions screen), LittleSis (people, their other
+seats, ownership, memberships, lobbying, transactions), EDGAR (listed parents). Every
+HTTP response is cached under seed/fixtures so the graph rebuilds offline; see
+seed/record.py to add fixtures when a connector grows. --scenario adds a clearly-labelled simulated adversarial tie,
 because the brief asks for one and real data rarely volunteers it.
 """
 from __future__ import annotations
@@ -263,7 +264,13 @@ async def seed_program(keywords: list[str], root_name: str, *, since: str, until
     prime_ids: dict[str, str] = {}  # recipient_id → entity id
     for rid, slot in ranked:
         trace_start = len(_seed_retrieval_trace or [])
-        rec = await recipient(rid)
+        # A missing or persistently failing recipient profile must not discard award-backed
+        # supply data. Keep the award-row identity while retaining the failed retrieval trace.
+        try:
+            rec = await recipient(rid)
+        except Exception as e:
+            log(f"recipient profile unavailable for {slot['name']} ({rid}): {type(e).__name__}; keeping the award-row name")
+            rec = {}
         rec_retrievals = list((_seed_retrieval_trace or [])[trace_start:])
         prime_retrievals = [*slot["retrievals"], *rec_retrievals]
         uei = rec.get("uei")
@@ -271,7 +278,8 @@ async def seed_program(keywords: list[str], root_name: str, *, since: str, until
         loc = _country(rec.get("location"))
         await merge_entity(eid, {"name": rec.get("name") or slot["name"], "kind": "organization", "uei": uei, "duns": rec.get("duns"),
                                  "aliases": rec.get("alternate_names") or [], "aliases_norm": [normalize_name(x) for x in rec.get("alternate_names") or []],
-                                 "business_types": rec.get("business_types") or [], "source_url": recipient_url(rid), **PROV},
+                                 "business_types": rec.get("business_types") or [], "source_url": recipient_url(rid), **PROV,
+                                 **({} if rec else {"confidence": 0.75, "method": "name_match"})},
                            retrievals=prime_retrievals)
         if loc:
             await merge_rel(eid, "OPERATES_IN", await merge_location(loc),
@@ -647,7 +655,7 @@ async def main_async(args) -> None:
     # enrichment: authoritative connectors over every supplier; people/EDGAR over the biggest
     all_ids = [r["id"] for r in await db.read("MATCH (e:Entity) WHERE e.kind='organization' AND coalesce(e.simulated,false)=false RETURN e.id AS id")]
     top_ids = [r["id"] for r in await db.read(
-        "MATCH (e:Entity)-[s:SUPPLIES]->() WHERE coalesce(e.simulated,false)=false RETURN e.id AS id, sum(coalesce(s.amount,0)) AS amt ORDER BY amt DESC LIMIT $n", {"n": args.people})]
+        "MATCH (e:Entity)-[s:SUPPLIES]->() WHERE coalesce(e.simulated,false)=false RETURN e.id AS id, sum(coalesce(s.amount,0)) AS amt ORDER BY amt DESC, id LIMIT $n", {"n": args.people})]
     if not args.skip_enrich:
         await enrich_with(["gleif"], all_ids, commit_open=False)
         await enrich_with(["ofac"], all_ids, commit_open=False)
@@ -656,8 +664,12 @@ async def main_async(args) -> None:
             await enrich_with(["sam"], all_ids, commit_open=False)
         else:
             log("sam: no SAM.gov key in vault — registration/exclusion screen skipped")
-        # a parent brought in by GLEIF deserves a jurisdiction + screen too
-        parents = [r["id"] for r in await db.read("MATCH (p:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(:Entity) WHERE NOT (p)-[:SUPPLIES]->() AND coalesce(p.simulated,false)=false RETURN DISTINCT p.id AS id")]
+        # a parent brought in by GLEIF deserves a jurisdiction + screen too. Ordered by what its
+        # subsidiaries supply so the ten that also get the people layer are the same every run —
+        # an unordered pick chose different parents offline than the fixtures were recorded for.
+        parents = [r["id"] for r in await db.read(
+            "MATCH (p:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(c:Entity) WHERE NOT (p)-[:SUPPLIES]->() AND coalesce(p.simulated,false)=false "
+            "OPTIONAL MATCH (c)-[s:SUPPLIES]->() RETURN p.id AS id, sum(coalesce(s.amount,0)) AS amt ORDER BY amt DESC, id")]
         await enrich_with(["gleif", "ofac", "sam_exclusions"], parents, commit_open=False)
         await enrich_with(["littlesis"], top_ids + parents[:10], commit_open=True)
         await enrich_with(["edgar"], top_ids + parents[:10], commit_open=False)
@@ -687,7 +699,7 @@ def main() -> None:
     ap.add_argument("--agency", default="Department of Defense")
     ap.add_argument("--since", default="2019-10-01")
     ap.add_argument("--until", default="2026-09-30")
-    ap.add_argument("--primes", type=int, default=20)
+    ap.add_argument("--primes", type=int, default=100)
     ap.add_argument("--subs", type=int, default=60)
     ap.add_argument("--people", type=int, default=10, help="how many top suppliers get the people layer")
     ap.add_argument("--reset", action="store_true")
