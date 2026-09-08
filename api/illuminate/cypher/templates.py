@@ -227,8 +227,12 @@ def _neighbourhood(p):
         rel_filter += ["HELD_ROLE", "BENEFICIAL_OWNER_OF"]
     if layers.get("countries", False):
         rel_filter += ["INCORPORATED_IN", "OPERATES_IN", "MANUFACTURES_IN", "PARENT_SEATED_IN"]
-    if layers.get("artifacts", False):
-        rel_filter += ["EVIDENCES", "ASSERTS", "TARGETS", "ABOUT"]
+    # Artifacts and sources share a label and its edges; the canvas hides whichever kind is off.
+    if layers.get("artifacts", False) or layers.get("sources", False):
+        rel_filter += ["EVIDENCES", "ABOUT"]
+    if layers.get("claims", False):
+        rel_filter += ["ASSERTS", "TARGETS", "EVIDENCES"]
+    rel_filter = list(dict.fromkeys(rel_filter))
     rf = "|".join(rel_filter)
     bound = {"id": p["entity_id"], "limit": int(p.get("limit", 400))}
     if p.get("program_id"):
@@ -315,7 +319,7 @@ TEMPLATES: dict[str, Template] = {
         ),
         Template(
             "neighbourhood",
-            "Subgraph around an entity to a depth, honouring layer toggles (people, countries, artifacts).",
+            "Subgraph around an entity to a depth, honouring layer toggles (people, countries, categories, artifacts, sources, claims).",
             {"entity_id": {"type": "string"}, "depth": {"type": "integer", "default": 2}, "limit": {"type": "integer", "default": 400}, "layers": {"type": "object"},
              "program_id": {"type": "string", "description": "confine the walk to this program's supply chain; other programs, and whatever hangs off only them, are left out"}},
             ["entity_id"], _neighbourhood, None,

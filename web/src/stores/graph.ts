@@ -3,11 +3,16 @@ import { api, qs } from '../api/client'
 import type { StyleOp, LegendItem } from '../styles/styleOps'
 import { deriveLegend } from '../styles/styleOps'
 
-export interface GNode { id: string; label: string; labels?: string[]; name: string; props: Record<string, any> }
+export interface GNode { id: string; label: string; labels?: string[]; layer?: string | null; name: string; props: Record<string, any> }
 export interface GEdge { id: string; source: string; target: string; type: string; props: Record<string, any> }
 
 /** How long an arriving node stays marked as new on the canvas. */
 const FRESH_MS = 6000
+/** The layer toggles the graph endpoints take. Entities are always fetched. */
+export const LAYER_KEYS = ['people', 'countries', 'categories', 'artifacts', 'sources', 'claims'] as const
+function layerParams(layers: Record<string, boolean>) {
+  return Object.fromEntries(LAYER_KEYS.map(k => [k, !!layers[k]]))
+}
 
 const isProgram = (n: GNode) => n.label === 'Entity' && n.props?.kind === 'program'
 
@@ -120,7 +125,7 @@ export const useGraph = defineStore('graph', {
     async loadAll(layers: Record<string, boolean>) {
       this.loading = true
       try {
-        const r = await api.get(`/api/graph/all?${qs({ people: !!layers.people, countries: !!layers.countries, artifacts: !!layers.artifacts, categories: !!layers.categories })}`)
+        const r = await api.get(`/api/graph/all?${qs(layerParams(layers))}`)
         this.focusId = null
         this.focusLabel = null
         this.truncated = !!r.truncated
@@ -150,7 +155,7 @@ export const useGraph = defineStore('graph', {
     async loadNeighbourhood(entityId: string, depth: number, layers: Record<string, boolean>, replace = false) {
       this.loading = true
       try {
-        const r = await api.get(`/api/graph/subgraph?${qs({ entity_id: entityId, depth, people: !!layers.people, countries: !!layers.countries, artifacts: !!layers.artifacts, categories: !!layers.categories, program_id: this.focusId })}`)
+        const r = await api.get(`/api/graph/subgraph?${qs({ entity_id: entityId, depth, ...layerParams(layers), program_id: this.focusId })}`)
         replace ? this.replace(r.subgraph) : this.merge(r.subgraph)
         this.notePrograms(r.subgraph?.nodes || [])
         this.lastCypher = { statement: r.cypher, params: r.params }
