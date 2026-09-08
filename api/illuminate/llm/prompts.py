@@ -31,12 +31,14 @@ def constant_prefix() -> str:
     return "\n\n".join([RULES, schema_prompt(), template_prompt(), style_contract_prompt()])
 
 
-def turn_context(root_id: str | None, root_label: str | None, layers: dict | None, canvas_ids: list[str] | None = None) -> str:
+def turn_context(focus_id: str | None, focus_label: str | None, layers: dict | None, canvas_ids: list[str] | None = None) -> str:
     parts = [f"Today is {date.today().isoformat()}."]
-    if root_id:
-        parts.append(f"The workspace root (consumer) is {root_label or root_id} with id {root_id}. Questions about 'the program', 'my suppliers' or 'the graph' refer to it.")
+    if focus_id:
+        parts.append(f"The canvas is focused on the program {focus_label or focus_id} with id {focus_id}, and shows only its supply chain. "
+                     "Questions about 'the program', 'my suppliers' or 'the graph' refer to it.")
     else:
-        parts.append("No root consumer is set; ask the user to pick one or search for it.")
+        parts.append("The canvas shows every program in the workspace; none is focused. "
+                     "When a question says 'the program' without naming one, ask which, or search for it.")
     if layers:
         on = [k for k, v in layers.items() if v]
         parts.append(f"Layer toggles on: {', '.join(on) or 'none'}. Off layers are not fetched.")

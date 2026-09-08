@@ -57,10 +57,12 @@ LAYER_DEFAULTS = {"entities": True, "people": True, "countries": False, "categor
 
 
 class WorkspaceSettings(BaseModel):
-    """Single-workspace settings (multi-tenant auth is an explicit hackathon cut)."""
+    """Single-workspace settings (multi-tenant auth is an explicit hackathon cut).
 
-    root_id: str | None = None
-    root_label: str | None = None
+    No consumer lives here. A workspace holds every program at once; which one is in
+    view is a property of the canvas the user is looking at, not of the workspace.
+    """
+
     permission_mode: PermissionMode = "ask_always"
     model_strong: str | None = None
     model_fast: str | None = None

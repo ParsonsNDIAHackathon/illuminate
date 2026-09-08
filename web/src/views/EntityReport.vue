@@ -50,7 +50,7 @@
                 <dt>Manufactures</dt><dd>{{ rep.geography.manufactures?.map((m:any) => m.code).join(', ') || '—' }}</dd>
                 <dt>Employees</dt><dd>{{ rep.entity.employees || '—' }}</dd>
                 <dt>Awards</dt><dd>{{ rep.supply.awards.count }} on record</dd>
-                <dt>Tier</dt><dd>{{ rep.supply.tier_from_root != null ? `${rep.supply.tier_from_root} from root` : '—' }}</dd>
+                <dt>Tier</dt><dd>{{ rep.supply.tier_from_root != null ? `${rep.supply.tier_from_root} from ${graph.focusLabel || 'the focused program'}` : '—' }}</dd>
               </dl>
             </v-card-text></v-card>
             <v-card variant="outlined" class="mb-3"><v-card-text>
@@ -107,7 +107,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '../api/client'
+import { api, qs } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
 import ArtifactViewer from '../components/ArtifactViewer.vue'
 import SourceLink from '../components/SourceLink.vue'
@@ -118,7 +118,8 @@ import { useWorkspace } from '../stores/workspace'
 const props = defineProps<{ id: string }>()
 const router = useRouter(); const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace()
 const rep = ref<any>(null); const tab = ref('overview'); const enriching = ref(false); const regen_busy = ref(false)
-async function load() { rep.value = await api.get(`/api/entities/${props.id}/report`) }
+// tier is counted towards the program the canvas is focused on, if any
+async function load() { rep.value = await api.get(`/api/entities/${props.id}/report?${qs({ root_id: graph.focusId })}`) }
 function sevIcon(s: string | null) { return s === 'high' ? 'mdi-alert-octagon' : s === 'medium' ? 'mdi-alert' : s === 'low' ? 'mdi-information-outline' : s === 'clear' ? 'mdi-check-circle-outline' : 'mdi-help-circle-outline' }
 function sevColor(s: string | null) { return s === 'high' ? 'error' : s === 'medium' ? 'warning' : s === 'low' ? 'secondary' : s === 'clear' ? 'success' : undefined }
 async function enrich() { enriching.value = true; try { await jobs.enqueue(props.id) } finally { enriching.value = false } }

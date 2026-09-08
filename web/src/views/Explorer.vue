@@ -6,7 +6,7 @@
         <LayerToggles @change="reload" />
         <v-select class="focus" :model-value="graph.focusId" :items="focusItems" item-title="name" item-value="id"
                   density="compact" variant="solo" flat hide-details prepend-inner-icon="mdi-target"
-                  :title="graph.focusId ? 'Showing one consumer — pick Everything to see the whole graph' : 'Showing the whole graph'"
+                  :title="graph.focusId ? 'Showing one program and its supply chain — pick Everything to see them all' : 'Showing every program'"
                   @update:model-value="setFocus" />
       </div>
       <Legend />
@@ -21,7 +21,7 @@
         </v-list>
       </div>
       <div class="notes">
-        <span v-if="graph.truncated" class="warn">graph capped — narrow with a consumer filter or turn layers off</span>
+        <span v-if="graph.truncated" class="warn">graph capped — narrow to one program or turn layers off</span>
         <details v-if="graph.lastCypher"><summary>last query</summary><CypherBlock :statement="graph.lastCypher.statement" :params="graph.lastCypher.params" /></details>
       </div>
     </div>
@@ -49,9 +49,9 @@ import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 const graph = useGraph(); const ws = useWorkspace()
 const q = ref(''); const hits = ref<any[]>([]); const searching = ref(false); const open = ref(false)
-// The consumers a graph can be narrowed to. The canvas shows every program at once by default.
-const consumers = ref<any[]>([])
-const focusItems = computed(() => [{ id: null, name: 'Everything' }, ...consumers.value.map(c => ({ id: c.id, name: c.name }))])
+// The programs the canvas can be narrowed to. The store keeps this current from live
+// deltas, so a program added while this view is open shows up here without a reload.
+const focusItems = computed(() => [{ id: null, name: 'Everything' }, ...graph.programs])
 let t: any
 // A plain text field, not an autocomplete: the typed text — and the canvas filter it drives — must survive blur.
 watch(q, (v) => {
@@ -67,7 +67,7 @@ async function onPick(id: string) {
   graph.select(id)
 }
 async function setFocus(id: string | null) {
-  if (id) await graph.focus(id, consumers.value.find(c => c.id === id)?.name || null, ws.depth, ws.ws.layers)
+  if (id) await graph.focus(id, graph.programs.find(p => p.id === id)?.name || null, ws.depth, ws.ws.layers)
   else await graph.loadAll(ws.ws.layers)
 }
 async function reload() {
@@ -75,8 +75,7 @@ async function reload() {
   else await graph.loadAll(ws.ws.layers)
 }
 async function expand(id: string) { await graph.loadNeighbourhood(id, 1, ws.ws.layers) }
-async function loadConsumers() { try { consumers.value = (await api.get('/api/entities?kind=program&limit=100')).items } catch { consumers.value = [] } }
-onMounted(async () => { if (!ws.loaded) await ws.load(); loadConsumers(); if (!graph.nodes.size) reload() })
+onMounted(async () => { if (!ws.loaded) await ws.load(); graph.loadPrograms(); if (!graph.nodes.size) reload() })
 // Depth only shapes a focused view; the whole graph is not walked from a root.
 watch(() => ws.depth, () => { if (graph.focusId) reload() })
 </script>

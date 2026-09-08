@@ -32,11 +32,24 @@ async def search(q: str, kind: str = "any", limit: int = 10, user: str = Depends
 
 @router.get("/graph/subgraph")
 async def subgraph(entity_id: str, depth: int = 2, people: bool = True, countries: bool = False, artifacts: bool = False,
-                   sources: bool = False, claims: bool = False, categories: bool = False, user: str = Depends(user_id)):
+                   sources: bool = False, claims: bool = False, categories: bool = False,
+                   program_id: str | None = None, user: str = Depends(user_id)):
+    """A neighbourhood around one entity. program_id — the program the canvas is focused
+    on — keeps the walk inside that program's supply chain instead of crossing into
+    another program through a supplier they share."""
     ctx = ToolContext.from_workspace(source="ui", user=user)
     layers = {"people": people, "countries": countries, "artifacts": artifacts, "sources": sources, "claims": claims, "categories": categories}
-    r = await expand_subgraph(ctx, entity_id, depth, layers)
+    r = await expand_subgraph(ctx, entity_id, depth, layers, program_id)
     return {"subgraph": r.subgraph, "cypher": r.cypher, "params": r.params}
+
+
+@router.get("/graph/programs")
+async def programs():
+    """The programs the canvas can be narrowed to. The list the focus picker is built from."""
+    rows = await db.read(
+        "MATCH (e:Entity) WHERE e.kind = 'program' RETURN e.id AS id, e.name AS name ORDER BY e.name"
+    )
+    return {"items": rows}
 
 
 # Layer name -> the node labels it governs. Entities are always drawn. Artifacts are one label
@@ -233,9 +246,9 @@ async def locations():
 
 
 @router.get("/entities/{entity_id}/report")
-async def report(entity_id: str, user: str = Depends(user_id)):
-    from ..config import load_workspace
-    rep = await build_report(entity_id, load_workspace().root_id)
+async def report(entity_id: str, root_id: str | None = None, user: str = Depends(user_id)):
+    """root_id — the focused program, when there is one — is what tier_from_root counts to."""
+    rep = await build_report(entity_id, root_id)
     if not rep:
         raise HTTPException(404, "no such entity")
     return rep

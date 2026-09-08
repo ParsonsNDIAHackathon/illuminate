@@ -19,7 +19,6 @@ from collections import defaultdict
 from pathlib import Path
 
 from .. import db
-from ..config import load_workspace, save_workspace
 from ..connectors import get_connector
 from ..connectors.base import now_iso
 from ..connectors.http import set_cache_dir
@@ -310,9 +309,6 @@ async def main_async(args) -> None:
     if args.reset:
         await reset_graph()
     info = await seed_program(args.keyword, args.root_name, since=args.since, until=args.until, max_primes=args.primes, max_subs=args.subs, agency=args.agency)
-    ws = load_workspace()
-    ws.root_id, ws.root_label = info["root_id"], info["root_name"]
-    save_workspace(ws)
     # enrichment: authoritative connectors over every supplier; people/EDGAR over the biggest
     all_ids = [r["id"] for r in await db.read("MATCH (e:Entity) WHERE e.kind='organization' AND coalesce(e.simulated,false)=false RETURN e.id AS id")]
     top_ids = [r["id"] for r in await db.read(

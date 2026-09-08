@@ -5,7 +5,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from illuminate import db
-from illuminate.config import load_workspace
 
 
 @pytest.fixture
@@ -18,12 +17,15 @@ def client():
 
 
 def test_template_only_turn(client):
-    if not load_workspace().root_id:
-        pytest.skip("no root seeded")
+    programs = client.get("/api/graph/programs").json()["items"]
+    if not programs:
+        pytest.skip("no program seeded")
     with client.websocket_connect("/ws/chat?user=nokey-test-user") as ws:
         hello = ws.receive_json()
         assert hello["type"] == "hello" and hello["model_key"] is False
-        ws.send_text(json.dumps({"type": "message", "text": "show sole-source suppliers"}))
+        # the focused program comes with the message; nothing on the server holds one
+        ws.send_text(json.dumps({"type": "message", "text": "show sole-source suppliers",
+                                 "focus_id": programs[0]["id"], "focus_label": programs[0]["name"]}))
         events = []
         for _ in range(20):
             ev = ws.receive_json()
