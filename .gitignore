@@ -12,9 +12,7 @@ web/dist/
 .env
 *.local
 api/data/
-data/
-!web/src/data/
-!web/src/data/vendorComparisonPreset.ts
+/data/
 # neo4j volume
 .neo4j/
 # misc
