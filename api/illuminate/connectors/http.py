@@ -52,6 +52,17 @@ def _key(method: str, url: str, body: Any) -> str:
     return h
 
 
+async def _throttle(host: str) -> None:
+    """Per-host politeness delay; SEC and GDELT rate-limit hard."""
+    delay = _delays.get(host, 0.0)
+    if not delay:
+        return
+    wait = _last_call.get(host, 0) + delay - time.time()
+    if wait > 0:
+        await asyncio.sleep(wait)
+    _last_call[host] = time.time()
+
+
 class HttpError(Exception):
     def __init__(self, status: int, url: str, text: str = ""):
         super().__init__(f"HTTP {status} for {url}: {text[:200]}")
@@ -74,13 +85,7 @@ async def fetch_json(method: str, url: str, *, params: dict | None = None, json_
             pass
     if _read_only_cache:
         raise HttpError(0, full, "not in fixture cache (offline mode)")
-    host = req.url.host or ""
-    delay = _delays.get(host, 0.0)
-    if delay:
-        wait = _last_call.get(host, 0) + delay - time.time()
-        if wait > 0:
-            await asyncio.sleep(wait)
-        _last_call[host] = time.time()
+    await _throttle(req.url.host or "")
     hdrs = {"User-Agent": settings.illuminate_user_agent, "Accept": "application/json", **(headers or {})}
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         r = await client.request(method, full, json=json_body, headers=hdrs)
@@ -113,3 +118,60 @@ async def fetch_text(url: str, *, ttl: float = 86400, timeout: float = 60.0, hea
     if ttl > 0:
         path.write_text(r.text)
     return r.text
+
+
+# Documents are archival — a filing or an article does not change once published — so they
+# are cached far longer than API responses, as bytes plus a sidecar holding the content type.
+DOC_TTL = 30 * 86400
+MAX_DOC_BYTES = 8 * 1024 * 1024
+
+
+async def fetch_document(url: str, *, ttl: float = DOC_TTL, timeout: float = 60.0) -> dict:
+    """GET any document. Returns {url, content_type, body: bytes, retrieved_at, truncated}.
+
+    Unlike fetch_json/fetch_text this makes no assumption about the payload: the caller
+    dispatches on content_type. The download stops at MAX_DOC_BYTES so a stray link to a
+    large binary cannot exhaust memory.
+    """
+    key = _key("GET", url, None)
+    blob = cache_dir() / f"{key}.doc"
+    meta = cache_dir() / f"{key}.doc.json"
+    if ttl > 0 and blob.exists() and meta.exists():
+        try:
+            m = json.loads(meta.read_text())
+            if _read_only_cache or time.time() - m.get("_ts", 0) < ttl:
+                return {"url": m.get("url") or url, "content_type": m.get("content_type", ""), "body": blob.read_bytes(),
+                        "retrieved_at": m.get("_ts"), "truncated": m.get("truncated", False)}
+        except Exception:
+            pass
+    if _read_only_cache:
+        raise HttpError(0, url, "not in fixture cache (offline mode)")
+    parsed = httpx.URL(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HttpError(0, url, f"unsupported scheme {parsed.scheme!r}")
+    await _throttle(parsed.host or "")
+    hdrs = {"User-Agent": settings.illuminate_user_agent, "Accept": "*/*"}
+    chunks: list[bytes] = []
+    size = 0
+    truncated = False
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        async with client.stream("GET", url, headers=hdrs) as r:
+            if r.status_code >= 400:
+                raise HttpError(r.status_code, url, "")
+            ctype = (r.headers.get("content-type") or "application/octet-stream").strip().lower()
+            final = str(r.url)
+            async for chunk in r.aiter_bytes():
+                chunks.append(chunk)
+                size += len(chunk)
+                if size >= MAX_DOC_BYTES:
+                    truncated = True
+                    break
+    body = b"".join(chunks)[:MAX_DOC_BYTES]
+    now = time.time()
+    if ttl > 0:
+        try:
+            blob.write_bytes(body)
+            meta.write_text(json.dumps({"_ts": now, "url": scrub(final), "content_type": ctype, "truncated": truncated}))
+        except Exception:
+            pass
+    return {"url": scrub(final), "content_type": ctype, "body": body, "retrieved_at": now, "truncated": truncated}

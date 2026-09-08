@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from .. import db
+from ..content import document, summarize
+from ..connectors.http import HttpError, fetch_document
 from ..raw import find_raw
 from ..report import build_report
 from ..tools.handlers import ToolContext, expand_subgraph, search_entities
@@ -135,7 +137,47 @@ async def artifact_detail(artifact_id: str):
     if not rows:
         raise HTTPException(404, "no such artifact")
     row = rows[0]
-    return {**row, "raw": find_raw(artifact_id, row["artifact"] or {})}
+    raw = find_raw(artifact_id, row["artifact"] or {})
+    return {**row, "raw": raw, "summary": summarize(row["artifact"] or {}, raw)}
+
+
+async def _artifact_props(artifact_id: str) -> dict:
+    rows = await db.read("MATCH (a:Artifact {id:$id}) RETURN a{.*} AS artifact", {"id": artifact_id})
+    if not rows or not rows[0].get("artifact"):
+        raise HTTPException(404, "no such artifact")
+    return rows[0]["artifact"]
+
+
+@router.get("/artifacts/{artifact_id}/content")
+async def artifact_content(artifact_id: str):
+    """The source document behind the artifact, fetched and typed for display."""
+    return await document(await _artifact_props(artifact_id))
+
+
+@router.get("/artifacts/{artifact_id}/file")
+async def artifact_file(artifact_id: str):
+    """Proxy the source bytes so a PDF or image renders in the page — the browser cannot
+    fetch them cross-origin. Only non-markup types are served: returning remote HTML from
+    our own origin would hand it our cookies, and /content already renders HTML safely."""
+    props = await _artifact_props(artifact_id)
+    url = (props.get("url") or "").strip()
+    if not url:
+        raise HTTPException(404, "artifact has no source URL")
+    try:
+        doc = await fetch_document(url)
+    except HttpError as e:
+        raise HTTPException(502, str(e))
+    mime = doc["content_type"].split(";")[0].strip()
+    if mime.startswith("text/") or mime in ("application/xhtml+xml", "image/svg+xml") or mime.endswith(("+xml", "/xml")):
+        raise HTTPException(415, f"{mime} is served through /content, not as bytes")
+    if not (mime == "application/pdf" or mime.startswith(("image/", "audio/", "video/"))):
+        mime = "application/octet-stream"
+    return Response(content=doc["body"], media_type=mime, headers={
+        "Content-Disposition": "inline",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "sandbox; default-src 'none'",
+        "Cache-Control": "private, max-age=3600",
+    })
 
 
 @router.get("/locations")
