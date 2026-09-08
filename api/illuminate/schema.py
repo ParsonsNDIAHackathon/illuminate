@@ -51,7 +51,7 @@ APPROVED_TRUTH_STATUS = "committed"
 
 # APOC procedures/functions the validator allows (read side).
 APOC_ALLOWLIST = [
-    "apoc.path.expand", "apoc.path.subgraphAll", "apoc.path.subgraphNodes", "apoc.path.spanningTree",
+    "apoc.path.expand", "apoc.path.expandConfig", "apoc.path.subgraphAll", "apoc.path.subgraphNodes", "apoc.path.spanningTree",
     "apoc.algo.dijkstra", "apoc.algo.allSimplePaths", "apoc.coll.", "apoc.text.", "apoc.map.",
     "apoc.convert.", "apoc.date.", "apoc.meta.stats", "apoc.node.degree", "apoc.nodes.connected",
 ]

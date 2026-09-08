@@ -13,6 +13,7 @@ from ..tools.handlers import ToolContext, expand_subgraph, search_entities
 from .deps import user_id
 
 router = APIRouter(prefix="/api", tags=["graph"])
+from ..supply_chain import SupplyChainAnalysis, get_supply_chain_analysis
 
 
 @router.get("/graph/stats")
@@ -211,7 +212,13 @@ async def report(entity_id: str, user: str = Depends(user_id)):
         raise HTTPException(404, "no such entity")
     return rep
 
-
+@router.get("/entities/{entity_id}/supply-chain", response_model=SupplyChainAnalysis)
+async def supply_chain(entity_id: str):
+    """Explainable, bounded supply-chain findings for a program/root entity."""
+    analysis = await get_supply_chain_analysis(entity_id)
+    if analysis is None:
+        raise HTTPException(404, "no such program or root entity")
+    return analysis
 @router.post("/entities/{entity_id}/summary")
 async def regenerate_summary(entity_id: str, user: str = Depends(user_id)):
     from ..config import settings

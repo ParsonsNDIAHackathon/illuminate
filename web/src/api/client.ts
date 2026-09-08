@@ -195,17 +195,6 @@ export interface EntityRiskCategoryContract {
   [key: string]: unknown
 }
 
-export interface EntityRiskCategoryContract {
-  id?: string
-  category?: string
-  name?: string
-  severity?: string | number | null
-  score?: number | null
-  confidence?: number | null
-  freshness?: string | null
-  [key: string]: unknown
-}
-
 export const ndiaCatalog = {
   preview: () => api.get<CatalogContributionPreview>('/api/catalog/ndia/preview'),
   submit: (confirmationToken: string, dryRun = false, operatorToken?: string) =>
