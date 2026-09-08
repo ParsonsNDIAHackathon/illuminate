@@ -57,6 +57,11 @@ class Connector:
     key_note: str | None = None
     diagnostic_url: str | None = None
     diagnostic_params: dict[str, Any] = {}
+    # Entity kinds this source can say anything about. A registry, sanctions list or
+    # officer database speaks about companies; screening a *program* name against the
+    # SDN list only manufactures noise, so the default excludes them.
+    kinds: tuple[str, ...] = ("organization",)
+
     def needs_key(self) -> bool:
         return self.key_name is not None
 
@@ -85,17 +90,6 @@ class Connector:
         params = {
             name: (key if value == "$credential" else value)
             for name, value in self.diagnostic_params.items()
-        }
-        await probe_source(self.diagnostic_url, params=params or None, timeout=8, max_bytes=4096)
-        return {"ok": True, "status": "available", "detail": "Source is available"}
-
-    def to_dict(self) -> dict:
-        # Local import avoids coupling connector implementations to the registry
-        # while still exposing stable lineage metadata at the API boundary.
-        from .registry import source_metadata
-        return {"name": self.name, "label": self.label, "description": self.description, "trust": self.trust,
-                "key_name": self.key_name, "key_url": self.key_url, "key_note": self.key_note,
-                **source_metadata(self.name)}
         }
         await probe_source(self.diagnostic_url, params=params or None, timeout=8, max_bytes=4096)
         return {"ok": True, "status": "available", "detail": "Source is available"}
