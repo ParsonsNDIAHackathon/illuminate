@@ -19,7 +19,7 @@ import cola from 'cytoscape-cola'
 import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 import { applyStyleOps, clearStyleOps } from '../styles/styleOps'
-import { LABEL_COLORS } from '../styles/palette'
+import { edgeColor, fillFor, layerOf, shapeFor } from '../styles/nodeTypes'
 
 cytoscape.use(fcose)
 cytoscape.use(cola)
@@ -29,19 +29,7 @@ const ws = useWorkspace()
 let cy: Core | null = null
 const emit = defineEmits<{ (e: 'expand', id: string): void; (e: 'report', id: string): void }>()
 
-const EDGE_COLORS: Record<string, string> = { SUPPLIES: '#64748b', OWNS: '#ea580c', ULTIMATE_PARENT_OF: '#ea580c', HELD_ROLE: '#0f766e', BENEFICIAL_OWNER_OF: '#0f766e', PROVIDES: '#7c3aed', SUBCATEGORY_OF: '#7c3aed', INCORPORATED_IN: '#92400e', OPERATES_IN: '#92400e', MANUFACTURES_IN: '#b45309', PARENT_SEATED_IN: '#b45309', EVIDENCES: '#9ca3af', ASSERTS: '#be185d', TARGETS: '#be185d', ABOUT: '#9ca3af' }
 
-function baseColor(n: any) {
-  const t = ws.theme
-  if (n.props?.kind === 'program') return LABEL_COLORS.Program[t]
-  if (layerOf(n) === 'sources') return LABEL_COLORS.Source[t]
-  return (LABEL_COLORS[n.label] || LABEL_COLORS.Entity)[t]
-}
-function shapeFor(n: any) {
-  if (n.props?.kind === 'program') return 'round-rectangle'
-  if (layerOf(n) === 'sources') return 'barrel'
-  return ({ Entity: 'ellipse', Person: 'diamond', Category: 'hexagon', Location: 'round-triangle', Artifact: 'rectangle', Claim: 'tag' } as any)[n.label] || 'ellipse'
-}
 function badgeFor(n: any) {
   const p = n.props || {}
   const bits: string[] = []
@@ -89,8 +77,8 @@ function styleSheet(): any[] {
 
 function toElements() {
   const root = ws.ws.root_id
-  const nodes = graph.nodeList.map(n => ({ group: 'nodes', data: { id: n.id, name: n.name, label: n.label, layer: layerOf(n), baseColor: baseColor(n), shape: shapeFor(n), size: n.props?.kind === 'program' ? 56 : n.label === 'Entity' ? 34 : n.label === 'Person' ? 26 : 22, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }))
-  const edges = graph.edgeList.map(e => ({ group: 'edges', data: { id: e.id, source: e.source, target: e.target, type: e.type, color: EDGE_COLORS[e.type] || '#9ca3af', simulated: !!e.props?.simulated, label: e.type === 'SUPPLIES' && e.props?.tier ? `T${e.props.tier}${e.props.sole_source ? ' · sole' : ''}` : e.type === 'HELD_ROLE' ? (e.props?.title || '').slice(0, 18) : e.type === 'OWNS' && e.props?.pct ? `${e.props.pct}%` : '' } }))
+  const nodes = graph.nodeList.map(n => ({ group: 'nodes', data: { id: n.id, name: n.name, label: n.label, layer: layerOf(n), baseColor: fillFor(n, ws.theme), shape: shapeFor(n), size: n.props?.kind === 'program' ? 56 : n.label === 'Entity' ? 34 : n.label === 'Person' ? 26 : 22, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }))
+  const edges = graph.edgeList.map(e => ({ group: 'edges', data: { id: e.id, source: e.source, target: e.target, type: e.type, color: edgeColor(e.type, ws.theme), simulated: !!e.props?.simulated, label: e.type === 'SUPPLIES' && e.props?.tier ? `T${e.props.tier}${e.props.sole_source ? ' · sole' : ''}` : e.type === 'HELD_ROLE' ? (e.props?.title || '').slice(0, 18) : e.type === 'OWNS' && e.props?.pct ? `${e.props.pct}%` : '' } }))
   return [...nodes, ...edges]
 }
 
@@ -116,17 +104,7 @@ function restyle() { if (!cy) return; clearStyleOps(cy); applyStyleOps(cy, graph
 // Layer toggles gate what the server sends, but nodes can arrive by other routes (chat results,
 // generated Cypher, an API that predates the flag). The canvas enforces the toggles too, so an
 // unchecked layer is never drawn. Edges to hidden nodes are hidden by Cytoscape automatically.
-// The server names each node's layer (graphio.layer_of); the fallback mirrors it for nodes from
-// a route that predates the field. Artifacts split by kind: registry entries and source records
-// are "sources", documents (filings, news, awards, web pages) are "artifacts".
-const SOURCE_KINDS = new Set(['record', 'registry'])
-const LAYER_OF: Record<string, string> = { Person: 'people', Location: 'countries', Category: 'categories', Artifact: 'artifacts', Claim: 'claims' }
 const LAYER_DEFAULT: Record<string, boolean> = { people: true, countries: false, categories: false, artifacts: false, sources: false, claims: false }
-function layerOf(n: any): string | null {
-  if (n.layer !== undefined) return n.layer
-  if (n.label === 'Artifact') return SOURCE_KINDS.has(n.props?.kind || 'record') ? 'sources' : 'artifacts'
-  return LAYER_OF[n.label] || null
-}
 function applyLayers() {
   if (!cy) return
   const L = ws.ws.layers || {}
