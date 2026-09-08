@@ -74,6 +74,10 @@ function styleSheet(): any[] {
     { selector: '.op-dashed', style: { 'line-style': 'dashed', 'border-style': 'dashed' } },
     { selector: '.op-dim', style: { opacity: 0.18 } },
     { selector: '.op-hide', style: { display: 'none' } },
+    // search-bar filter: matches stay bright, everything else recedes
+    { selector: '.q-dim', style: { opacity: 0.12, 'z-index': 0 } },
+    { selector: 'node.q-match', style: { 'border-width': 3, 'border-color': dark ? '#fbbf24' : '#d97706', 'z-index': 20 } },
+    { selector: 'edge.q-match', style: { width: 2.2, 'z-index': 20 } },
   ]
 }
 
@@ -101,7 +105,7 @@ function sync() {
   }
   restyle()
 }
-function restyle() { if (!cy) return; clearStyleOps(cy); applyStyleOps(cy, graph.styleOps, ws.theme) }
+function restyle() { if (!cy) return; clearStyleOps(cy); applyStyleOps(cy, graph.styleOps, ws.theme); applyFilter() }
 
 // Layout strategy: fcose arranges a fresh canvas (it is the better static layout), then cola takes
 // over in infinite mode — a force simulation that keeps running, so dragging a node pulls its
@@ -131,6 +135,24 @@ function seedNearNeighbours(ids: string[]) {
     n.position({ x: p.x + (Math.random() - 0.5) * 80, y: p.y + (Math.random() - 0.5) * 80 })
   }
 }
+
+/** Does the store node match the search text? Name, label and every scalar prop (UEI, CAGE, country…) count. */
+function nodeMatches(n: any, q: string) {
+  if (n.name?.toLowerCase().includes(q) || n.label?.toLowerCase().includes(q)) return true
+  for (const v of Object.values(n.props || {})) if ((typeof v === 'string' || typeof v === 'number') && String(v).toLowerCase().includes(q)) return true
+  return false
+}
+/** Search-bar filter: dim nodes that don't match and edges that don't join two matches. Independent of chat style ops. */
+function applyFilter() {
+  if (!cy) return
+  const q = graph.filter.toLowerCase()
+  cy.elements().removeClass('q-dim q-match')
+  if (!q) return
+  const hit = cy.nodes().filter(e => { const n = graph.nodes.get(e.id()); return !!n && nodeMatches(n, q) })
+  hit.addClass('q-match')
+  cy.nodes().not(hit).addClass('q-dim')
+  cy.edges().forEach(e => { e.addClass(e.source().hasClass('q-match') && e.target().hasClass('q-match') ? 'q-match' : 'q-dim') })
+}
 function layout(fit = true) {
   if (!cy || cy.nodes().length === 0) return
   stopLive()
@@ -153,6 +175,7 @@ onMounted(() => {
 onBeforeUnmount(() => { stopLive(); cy?.destroy() })
 watch(() => graph.version, sync)
 watch(() => graph.styleVersion, restyle)
+watch(() => graph.filter, applyFilter)
 watch(() => ws.theme, () => { cy?.style(styleSheet() as any); sync() })
 watch(() => [graph.selectedId, graph.selectedEdgeId], ([id, eid]) => {
   if (!cy) return

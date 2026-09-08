@@ -42,8 +42,8 @@ import { useWorkspace } from '../stores/workspace'
 const graph = useGraph(); const ws = useWorkspace()
 const q = ref(''); const hits = ref<any[]>([]); const searching = ref(false); const picked = ref<string | null>(null)
 let t: any
-watch(q, (v) => { clearTimeout(t); if (!v || v.length < 2) return; t = setTimeout(async () => { searching.value = true; try { hits.value = (await api.get(`/api/graph/search?${qs({ q: v, limit: 10 })}`)).results } finally { searching.value = false } }, 250) })
-async function onPick(id: string | null) { if (!id) return; await graph.loadNeighbourhood(id, 1, ws.ws.layers); graph.select(id) }
+watch(q, (v) => { graph.setFilter(v && v.length >= 2 ? v : ''); clearTimeout(t); if (!v || v.length < 2) return; t = setTimeout(async () => { searching.value = true; try { hits.value = (await api.get(`/api/graph/search?${qs({ q: v, limit: 10 })}`)).results } finally { searching.value = false } }, 250) })
+async function onPick(id: string | null) { if (!id) return; await graph.loadNeighbourhood(id, 1, ws.ws.layers); graph.select(id); picked.value = null; q.value = ''; graph.setFilter('') }
 async function reload() { if (ws.ws.root_id) await graph.loadNeighbourhood(ws.ws.root_id, ws.depth, ws.ws.layers, true) }
 async function expand(id: string) { await graph.loadNeighbourhood(id, 1, ws.ws.layers) }
 onMounted(async () => { if (!ws.loaded) await ws.load(); if (!graph.nodes.size) reload() })

@@ -19,6 +19,7 @@ export const useGraph = defineStore('graph', {
     version: 0,          // bumped when elements change
     styleVersion: 0,     // bumped when style ops change
     highlightIds: [] as string[],
+    filter: '',          // search-bar text; canvas dims nodes that don't match
   }),
   getters: {
     selected: (s) => (s.selectedId ? s.nodes.get(s.selectedId) || null : null),
@@ -37,6 +38,7 @@ export const useGraph = defineStore('graph', {
     clear() { this.nodes = new Map(); this.edges = new Map(); this.selectedId = null; this.selectedEdgeId = null; this.version++ },
     select(id: string | null) { this.selectedId = id; if (id) this.selectedEdgeId = null },
     selectEdge(id: string | null) { this.selectedEdgeId = id; if (id) this.selectedId = null },
+    setFilter(q: string) { this.filter = (q || '').trim() },
     applyStyleOps(ops: StyleOp[], append = false) {
       this.styleOps = append ? [...this.styleOps, ...ops] : ops
       this.legend = deriveLegend(this.styleOps)
