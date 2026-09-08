@@ -58,7 +58,7 @@
     <section v-if="node.label === 'Artifact'">
       <h4>Artifact</h4>
       <dl>
-        <template v-if="p.url"><dt>Page</dt><dd><a :href="p.url" target="_blank" rel="noopener">{{ p.url }}</a></dd></template>
+        <template v-if="p.url"><dt>Page</dt><dd><SourceLink :href="p.url">{{ p.url }}</SourceLink></dd></template>
         <template v-if="p.published_at"><dt>Published</dt><dd>{{ p.published_at }}</dd></template>
         <template v-if="p.amount"><dt>Amount</dt><dd>${{ Number(p.amount).toLocaleString() }}</dd></template>
         <template v-if="p.award_id"><dt>Award</dt><dd>{{ p.award_id }}</dd></template>
@@ -67,12 +67,14 @@
     </section>
     <div class="d-flex flex-wrap ga-1 mt-2">
       <v-btn v-if="node.label === 'Artifact'" prepend-icon="mdi-text-box-search-outline" @click="rawId = node.id">Contents</v-btn>
+      <v-btn v-if="node.label === 'Artifact'" prepend-icon="mdi-eye-outline" @click="viewId = node.id">View</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-file-document-outline" :to="`/entities/${node.id}`">Report</v-btn>
       <v-btn prepend-icon="mdi-arrow-expand-all" @click="$emit('expand', node.id)">Expand</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-auto-fix" @click="enrich" :loading="enriching">Enrich</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-target" variant="text" @click="setRoot" title="Make this the consumer (root)">Set as root</v-btn>
     </div>
     <ArtifactViewer :artifact-id="rawId" @close="rawId = null" />
+    <SourceFrame v-if="viewId" :artifact-id="viewId" @close="viewId = null" />
   </div>
 </template>
 <script setup lang="ts">
@@ -82,8 +84,10 @@ import { useGraph } from '../stores/graph'
 import { useJobs } from '../stores/jobs'
 import { useWorkspace } from '../stores/workspace'
 import ArtifactViewer from './ArtifactViewer.vue'
+import SourceFrame from './SourceFrame.vue'
+import SourceLink from './SourceLink.vue'
 const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace()
-const rawId = ref<string | null>(null)
+const rawId = ref<string | null>(null); const viewId = ref<string | null>(null)
 defineEmits<{ (e: 'expand', id: string): void }>()
 const node = computed(() => graph.selected)
 const p = computed(() => node.value?.props || {})
