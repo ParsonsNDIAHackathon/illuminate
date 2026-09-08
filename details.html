@@ -208,7 +208,7 @@
         <div>
           <div class="tag display">UC-11</div>
           <div class="name">Automated Vendor Risk Assessment</div>
-          <p class="how">Root = the buying organisation. One vendor report: identity, geography, control, people, six risk families with citations.</p>
+          <p class="how">Root = the buying organisation. One vendor report: identity, geography, control, people, affiliations, nine risk families with citations.</p>
         </div>
       </div>
     </section>
@@ -263,7 +263,7 @@
         <tbody>
           <tr><td><span class="d">USAspending</span></td><td class="num">92</td><td>Top-20 prime recipients by obligated amount since FY2020 (UEI, business types, address, place of performance, PSC/NAICS, competition → <code>sole_source</code>) plus all reported sub-awardees at tier 2. Awards are <code>Artifact {kind:'award'}</code> nodes. The same keyword award search runs on demand for any program added later, through the <code>discover_suppliers</code> tool — the one source that proposes <code>SUPPLIES</code>.</td></tr>
           <tr><td><span class="d">GLEIF</span></td><td class="num">77</td><td>LEI, legal jurisdiction (<code>INCORPORATED_IN</code>), level-2 direct and ultimate parents (<code>OWNS</code>, <code>ULTIMATE_PARENT_OF</code>, <code>PARENT_SEATED_IN</code>). Real finding: eight tier-1 suppliers resolve to a foreign ultimate parent, Subaru to Japan and Canadian Commercial Corporation to Canada among them.</td></tr>
-          <tr><td><span class="d">LittleSis</span></td><td class="num">71</td><td>Officers and directors as <code>Person</code> nodes with one tenured <code>HELD_ROLE</code> edge per term.</td></tr>
+          <tr><td><span class="d">LittleSis</span></td><td class="num">71</td><td>Officers and directors as <code>Person</code> nodes with one tenured <code>HELD_ROLE</code> edge per term, and each officer's other seats — government bodies become <code>kind:'agency'</code> entities, so a revolving-door tie needs no second supplier in the graph. The org record adds revenue, the Senate LDA registrant id, aliases and LittleSis types; the org's own ties land as <code>OWNS</code> (ownership and hierarchy rows), <code>MEMBER_OF</code>, <code>TRANSACTS_WITH</code>, <code>LOBBIES</code> and <code>DONATED_TO</code>. All of it is open-source and stays a lead.</td></tr>
           <tr><td><span class="d">SEC EDGAR</span></td><td class="num">6</td><td>Tickers, CIKs and filings for the listed firms.</td></tr>
           <tr><td><span class="d">SAM.gov Entity</span></td><td class="num">5</td><td>Registration status, CAGE, incorporation, NAICS per vendor. The personal-key tier allows about ten calls a day, so this fills in slowly.</td></tr>
           <tr><td><span class="d">OFAC SDN</span></td><td class="num">bulk</td><td>Sanctions screen on every entity, matched locally by UEI, CAGE and strict name; recorded as claims with the matched rows as detail.</td></tr>
@@ -320,7 +320,7 @@
         </figure>
         <figure>
           <img src="docs/screenshots/06-report-risk.png" alt="Vendor report risk section with six risk families and citations" loading="lazy">
-          <figcaption><b>Risk.</b> Six risk families with citations, and honest <em>no data</em> rows where a source was not available.</figcaption>
+          <figcaption><b>Risk.</b> Nine risk families (ownership, concentration, people, government ties, affiliations, political exposure, sanctions, financial, media) with citations, and honest <em>no data</em> rows where a source was not available.</figcaption>
         </figure>
         <figure>
           <img src="docs/screenshots/07-report-people.png" alt="Vendor report people section listing officers and directors with tenure" loading="lazy">

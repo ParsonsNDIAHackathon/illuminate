@@ -4,6 +4,7 @@ citations, artifacts. Signals that returned no data are shown as no-data, never
 imputed to zero."""
 from __future__ import annotations
 
+import re
 from datetime import date
 
 from . import db
@@ -81,9 +82,11 @@ async def people(entity_id: str) -> dict:
         """
         MATCH (p:Person)-[r:HELD_ROLE]->(e:Entity {id:$id})
         OPTIONAL MATCH (p)-[r2:HELD_ROLE]->(o:Entity) WHERE o.id <> e.id AND (o.lei IS NULL OR e.lei IS NULL OR o.lei <> e.lei)
-        WITH p, r, collect(DISTINCT {entity_id:o.id, entity:o.name, title:r2.title, current:r2.current, flagged: coalesce(o.flagged,false)}) AS elsewhere
+        WITH p, r, collect(DISTINCT {entity_id:o.id, entity:o.name, title:r2.title, current:r2.current, from:r2.from, to:r2.to, flagged: coalesce(o.flagged,false),
+                                     kind: o.kind, federal: coalesce(o.federal,false), supplier: EXISTS { (o)-[:SUPPLIES]->() }}) AS elsewhere
         RETURN p.id AS person_id, p.name AS name, r.id AS edge_id, r.title AS title, r.role_type AS role_type, r.from AS from, r.to AS to,
-               coalesce(r.current, r.to IS NULL) AS current, r.source AS source, r.source_url AS source_url, elsewhere
+               coalesce(r.current, r.to IS NULL) AS current, r.source AS source, r.source_url AS source_url, elsewhere,
+               coalesce(p.public_official,false) AS public_official, p.person_types AS person_types
         ORDER BY current DESC, r.from DESC
         LIMIT 200
         """,
@@ -93,11 +96,73 @@ async def people(entity_id: str) -> dict:
     former = [r for r in rows if not r["current"]]
     for r in rows:
         r["elsewhere"] = [x for x in r["elsewhere"] if x.get("entity_id")]
-        r["interlock"] = any(x["current"] for x in r["elsewhere"]) and r["current"]
+        gov = [x for x in r["elsewhere"] if x.get("kind") == "agency"]
+        # An interlock is a seat at another *supplier* in the network. LittleSis also records
+        # seats at banks, law firms and think tanks; those stay visible but do not score.
+        suppliers = [x for x in r["elsewhere"] if x.get("supplier") and x.get("kind") != "agency"]
+        r["interlock"] = any(x["current"] for x in suppliers) and r["current"]
         r["moved_to_flagged"] = any(x["flagged"] and x["current"] for x in r["elsewhere"]) and not r["current"]
-        r["formerly_elsewhere"] = bool(r["current"]) and any(not x["current"] for x in r["elsewhere"])
+        r["formerly_elsewhere"] = bool(r["current"]) and any(not x["current"] for x in suppliers)
+        r["government"] = gov
+        r["concurrent_government"] = bool(r["current"]) and any(x["current"] for x in gov)
+        r["former_government"] = bool(r["current"]) and any(not x["current"] for x in gov)
     seats = await db.read("MATCH (e:Entity {id:$id}) RETURN e.board_size AS n", {"id": entity_id})
     return {"current": current, "former": former, "board_size": seats[0]["n"] if seats else None, "resolved_current_count": len(current)}
+
+
+# Country and nationality tokens that suggest a counterparty is foreign when no jurisdiction is
+# resolved for it. A hint only: it feeds a "low" indicator that says so, never a finding.
+_FOREIGN_HINTS = re.compile(
+    r"\b(russia|russian|china|chinese|hong kong|iran|iranian|north korea|saudi|emirates|uae|qatar|turkey|turkish|israel|israeli|jordan|jordanian|"
+    r"egypt|egyptian|india|indian|pakistan|korea|korean|japan|japanese|taiwan|german|germany|france|french|british|united kingdom|italy|italian|"
+    r"spain|spanish|brazil|mexico|canada|canadian|australia|australian|singapore|malaysia|indonesia|vietnam|philippines|kuwait|bahrain|oman|iraq|"
+    r"afghanistan|ukraine|poland|polish|sweden|swedish|norway|norwegian|dutch|netherlands|belgium|swiss|switzerland|austria|greece|greek|royal)\b")
+
+
+def _foreign_hint(name: str | None) -> bool:
+    return bool(_FOREIGN_HINTS.search((name or "").lower()))
+
+
+async def affiliations(entity_id: str) -> dict:
+    """The entity's recorded ties beyond supply and ownership: memberships, lobbying,
+    transactions and donations, with the counterparty's kind, jurisdiction and flag."""
+    rows = await db.read(
+        """
+        MATCH (e:Entity {id:$id})-[r:MEMBER_OF|TRANSACTS_WITH|LOBBIES|DONATED_TO]-(o:Entity)
+        OPTIONAL MATCH (o)-[:INCORPORATED_IN]->(inc:Location)
+        OPTIONAL MATCH (o)-[:PARENT_SEATED_IN]->(seat:Location)
+        RETURN type(r) AS type, r.id AS edge_id, startNode(r).id = e.id AS outbound, o.id AS entity_id, o.name AS entity, o.kind AS kind,
+               coalesce(o.federal,false) AS federal, coalesce(o.flagged,false) AS flagged, o.org_types AS org_types,
+               inc.code AS incorporated, seat.code AS parent_seat, r.from AS from, r.to AS to, coalesce(r.current, r.to IS NULL) AS current,
+               r.amount AS amount, r.description AS description, r.source AS source, r.source_url AS source_url
+        ORDER BY current DESC, coalesce(r.from,'') DESC LIMIT 200
+        """,
+        {"id": entity_id},
+    )
+    # Subsidiaries sit here too: the ownership family looks *up* the chain, and a unit
+    # seated abroad is exposure the parent chain never shows.
+    subs = await db.read(
+        """
+        MATCH (e:Entity {id:$id})-[r:OWNS]->(o:Entity)
+        OPTIONAL MATCH (o)-[:INCORPORATED_IN]->(inc:Location)
+        RETURN 'OWNS' AS type, r.id AS edge_id, true AS outbound, o.id AS entity_id, o.name AS entity, o.kind AS kind, false AS federal,
+               coalesce(o.flagged,false) AS flagged, o.org_types AS org_types, inc.code AS incorporated, null AS parent_seat,
+               r.from AS from, r.to AS to, coalesce(r.current, r.to IS NULL) AS current, r.pct AS amount, r.description AS description,
+               r.source AS source, r.source_url AS source_url
+        ORDER BY current DESC LIMIT 100
+        """,
+        {"id": entity_id},
+    )
+    rows += subs
+    for r in rows:
+        code = r.get("incorporated") or r.get("parent_seat")
+        r["foreign"] = (not code.upper().startswith(HOME)) if code else None
+        r["foreign_hint"] = r["foreign"] is None and _foreign_hint(r.get("entity"))
+    by_type: dict[str, list[dict]] = {"MEMBER_OF": [], "TRANSACTS_WITH": [], "LOBBIES": [], "DONATED_TO": [], "OWNS": []}
+    for r in rows:
+        by_type.setdefault(r["type"], []).append(r)
+    return {"memberships": by_type["MEMBER_OF"], "transactions": by_type["TRANSACTS_WITH"], "lobbying": by_type["LOBBIES"],
+            "donations": by_type["DONATED_TO"], "subsidiaries": by_type["OWNS"], "count": len(rows)}
 
 
 async def screens(entity_id: str) -> list[dict]:
@@ -151,8 +216,22 @@ def _ind(family: str, label: str, severity: str | None, source: str | None, deta
     return {"family": family, "label": label, "severity": severity, "source": source, "detail": detail, "source_url": url, "element_ids": ids or [], "no_data": severity is None}
 
 
-async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, scr: list[dict]) -> dict:
+def _int(v) -> int | None:
+    try:
+        return int(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _tie_label(t: dict) -> str:
+    """'Membership: SHREC', 'Subsidiary: Raytheon Saudi Arabia'."""
+    word = {"MEMBER_OF": "Membership", "TRANSACTS_WITH": "Business relationship", "LOBBIES": "Lobbying", "DONATED_TO": "Donation", "OWNS": "Subsidiary"}.get(t.get("type") or "", "Tie")
+    return f"{word}: {t.get('entity')}"
+
+
+async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, scr: list[dict], aff: dict | None = None) -> dict:
     inds: list[dict] = []
+    aff = aff or {"memberships": [], "transactions": [], "lobbying": [], "donations": [], "subsidiaries": [], "count": 0}
     e = core["e"]
     # 1. Ownership / foreign control
     seat = (core.get("parent_seat") or {}).get("code")
@@ -164,6 +243,10 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
                          e.get("ownership_source") or "GLEIF", detail, ids=[u["id"] for u in ups]))
     elif ups:
         inds.append(_ind("ownership", "Ultimate parent known, jurisdiction unresolved", "low", "GLEIF", ups[0]["name"], ids=[ups[0]["id"]]))
+    elif core.get("direct_parents"):
+        dp = core["direct_parents"][0]
+        inds.append(_ind("ownership", "Parent recorded, jurisdiction unresolved", "low", e.get("ownership_source") or "LittleSis",
+                         dp["name"] + (f" ({dp['pct']}%)" if dp.get("pct") else ""), ids=[dp["id"]]))
     else:
         inds.append(_ind("ownership", "Ownership chain", None, None, "No parent records resolved"))
     # 2. Concentration / sole source
@@ -188,18 +271,76 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
                          "medium", who.get("source") or "LittleSis", who["name"], who.get("source_url"), ids=[who["person_id"]]))
     elif any(p.get("formerly_elsewhere") for p in ppl["current"]):
         p0 = next(p for p in ppl["current"] if p.get("formerly_elsewhere"))
-        other = next((x for x in p0["elsewhere"] if not x["current"]), None)
-        inds.append(_ind("people", f"Former {other['title'] or 'officer'} of {other['entity']} on current board" if other else "Former officer of another supplier on current board",
+        other = next((x for x in p0["elsewhere"] if not x["current"] and x.get("supplier")), None)
+        inds.append(_ind("people", f"Former {(other['title'] if other['title'] and other['title'] != 'Position' else 'officer')} of {other['entity']} on current board" if other else "Former officer of another supplier on current board",
                          "medium", p0.get("source") or "LittleSis", f"{p0['name']} — {p0['title'] or 'role'} since {p0.get('from') or '?'}", p0.get("source_url"), ids=[p0["person_id"]]))
     elif interlocks:
         p0 = interlocks[0]
-        other = next((x for x in p0["elsewhere"] if x["current"]), None)
+        other = next((x for x in p0["elsewhere"] if x["current"] and x.get("supplier")), None)
         inds.append(_ind("people", f"Board interlock — {p0['name']} also at {other['entity'] if other else 'another supplier'}", "low", p0.get("source") or "LittleSis",
                          "An interlock is a lead, not a finding", p0.get("source_url"), ids=[p0["person_id"]]))
     elif ppl["current"] or ppl["former"]:
         inds.append(_ind("people", "No interlocks or flagged movements among resolved people", "clear", "LittleSis · EDGAR"))
     else:
         inds.append(_ind("people", "People", None, None, "No officers or directors resolved"))
+    # 3b. Government ties — the revolving door and public-office holders on the board
+    concurrent = [p for p in ppl["current"] if p.get("concurrent_government")]
+    former_gov = [p for p in ppl["current"] if p.get("former_government")]
+    officials = [p for p in ppl["current"] if p.get("public_official")]
+    if concurrent:
+        p0 = concurrent[0]
+        g = next(x for x in p0["government"] if x["current"])
+        inds.append(_ind("government", f"Current {p0['title'] or 'officer'} also holds a post at {g['entity']}", "medium", p0.get("source") or "LittleSis",
+                         f"{p0['name']} — concurrent {'federal ' if g.get('federal') else ''}government position; conflict-of-interest lead", p0.get("source_url"), ids=[p0["person_id"], g["entity_id"]]))
+    elif former_gov or officials:
+        p0 = (former_gov or officials)[0]
+        g = next((x for x in p0["government"] if not x["current"]), None)
+        n = len(former_gov)
+        label = (f"{n} current officer{'s' if n != 1 else ''} previously in government" if former_gov
+                 else f"{p0['name']} is a {', '.join(t for t in (p0.get('person_types') or []) if t in ('Public Official', 'Elected Representative', 'Political Candidate', 'Lobbyist')) or 'public-office holder'}")
+        inds.append(_ind("government", label, "low", p0.get("source") or "LittleSis",
+                         f"{p0['name']} — formerly {g['title'] or 'at'} {g['entity']}" + (f" until {g['to']}" if g and g.get("to") else "") if g else "Revolving-door exposure is a lead, not a finding",
+                         p0.get("source_url"), ids=[p0["person_id"]] + ([g["entity_id"]] if g else [])))
+    elif ppl["current"]:
+        inds.append(_ind("government", "No government posts among resolved current officers", "clear", "LittleSis"))
+    else:
+        inds.append(_ind("government", "Government ties", None, None, "No officers resolved to check"))
+    # 3c. Affiliations — memberships and transactions with flagged or foreign counterparties
+    ties = aff["memberships"] + aff["transactions"] + aff.get("subsidiaries", [])
+    flagged_ties = [t for t in ties if t.get("flagged")]
+    foreign_ties = [t for t in ties if t.get("foreign")]
+    hinted = [t for t in ties if t.get("foreign_hint")]
+    if flagged_ties:
+        t0 = flagged_ties[0]
+        inds.append(_ind("affiliations", f"{_tie_label(t0)} — flagged entity", "high", t0.get("source") or "LittleSis", t0.get("description"), t0.get("source_url"), ids=[t0["entity_id"]]))
+    elif foreign_ties:
+        t0 = foreign_ties[0]
+        inds.append(_ind("affiliations", f"{_tie_label(t0)} — seated in {t0.get('incorporated') or t0.get('parent_seat')}", "medium",
+                         t0.get("source") or "LittleSis", t0.get("description"), t0.get("source_url"), ids=[t0["entity_id"]]))
+    elif hinted:
+        t0 = hinted[0]
+        inds.append(_ind("affiliations", f"{_tie_label(t0)} — name suggests a foreign counterparty", "low", t0.get("source") or "LittleSis",
+                         (t0.get("description") or "") + " · jurisdiction unresolved; verify before weighting", t0.get("source_url"), ids=[t0["entity_id"]]))
+    elif ties:
+        inds.append(_ind("affiliations", f"{len(ties)} recorded affiliation{'s' if len(ties) != 1 else ''}, none foreign or flagged", "clear", "LittleSis"))
+    else:
+        inds.append(_ind("affiliations", "Affiliations", None, None, "No memberships or transactions on record"))
+    # 3d. Political exposure — lobbying and giving
+    lob = aff["lobbying"]
+    don = aff["donations"]
+    if lob:
+        cur = [l for l in lob if l.get("current")]
+        bodies = sorted({l["entity"] for l in lob})
+        inds.append(_ind("political", f"Lobbies {len(bodies)} government bod{'ies' if len(bodies) != 1 else 'y'}" + (f", {len(cur)} ongoing" if cur else ""), "low",
+                         lob[0].get("source") or "LittleSis", ", ".join(bodies[:4]) + ("…" if len(bodies) > 4 else "") + (f" · LDA registrant {e['lda_registrant_id']}" if e.get("lda_registrant_id") else ""),
+                         lob[0].get("source_url"), ids=[l["entity_id"] for l in lob[:6]]))
+    elif don:
+        inds.append(_ind("political", f"{len(don)} recorded donation{'s' if len(don) != 1 else ''}, no lobbying on record", "clear", don[0].get("source") or "LittleSis",
+                         ", ".join(sorted({d['entity'] for d in don})[:4]), don[0].get("source_url")))
+    elif e.get("lda_registrant_id"):
+        inds.append(_ind("political", "Registered lobbying entity, no relationships recorded", "low", "LittleSis", f"LDA registrant {e['lda_registrant_id']}"))
+    else:
+        inds.append(_ind("political", "Political exposure", None, None, "No lobbying or donation records"))
     # 4. Sanctions & debarment
     sanc = next((s for s in scr if s["predicate"] == "sanctions_screen"), None)
     excl = next((s for s in scr if s["predicate"] == "exclusion_screen"), None)
@@ -251,7 +392,8 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
     scr = await screens(entity_id)
     arts = await artifacts(entity_id)
     nws = await news(entity_id)
-    risk = await risk_indicators(entity_id, core, supply, ppl, scr)
+    aff = await affiliations(entity_id)
+    risk = await risk_indicators(entity_id, core, supply, ppl, scr, aff)
     e = core["e"]
     sources = sorted({s for s in [e.get("source")] + [a.get("source") for a in arts] + [p.get("source") for p in ppl["current"] + ppl["former"]] if s})
     return {
@@ -260,7 +402,9 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
             "id": e.get("id"), "name": e.get("name"), "uei": e.get("uei"), "cage": e.get("cage"), "lei": e.get("lei"),
             "aliases": e.get("aliases") or [], "kind": e.get("kind"), "registration_status": e.get("registration_status"),
             "public": e.get("public"), "ticker": e.get("ticker"), "simulated": bool(e.get("simulated")),
+            "revenue": _int(e.get("revenue")), "lda_registrant_id": e.get("lda_registrant_id"), "org_types": e.get("org_types"), "blurb": e.get("blurb"),
         },
+        "affiliations": aff,
         "geography": {
             "incorporated": core.get("incorporated"), "parent_seat": core.get("parent_seat"),
             "manufactures": core.get("manufactures"), "operates": core.get("operates"),

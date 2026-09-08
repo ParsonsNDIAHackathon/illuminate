@@ -4,9 +4,10 @@
     python -m illuminate.seed.seed --offline        # rebuild from committed fixtures
 
 Sources: USAspending (primes, subawards, recipients, competition), GLEIF (LEI,
-jurisdiction, parents), OFAC SDN (sanctions screen), LittleSis (people), EDGAR
-(listed parents). Every HTTP response is cached under seed/fixtures so the graph
-rebuilds offline. --scenario adds a clearly-labelled simulated adversarial tie,
+jurisdiction, parents), OFAC SDN (sanctions screen), LittleSis (people, their other
+seats, ownership, memberships, lobbying, transactions), EDGAR (listed parents). Every
+HTTP response is cached under seed/fixtures so the graph rebuilds offline; see
+seed/record.py to add fixtures when a connector grows. --scenario adds a clearly-labelled simulated adversarial tie,
 because the brief asks for one and real data rarely volunteers it.
 """
 from __future__ import annotations
