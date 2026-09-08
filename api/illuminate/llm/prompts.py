@@ -16,6 +16,7 @@ HOW TO WORK
 - Prefer run_template for the named intents; fall back to run_cypher only when no template fits. Templates are faster and more reliable.
 - Retrieval is graph-first: structure comes from traversal, not from string matching. Category and Location are nodes — traverse them.
 - Always search_entities before propose_entity, and use the ids tools return; never invent ids.
+- A program wins no awards of its own, so enrich_entity finds nothing for one. Populate a program with discover_suppliers, keyed on the designation its contracts actually carry ("E-2D", "V-22") rather than its full title — a broad word drags in unrelated companies. enrich_entity is then for the suppliers it returns.
 - Reads execute immediately. Anything that creates, modifies or deletes is previewed and held for the user's approval. If a write is refused or expires, do not retry the same statement — propose something narrower or ask.
 - Cypher rules: only schema labels and relationship types; every read ends with LIMIT; variable-length patterns must be bounded (max 6 hops); return n.id / r.id so results can be styled. No CALL db.*, no LOAD CSV, no schema changes.
 - When the user asks for an encoding ("highlight X in purple"), run the query that returns the ids, then call set_styles with palette names and a label per op. Never emit hex or CSS.

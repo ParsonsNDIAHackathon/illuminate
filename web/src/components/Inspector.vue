@@ -69,9 +69,35 @@
       <v-btn v-if="node.label === 'Artifact'" prepend-icon="mdi-text-box-search-outline" @click="rawId = node.id">Contents</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-file-document-outline" :to="`/entities/${node.id}`">Report</v-btn>
       <v-btn prepend-icon="mdi-arrow-expand-all" @click="$emit('expand', node.id)">Expand</v-btn>
+      <v-btn v-if="isProgram" prepend-icon="mdi-sitemap-outline" @click="openDiscover" :loading="discovering">Find suppliers</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-auto-fix" @click="enrich" :loading="enriching">Enrich</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-target" variant="text" @click="setRoot" title="Make this the consumer (root)">Set as root</v-btn>
     </div>
+    <v-dialog v-model="discoverDlg" max-width="520">
+      <v-card>
+        <v-card-title class="text-subtitle-1">Find suppliers of {{ node.name }}</v-card-title>
+        <v-card-text>
+          <p class="text-body-2 mb-3" style="opacity:.75">
+            Federal award records are searched for these words. Prime recipients become tier-1 suppliers and their
+            reported sub-awardees tier-2. Use the designation the contracts carry — “E-2D”, not the full programme
+            title — since a broad word pulls in unrelated companies that happen to share it.
+          </p>
+          <v-combobox v-model="kw" label="Award keywords" multiple chips closable-chips clearable
+                      hint="Press enter after each" persistent-hint density="comfortable" />
+          <div class="d-flex ga-3 mt-3">
+            <v-text-field v-model="agency" label="Awarding agency" density="comfortable" hide-details
+                          placeholder="Department of Defense" />
+            <v-text-field v-model.number="maxSubs" label="Max sub-awardees" type="number" density="comfortable" hide-details style="max-width:150px" />
+          </div>
+          <p v-if="discoverError" class="text-body-2 mt-3 text-error">{{ discoverError }}</p>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="discoverDlg = false">Cancel</v-btn>
+          <v-btn color="primary" :disabled="!kw.length" :loading="discovering" @click="runDiscover">Search awards</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
     <ArtifactViewer :artifact-id="rawId" @close="rawId = null" />
   </div>
 </template>
@@ -88,6 +114,9 @@ defineEmits<{ (e: 'expand', id: string): void }>()
 const node = computed(() => graph.selected)
 const p = computed(() => node.value?.props || {})
 const detail = ref<any>(null); const supplies = ref<any[]>([]); const personRoles = ref<any[]>([]); const enriching = ref(false)
+const isProgram = computed(() => node.value?.label === 'Entity' && p.value.kind === 'program')
+const discoverDlg = ref(false); const discovering = ref(false); const discoverError = ref('')
+const kw = ref<string[]>([]); const agency = ref(''); const maxSubs = ref<number | null>(null)
 watch(node, async (n) => {
   detail.value = null; supplies.value = []; personRoles.value = []
   if (!n) return
@@ -102,6 +131,27 @@ watch(node, async (n) => {
   }
 }, { immediate: true })
 async function enrich() { enriching.value = true; try { await jobs.enqueue(node.value!.id) } finally { enriching.value = false } }
+function openDiscover() {
+  // the keywords a previous search used, never a guess from the name: guessing is how
+  // "Hawkeye" pulls in a satellite company that has nothing to do with the aircraft
+  kw.value = [...(p.value.keywords || [])]
+  agency.value = p.value.award_agency ?? ''
+  maxSubs.value = p.value.max_subs ?? null
+  discoverError.value = ''
+  discoverDlg.value = true
+}
+async function runDiscover() {
+  discovering.value = true; discoverError.value = ''
+  try {
+    // the write is held at the permission gate, so this resolves when the user decides
+    await api.post(`/api/programs/${node.value!.id}/suppliers`, {
+      keywords: kw.value, agency: agency.value || null, max_subs: maxSubs.value ?? null,
+    })
+    discoverDlg.value = false
+  } catch (e: any) {
+    discoverError.value = e?.message || 'the award search was refused'
+  } finally { discovering.value = false }
+}
 async function setRoot() { await ws.save({ root_id: node.value!.id, root_label: node.value!.name }) }
 </script>
 <style scoped>

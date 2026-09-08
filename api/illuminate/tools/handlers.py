@@ -245,11 +245,11 @@ def _loc(code: str) -> tuple[str, str]:
 
 
 async def propose_entity(ctx: ToolContext, name: str, kind: str = "organization", uei: str | None = None, cage: str | None = None, lei: str | None = None,
-                         aliases: list[str] | None = None, incorporated_in: str | None = None, manufactures_in: list[str] | None = None,
+                         aliases: list[str] | None = None, keywords: list[str] | None = None, incorporated_in: str | None = None, manufactures_in: list[str] | None = None,
                          operates_in: list[str] | None = None, provides: list[str] | None = None, supplies_to: dict | None = None,
                          owned_by: dict | None = None, source_url: str | None = None, rationale: str | None = None) -> ToolResult:
     existing = await find_entity(uei=uei, cage=cage, lei=lei, name=name)
-    if existing and existing.confidence >= 0.9 and not (supplies_to or owned_by or provides or manufactures_in):
+    if existing and existing.confidence >= 0.9 and not (supplies_to or owned_by or provides or manufactures_in or keywords):
         return ToolResult(ok=True, data={"resolved_existing": {"id": existing.id, "name": existing.name, "method": existing.method, "confidence": existing.confidence},
                                           "note": "entity already exists; nothing written"})
     eid = existing.id if (existing and existing.confidence >= 0.9) else make_entity_id(uei=uei, lei=lei, cage=cage, name=name)
@@ -264,6 +264,11 @@ async def propose_entity(ctx: ToolContext, name: str, kind: str = "organization"
         "ON CREATE SET e.name=$name, e.name_norm=$name_norm, e.kind=$kind, e.uei=$uei, e.cage=$cage, e.lei=$lei, e.aliases=$aliases, e.aliases_norm=$aliases_norm,",
         "  e.source=$source, e.source_url=$source_url, e.retrieved_at=$retrieved_at, e.method=$method, e.confidence=$confidence",
     ]
+    kws = [k.strip() for k in (keywords or []) if isinstance(k, str) and k.strip()]
+    if kws and kind == "program":
+        # a program's award designations: what discover_suppliers searches on later
+        params["keywords"] = kws
+        parts.append("SET e.keywords = $keywords")
     if incorporated_in:
         lid, code = _loc(incorporated_in)
         params.update({"inc_id": lid, "inc_code": code, "inc_rid": edge_id()})
@@ -342,6 +347,59 @@ async def attach_evidence(ctx: ToolContext, subject_id: str, predicate: str, sou
     return ToolResult(ok=False, data={"error": f"write {decision.status}: {decision.reason or ''}".strip()}, cypher=v.statement, params=params, permission=perm)
 
 
+async def discover_suppliers(ctx: ToolContext, entity_id: str, keywords: list[str], agency: str | None = None, since: str | None = None,
+                             until: str | None = None, max_primes: int | None = None, max_subs: int | None = None,
+                             rationale: str | None = None) -> ToolResult:
+    """Grow a program's supply network from award records. The search itself lives in
+    the USAspending connector; this writes the parameters onto the program — so the
+    discovery is repeatable and its terms are visible next to its results — and queues
+    the job. The write goes through the gate like every other one."""
+    from ..connectors.usaspending import program_search
+    from ..enrichment.worker import worker
+
+    rows = await db.read("MATCH (e:Entity {id:$id}) RETURN e{.*} AS e", {"id": entity_id})
+    if not rows:
+        return ToolResult(ok=False, data={"error": f"no entity {entity_id}"})
+    ent = rows[0]["e"]
+    kind = ent.get("kind") or "organization"
+    if kind != "program":
+        return ToolResult(ok=False, data={"error": f"{ent.get('name')} is a {kind}, not a program",
+                                          "hint": "discover_suppliers searches awards by program keyword; for a company use enrich_entity"})
+    kws = [k.strip() for k in (keywords or []) if isinstance(k, str) and k.strip()]
+    if not kws:
+        return ToolResult(ok=False, data={"error": "keywords are required", "hint": "the designation the contracts carry, e.g. ['E-2D']"})
+
+    # Only the parameters actually given are written; the rest are left to the connector's
+    # defaults rather than frozen onto the node, so a default can still change under them.
+    params: dict[str, Any] = {"id": entity_id, "keywords": kws}
+    sets = ["e.keywords = $keywords"]
+    optional = (("award_since", "since", since or None), ("award_until", "until", until or None), ("award_agency", "agency", agency),
+                ("max_primes", "max_primes", int(max_primes) if max_primes else None),
+                ("max_subs", "max_subs", int(max_subs) if max_subs is not None else None))
+    for prop, key, value in optional:
+        if value is not None:
+            params[key] = value
+            sets.append(f"e.{prop} = ${key}")
+    statement = "MATCH (e:Entity {id:$id})\nWHERE e.kind = 'program'\nSET " + ", ".join(sets) + "\nRETURN e.id AS id"
+    try:
+        v = validate(statement, params=params)
+    except CypherRejected as e:
+        return ToolResult(ok=False, data={"error": f"internal statement rejected: {e.reason}"}, cypher=statement)
+    rat = rationale or f"Search federal awards for {', '.join(kws)} and attach the recipients as suppliers of {ent.get('name')}"
+    decision = await gate.request(v, params, source=ctx.source, conversation_id=ctx.conversation_id, tool="discover_suppliers", rationale=rat)
+    perm = {"status": decision.status, "request_id": decision.request_id, "reason": decision.reason}
+    if decision.status != "executed":
+        return ToolResult(ok=False, data={"error": f"write {decision.status}: {decision.reason or ''}".strip()}, cypher=v.statement, params=params, permission=perm)
+
+    fresh = (await db.read("MATCH (e:Entity {id:$id}) RETURN e{.*} AS e", {"id": entity_id}))[0]["e"]
+    cfg = program_search(fresh)
+    job = await worker.enqueue(entity_id, connectors=["usaspending"], user=ctx.user, requested_by=ctx.source)
+    return ToolResult(ok=True, data={"job_id": job.id, "program": {"id": entity_id, "name": ent.get("name")}, "search": cfg, "status": job.status,
+                                     "note": "Prime recipients arrive as tier-1 suppliers and reported sub-awardees as tier-2, each with its award record as evidence. "
+                                             "Suppliers land with a name and UEI only — run enrich_entity on the ones that matter for identity, ownership, geography and screens."},
+                      cypher=v.statement, params=params, permission=perm)
+
+
 async def enrich_entity(ctx: ToolContext, entity_id: str, connectors: list[str] | None = None) -> ToolResult:
     from ..enrichment.worker import worker
     rows = await db.read("MATCH (e:Entity {id:$id}) RETURN e.id AS id, e.name AS name", {"id": entity_id})
@@ -361,6 +419,7 @@ HANDLERS = {
     "attach_evidence": attach_evidence,
     "set_styles": set_styles,
     "get_entity_report": get_entity_report,
+    "discover_suppliers": discover_suppliers,
     "enrich_entity": enrich_entity,
 }
 

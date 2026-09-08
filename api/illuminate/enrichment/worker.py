@@ -100,12 +100,17 @@ class Worker:
             if not conn:
                 job.results[name] = {"error": "unknown connector"}
                 continue
+            if not conn.applies_to(entity):
+                job.results[name] = {"skipped": f"source does not speak about a {entity.get('kind') or 'organization'}"}
+                await self._emit("job_update", job.to_dict())
+                continue
             st = await conn.status(job.user)
             if not st.get("connected"):
                 job.results[name] = {"skipped": st.get("detail")}
                 await self._emit("job_update", job.to_dict())
                 continue
             res = {"facts": 0, "staged": 0, "committed": 0, "error": None}
+            touched: dict[str, None] = {job.entity_id: None}
             try:
                 facts = await conn.enrich(entity, job.user)
                 res["facts"] = len(facts)
@@ -113,6 +118,12 @@ class Worker:
                     cid = await claims.stage(f, source=conn.name, trust=conn.trust, model=f.props.pop("_model", None) if "_model" in f.props else None)
                     status = await claims.decide(cid, trust=conn.trust)
                     res["staged" if status == "staged" else "committed"] += 1
+                    # stage() rewrites the refs to whatever they resolved to, so these are
+                    # the ids the write actually touched — a supplier network reaches the
+                    # canvas whole rather than one hop from the entity being enriched.
+                    touched[f.subject.id] = None
+                    if f.object:
+                        touched[f.object.id] = None
             except Exception as e:
                 res["error"] = f"{type(e).__name__}: {e}"
             job.results[name] = res
@@ -120,7 +131,7 @@ class Worker:
             # Claims commit straight to the graph, so the canvas is told after every connector
             # rather than at the end of the job: facts appear as they are found.
             if res["committed"] or res["staged"]:
-                await events.announce([job.entity_id], reason=f"enrich:{name}", source="enrichment")
+                await events.announce(list(touched), reason=f"enrich:{name}", source="enrichment")
             # entity may have gained identifiers (LEI, CIK…) that later connectors use
             rows = await db.read("MATCH (e:Entity {id:$id}) RETURN e{.*} AS e", {"id": job.entity_id})
             entity = rows[0]["e"]
