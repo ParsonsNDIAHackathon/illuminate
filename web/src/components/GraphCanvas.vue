@@ -141,7 +141,7 @@ function toElements() {
   const zoom = cy?.zoom() || 1
   const nodes = graph.nodeList.map(n => {
     const size = n.props?.kind === 'program' ? 56 : n.label === 'Entity' ? 34 : n.label === 'Person' ? 26 : 22
-    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, baseColor: baseColor(n), shape: shapeFor(n), size, simSize: size / zoom, simFont: 11 / zoom, simBorder: 3 / zoom, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
+    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, layer: layerOf(n), baseColor: baseColor(n), shape: shapeFor(n), size, simSize: size / zoom, simFont: 11 / zoom, simBorder: 3 / zoom, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
   })
   const edges = graph.edgeList.map(e => {
     const family = relationshipFamily(e.type)
