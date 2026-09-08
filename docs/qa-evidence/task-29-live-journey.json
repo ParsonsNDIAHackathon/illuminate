@@ -1,0 +1,43 @@
+{
+  "date": "2026-09-08",
+  "environment": "isolated offline deterministic fixture",
+  "root_id": "ent_6484d4d13b76",
+  "root_name": "V-22 Osprey Program (PMA-275)",
+  "steps": [
+    {"name": "mission-readiness", "status": 200, "primary_workflow_ready": true, "freshness": "current"},
+    {"name": "mission-program", "status": 200},
+    {"name": "illumination", "status": 200, "nodes": 106, "relationships": 156},
+    {"name": "guided-manufactures-in-preset", "status": 200, "ok": true, "rows": 1},
+    {"name": "vendor-index", "status": 200, "items": 66},
+    {"name": "live-risky-incomplete-report", "status": 200, "entity": "SUBARU CORPORATION", "score": 50, "band": "high", "completeness": 0.429, "freshness": "diligence_required"},
+    {"name": "committed-claims", "status": 200, "items": 424},
+    {"name": "evidence-artifacts", "status": 200, "items": 181},
+    {"name": "findings-csv", "status": 200, "rows": 100, "content_type": "text/csv"},
+    {"name": "catalog-preview", "status": 200, "schema_valid": true, "event_id": 3},
+    {"name": "catalog-dry-run", "status": 200, "contribution_state": "validated_dry_run", "dry_run": true},
+    {"name": "catalog-status-after-dry-run", "status": 200, "contribution_state": "not_submitted"}
+  ],
+  "browser_sessions": {
+    "clean_routes": ["mission", "illumination", "vendor-risk", "comparison", "settings"],
+    "reused_profile_routes": ["mission", "illumination", "vendor-risk", "comparison", "claims", "artifacts", "settings"],
+    "interrupted_state": "pass",
+    "recovered_state": "pass"
+  },
+  "configured_workflow_retest": {
+    "workflow": "UC7 Illuminate",
+    "workflow_status": "running",
+    "primary_workflow_ready": true,
+    "freshness": "current",
+    "graph_nodes_total": 862,
+    "relationships_total": 1809,
+    "mission_graph_nodes": 106,
+    "guided_preset_ok": true,
+    "vendor_report_ok": true,
+    "committed_claims": 450,
+    "artifacts": 199,
+    "findings_csv_rows": 100,
+    "catalog_dry_run": "validated_dry_run",
+    "catalog_status_after": "not_submitted"
+  },
+  "publication_attempted": false
+}
