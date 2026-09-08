@@ -4,6 +4,17 @@ Supplier-network intelligence: one graph, any consumer. Built for the NDIA Globa
 Hackathon, Washington DC, 8–10 Sep 2026 (UC-7 supply chain illumination, UC-11 vendor risk).
 
 **What it is, what is in the graph, and how it is built: open [`details.html`](details.html).**
+For a concise judge-facing source-to-decision view, trust boundaries, deployment paths, and
+presenter answers, see the [architecture and lineage brief](docs/architecture-lineage-brief.md).
+
+**Building a partner consumer:** see the
+[`Interoperability consumer guide`](docs/INTEROPERABILITY.md) for versioned
+findings, incremental retrieval, provenance, simulation handling, and the
+planned NDIA catalog contribution.
+
+**New contributor? Follow the [contributor onboarding guide](docs/ONBOARDING.md)**
+to create a task, work in a branch, open a merge request, and run Illuminate
+locally.
 
 Requires Docker and `make`. For the host-side dev loop (hot reload) you also need
 Python ≥ 3.12 and Node ≥ 20.
@@ -71,3 +82,46 @@ Either way the graph and `api/data/` are replaced with the archive's contents. D
 `BACKUP` in `.env` or it will restore on every start.
 
 `make help` lists all targets.
+
+## Replit production deployment
+
+Replit production uses a reserved VM because Illuminate runs a WebSocket endpoint,
+a background worker, and an embedded Neo4j process. Publishing runs:
+
+```bash
+UV_PROJECT_ENVIRONMENT=$PWD/api/.venv uv sync --project api --frozen --no-dev
+npm --prefix web ci
+npm --prefix web run build
+bash scripts/replit-production.sh
+```
+
+The launcher prepares writable Neo4j directories, enables the bundled APOC core
+plugin, waits for Neo4j, rebuilds the deterministic offline V-22 mission dataset,
+then serves the API, MCP transport (`/mcp/`), WebSocket endpoint, and built Vue SPA
+from one public origin. A missing plugin, failed seed, failed process, or readiness
+timeout terminates startup rather than exposing a partially healthy deployment.
+
+### Environment
+
+- `PORT` is supplied by Replit and must not be hardcoded.
+- `NEO4J_PASSWORD` must be set as a Replit secret. If omitted, the launcher uses
+  the required `SESSION_SECRET`; never expose Neo4j's internal ports publicly.
+- Keep the selected password secret stable for retained VM state. Changing it
+  without resetting the deployment-local Neo4j store causes startup to fail
+  clearly rather than running with mismatched credentials.
+- `ILLUMINATE_STATE_ROOT` optionally relocates Neo4j and workspace state.
+- `ILLUMINATE_STARTUP_TIMEOUT_SECONDS` optionally changes the 180-second startup
+  deadline.
+- Connector credentials remain optional and must be configured through Replit
+  Secrets or the app's connector settings; do not commit them.
+
+The VM filesystem should not be treated as a durable backup. A rebuild or a new
+deployment can replace local Neo4j and application state, and the deterministic
+fixtures are seeded again at startup. Use the existing Docker backup path for
+portable archives; long-term production persistence requires a separately managed
+database, which is outside this deployment.
+
+To redeploy, merge the desired revision to `main`, open Replit Publishing, and
+publish again. After publishing, verify `/api/health?refresh=true` reports
+`ok: true` and `primary_workflow_ready: true`, then load the root page and start
+the V-22 mission from the guided entry screen.

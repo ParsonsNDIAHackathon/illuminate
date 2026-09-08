@@ -11,12 +11,18 @@
             <span class="text-caption" style="min-width: 120px; text-align: right">{{ c.connected ? c.detail : 'Key needed' }}</span>
             <v-btn v-if="c.key_name" @click="open(c)">{{ c.connected ? 'Replace' : 'Add credential' }}</v-btn>
             <v-btn v-if="c.key_name && c.connected" icon="mdi-delete-outline" variant="text" @click="remove(c)" />
-            <v-btn v-if="c.name === 'openai' && c.connected" variant="text" @click="check" :loading="checking">Test</v-btn>
+            <v-btn variant="text" @click="check(c)" :loading="checking[c.name]" :disabled="Boolean(c.key_name && !c.connected)">Test</v-btn>
+          </div>
+        </template>
+        <template #subtitle>
+          <div>{{ c.description }}</div>
+          <div v-if="checkResults[c.name]" class="text-caption mt-1" :class="checkResults[c.name].ok ? 'text-success' : 'text-error'">
+            <v-icon size="small" :icon="checkResults[c.name].ok ? 'mdi-check-circle-outline' : 'mdi-alert-circle-outline'" />
+            {{ checkResults[c.name].detail }}
           </div>
         </template>
       </v-list-item>
     </v-list>
-    <v-alert v-if="checkResult" :type="checkResult.ok ? 'success' : 'error'" variant="tonal" density="compact" class="mt-2">{{ checkResult.ok ? `Key works — ${checkResult.models} models visible` : checkResult.error }}</v-alert>
     <v-dialog v-model="dlg" max-width="520">
       <v-card v-if="editing">
         <v-card-title>{{ editing.label }} credential</v-card-title>
@@ -32,13 +38,22 @@
 </template>
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { api } from '../api/client'
+import { api, type ConnectorTestResult } from '../api/client'
 import { useChat } from '../stores/chat'
-const items = ref<any[]>([]); const dlg = ref(false); const editing = ref<any>(null); const value = ref(''); const checking = ref(false); const checkResult = ref<any>(null)
+const items = ref<any[]>([]); const dlg = ref(false); const editing = ref<any>(null); const value = ref(''); const checking = ref<Record<string, boolean>>({}); const checkResults = ref<Record<string, ConnectorTestResult>>({})
 async function load() { items.value = await api.get('/api/connectors') }
 function open(c: any) { editing.value = c; value.value = ''; dlg.value = true }
 async function save() { await api.put(`/api/connectors/${editing.value.name}/credential`, { value: value.value }); dlg.value = false; await load(); if (editing.value.name === 'openai' || editing.value.name === 'websearch') useChat().modelKey = true }
 async function remove(c: any) { await api.del(`/api/connectors/${c.name}/credential`); await load() }
-async function check() { checking.value = true; try { checkResult.value = await api.post('/api/connectors/openai/check') } finally { checking.value = false } }
+async function check(c: any) {
+  checking.value[c.name] = true
+  try {
+    checkResults.value[c.name] = await api.post<ConnectorTestResult>(`/api/connectors/${encodeURIComponent(c.name)}/test`)
+  } catch {
+    checkResults.value[c.name] = { ok: false, status: 'unavailable', detail: 'The connectivity test could not be completed' }
+  } finally {
+    checking.value[c.name] = false
+  }
+}
 onMounted(load)
 </script>

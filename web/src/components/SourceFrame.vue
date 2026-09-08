@@ -31,6 +31,9 @@
         <div v-if="summaryLoading" class="py-6 text-center"><v-progress-circular indeterminate size="24" /></div>
         <ArtifactSummary v-else-if="summary" :summary="summary" />
       </v-card-text>
+      <v-card-subtitle v-if="mode === 'frame'" class="py-2 text-caption" style="opacity:.6">
+        A site that refuses to be framed shows up blank here — open it in a new tab instead.
+      </v-card-subtitle>
     </v-card>
   </v-dialog>
 </template>

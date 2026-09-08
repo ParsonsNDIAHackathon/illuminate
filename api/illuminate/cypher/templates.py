@@ -13,6 +13,7 @@ from typing import Any, Callable
 from ..config import settings
 
 MAX_DEPTH = settings.cypher_max_hops
+MAX_SUBGRAPH_NODES = 1000
 
 
 def _depth(v, default=3) -> int:
@@ -21,6 +22,14 @@ def _depth(v, default=3) -> int:
     except Exception:
         d = default
     return max(1, min(MAX_DEPTH, d))
+
+
+def _subgraph_limit(v, default=400) -> int:
+    try:
+        limit = int(v)
+    except (TypeError, ValueError):
+        limit = default
+    return max(1, min(MAX_SUBGRAPH_NODES, limit))
 
 
 @dataclass
@@ -236,7 +245,7 @@ def _neighbourhood(p):
         rel_filter += ["ASSERTS", "TARGETS", "EVIDENCES"]
     rel_filter = list(dict.fromkeys(rel_filter))
     rf = "|".join(rel_filter)
-    bound = {"id": p["entity_id"], "limit": int(p.get("limit", 400))}
+    bound = {"id": p["entity_id"], "limit": _subgraph_limit(p.get("limit", 400))}
     if p.get("program_id"):
         # Keep the walk inside one program. Suppliers sell to several programs, so an
         # unconstrained walk hops supplier -> another program -> that program's own

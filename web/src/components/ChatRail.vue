@@ -3,8 +3,9 @@
     <div class="rail-head">
       <span class="title">Ask the graph</span>
       <v-chip size="x-small" :color="chat.connected ? 'success' : 'error'" variant="tonal">{{ chat.connected ? 'live' : 'offline' }}</v-chip>
-      <v-chip v-if="!chat.modelKey" size="x-small" color="warning" variant="tonal" title="No OpenAI key — templates only">templates only</v-chip>
+       <v-chip v-if="!chat.modelKey" size="x-small" color="warning" variant="tonal" title="Model unavailable — deterministic reports and templates remain available">deterministic mode</v-chip>
       <v-spacer />
+      <v-btn icon="mdi-compare-horizontal" variant="text" size="x-small" title="Compare vendors" to="/compare/vendors" />
       <v-btn icon="mdi-refresh" variant="text" size="x-small" title="New conversation" @click="chat.reset()" />
     </div>
     <div class="messages" ref="scroller">
@@ -47,6 +48,7 @@ const chat = useChat(); const graph = useGraph(); const ws = useWorkspace()
 const draft = ref('')
 const scroller = ref<HTMLElement>()
 const suggestions = [
+  'compare a trustworthy vendor with a high-risk vendor',
   "for all of the program's vendors, highlight goods in purple and services in yellow",
   'highlight all entities that rely on manufacturing in CN, include tier 2 and below',
   'which suppliers have a foreign ultimate parent?',

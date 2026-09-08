@@ -1,0 +1,26 @@
+{
+  "fixture": {
+    "command": "./scripts/seed.sh --offline",
+    "root_id": "ent_6484d4d13b76",
+    "root_label": "V-22 Osprey Program (PMA-275)"
+  },
+  "timing_policy": {
+    "demo_target_ms": 5000,
+    "request_timeout_ms": 7000,
+    "startup_timeout_ms": 60000,
+    "samples": 3,
+    "gate": "Maximum warm-path sample must be within the target; startup readiness is diagnostic because host resources vary."
+  },
+  "operations": [
+    {"name": "readiness", "kind": "readiness", "method": "GET", "path": "/api/health", "expect": {"field": "ok", "equals": true}, "target_ms": 5000},
+    {"name": "program-load", "kind": "program_load", "method": "GET", "path": "/api/graph/subgraph?entity_id={root_id}&depth=2", "expect": {"field": "subgraph.nodes", "min_items": 1}, "target_ms": 5000},
+    {"name": "preset-vendors", "kind": "preset", "method": "POST", "path": "/api/query/template", "body": {"name": "vendors_of", "params": {"entity_id": "{root_id}", "depth": 3}}, "expect": {"field": "data.rows", "min_items": 1}, "target_ms": 5000},
+    {"name": "preset-category", "kind": "preset", "method": "POST", "path": "/api/query/template", "body": {"name": "color_by_category", "params": {"entity_id": "{root_id}", "depth": 3}}, "expect": {"field": "data.rows", "min_items": 1}, "target_ms": 5000},
+    {"name": "preset-country", "kind": "preset", "method": "POST", "path": "/api/query/template", "body": {"name": "manufactures_in", "params": {"root_id": "{root_id}", "country": "CN", "depth": 3}}, "expect": {"field": "data.rows", "min_items": 1}, "target_ms": 5000},
+    {"name": "preset-ownership", "kind": "preset", "method": "POST", "path": "/api/query/template", "body": {"name": "ownership_chain", "params": {"entity_id": "{root_id}"}}, "expect": {"field": "data.rows", "min_items": 1}, "target_ms": 5000},
+    {"name": "preset-sole-source", "kind": "preset", "method": "POST", "path": "/api/query/template", "body": {"name": "sole_source", "params": {"root_id": "{root_id}", "depth": 3}}, "expect": {"field": "data.rows", "min_items": 1}, "target_ms": 5000},
+    {"name": "vendor-report", "kind": "report", "method": "GET", "path": "/api/entities/{root_id}/report", "expect": {"field": "entity.id", "equals": "{root_id}"}, "target_ms": 5000},
+    {"name": "comparison-data", "kind": "comparison", "method": "GET", "path": "/api/entities?limit=2&offset=0", "expect": {"field": "items", "min_items": 2}, "target_ms": 5000},
+    {"name": "export-data", "kind": "export", "method": "GET", "path": "/api/graph/subgraph?entity_id={root_id}&depth=3", "expect": {"field": "subgraph.nodes", "min_items": 1}, "target_ms": 5000}
+  ]
+}

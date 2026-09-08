@@ -47,3 +47,12 @@ waitForPort = 8080
 
 [workflows.workflow.metadata]
 outputType = "webview"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 180000
+
+[deployment]
+deploymentTarget = "vm"
+build = ["bash", "-c", "UV_PROJECT_ENVIRONMENT=$PWD/api/.venv uv sync --project api --frozen --no-dev && npm --prefix web ci && npm --prefix web run build"]
+run = ["bash", "scripts/replit-production.sh"]

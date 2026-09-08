@@ -18,6 +18,11 @@ async def list_claims(status: str | None = None, entity_id: str | None = None, l
     return await claims.list_claims(status, entity_id, limit)
 
 
+@router.get("/source-records")
+async def list_source_records(entity_id: str | None = None, limit: int = 200):
+    return await claims.list_source_records(entity_id, limit)
+
+
 @router.post("/{claim_id}/commit")
 async def commit(claim_id: str, body: Note):
     try:

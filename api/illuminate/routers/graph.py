@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from .. import db, events
@@ -7,7 +9,8 @@ from ..content import document, summarize
 from ..connectors.http import HttpError, fetch_document
 from ..graphio import subgraph_from_graph
 from ..raw import find_raw
-from ..report import build_report
+from ..report import build_report, deterministic_summary, persist_summary
+from ..supply_chain import SupplyChainAnalysis, get_supply_chain_analysis
 from ..schema import SOURCE_KINDS
 from ..tools.handlers import ToolContext, expand_subgraph, search_entities
 from .deps import user_id
@@ -25,13 +28,13 @@ async def stats():
 
 
 @router.get("/graph/search")
-async def search(q: str, kind: str = "any", limit: int = 10, user: str = Depends(user_id)):
+async def search(q: str, kind: str = "any", limit: int = Query(10, ge=1, le=50), user: str = Depends(user_id)):
     r = await search_entities(ToolContext.from_workspace(source="ui", user=user), q, kind, limit)
     return r.data
 
 
 @router.get("/graph/subgraph")
-async def subgraph(entity_id: str, depth: int = 2, people: bool = True, countries: bool = False, artifacts: bool = False,
+async def subgraph(entity_id: str, depth: int = Query(2, ge=1, le=6), people: bool = True, countries: bool = False, artifacts: bool = False,
                    sources: bool = False, claims: bool = False, categories: bool = False,
                    program_id: str | None = None, user: str = Depends(user_id)):
     """A neighbourhood around one entity. program_id — the program the canvas is focused
@@ -98,7 +101,7 @@ async def node(node_id: str):
 
 
 @router.get("/entities")
-async def entities(q: str | None = None, kind: str | None = None, flagged: bool | None = None, limit: int = Query(100, le=1000), offset: int = 0):
+async def entities(q: str | None = None, kind: str | None = None, flagged: bool | None = None, limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0, le=100000)):
     where = ["1=1"]
     params: dict = {"limit": limit, "offset": offset}
     if q:
@@ -130,7 +133,7 @@ async def entities(q: str | None = None, kind: str | None = None, flagged: bool 
 
 
 @router.get("/people")
-async def people(q: str | None = None, limit: int = Query(200, le=1000)):
+async def people(q: str | None = None, limit: int = Query(200, ge=1, le=1000)):
     params: dict = {"limit": limit}
     where = "WHERE toLower(p.name) CONTAINS toLower($q)" if q else ""
     if q:
@@ -149,7 +152,7 @@ async def people(q: str | None = None, limit: int = Query(200, le=1000)):
 
 
 @router.get("/artifacts")
-async def artifacts(kind: str | None = None, entity_id: str | None = None, limit: int = Query(200, le=1000)):
+async def artifacts(kind: str | None = None, entity_id: str | None = None, limit: int = Query(200, ge=1, le=1000)):
     where = ["1=1"]
     params: dict = {"limit": limit}
     if kind:
@@ -163,8 +166,14 @@ async def artifacts(kind: str | None = None, entity_id: str | None = None, limit
         MATCH (a:Artifact) WHERE {' AND '.join(where)}
         OPTIONAL MATCH (a)-[:ABOUT]->(e:Entity)
         OPTIONAL MATCH (a)-[:EVIDENCES]->(c:Claim)
-        RETURN a.id AS id, a.kind AS kind, a.title AS title, a.url AS url, a.source AS source, a.published_at AS published_at, a.retrieved_at AS retrieved_at,
-               a.amount AS amount, a.sentiment AS sentiment, collect(DISTINCT e{{.id,.name}})[..5] AS about, count(DISTINCT c) AS claims
+        RETURN a.id AS id, a.kind AS kind, a.title AS title, a.url AS url, a.source AS source, a.source_id AS source_id,
+               a.source_identifier AS source_identifier,
+               a.catalog_ids AS catalog_ids, a.published_at AS published_at, a.retrieved_at AS retrieved_at,
+               a.usage_note AS usage_note, a.quality_note AS quality_note, a.supports AS supports, a.unknowns AS unknowns,
+               a.source_status AS source_status,
+               a.connector_error AS connector_error, coalesce(a.simulated,false) AS simulated,
+               a.amount AS amount, a.sentiment AS sentiment, collect(DISTINCT e{{.id,.name}})[..5] AS about,
+               count(DISTINCT c) AS claims, collect(DISTINCT c.status) AS claim_statuses
         ORDER BY coalesce(a.published_at, a.retrieved_at) DESC LIMIT $limit
         """,
         params,
@@ -254,20 +263,31 @@ async def report(entity_id: str, root_id: str | None = None, user: str = Depends
     return rep
 
 
+@router.get("/entities/{entity_id}/supply-chain", response_model=SupplyChainAnalysis)
+async def supply_chain(entity_id: str):
+    """Explainable, bounded supply-chain findings for a program/root entity."""
+    analysis = await get_supply_chain_analysis(entity_id)
+    if analysis is None:
+        raise HTTPException(404, "no such program or root entity")
+    return analysis
+
+
 @router.post("/entities/{entity_id}/summary")
 async def regenerate_summary(entity_id: str, user: str = Depends(user_id)):
-    from ..llm.client import has_key
+    from ..config import settings
     from ..llm.tasks import summarize_entity
-    import time
-    if not has_key(user):
-        raise HTTPException(400, "no OpenAI key configured")
     rep = await build_report(entity_id)
     if not rep:
         raise HTTPException(404, "no such entity")
-    out = await summarize_entity(user, rep)
-    if not out:
-        raise HTTPException(502, "model did not return a summary")
-    await db.write("MATCH (e:Entity {id:$id}) SET e.summary=$s, e.summary_model=$m, e.summary_at=$t",
-                   {"id": entity_id, "s": out["summary"], "m": out["model"], "t": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+    try:
+        out = await asyncio.wait_for(
+            summarize_entity(user, rep),
+            timeout=settings.summary_timeout_s,
+        )
+    except (asyncio.TimeoutError, TimeoutError):
+        out = deterministic_summary(rep, "model_timeout")
+    except Exception:
+        out = deterministic_summary(rep, "model_unavailable_or_invalid")
+    await persist_summary(entity_id, out)
     await events.announce([entity_id], reason="summary", source="ui")
-    return {"summary": out["summary"], "model": out["model"]}
+    return out

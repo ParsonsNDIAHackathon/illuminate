@@ -50,7 +50,7 @@ const nav = computed(() => [
 ])
 async function refreshStaged() { try { staged.value = (await api.get('/api/claims?status=staged&limit=500')).length } catch {} }
 onMounted(async () => { await ws.load(); chat.bind(); perms.load(); jobs.load(); refreshStaged(); setInterval(refreshStaged, 20000) })
-watch(() => jobs.jobs.map(j => j.status).join(), (a, b) => { if (a !== b) { const done = jobs.jobs.find(j => j.status === 'done'); if (done) { snackText.value = `Enrichment done: ${done.entity_name}`; snack.value = true; refreshStaged() } } })
+watch(() => jobs.jobs.map(j => j.status).join(), (a, b) => { if (a !== b) { const done = jobs.jobs.find(j => ['succeeded', 'empty', 'partial', 'failed', 'timed_out'].includes(j.status)); if (done) { snackText.value = `Enrichment ${done.status}: ${done.entity_name}`; snack.value = true; refreshStaged() } } })
 </script>
 <style>
 .brand { font-family: 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .18em; font-weight: 700; margin-left: 12px; }

@@ -100,8 +100,6 @@ def test_graph_all_honours_layers(client):
     assert not [n for n in lean["nodes"] if n["label"] == "Person"]
     full = client.get("/api/graph/all?people=true&artifacts=true").json()["subgraph"]
     assert len(full["nodes"]) >= len(lean["nodes"])
-
-
 def test_graph_all_splits_artifacts_sources_and_claims(client):
     from illuminate.schema import SOURCE_KINDS
     every = client.get("/api/graph/all?artifacts=true&sources=true&claims=true").json()["subgraph"]["nodes"]

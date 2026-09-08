@@ -13,40 +13,26 @@ export const LAYER_KEYS = ['people', 'countries', 'categories', 'artifacts', 'so
 function layerParams(layers: Record<string, boolean>) {
   return Object.fromEntries(LAYER_KEYS.map(k => [k, !!layers[k]]))
 }
-
 const isProgram = (n: GNode) => n.label === 'Entity' && n.props?.kind === 'program'
 
 export const useGraph = defineStore('graph', {
   state: () => ({
-    nodes: new Map<string, GNode>(),
-    edges: new Map<string, GEdge>(),
-    selectedId: null as string | null,
-    selectedEdgeId: null as string | null,
-    styleOps: [] as StyleOp[],
-    legend: [] as LegendItem[],
-    lastCypher: null as { statement: string; params?: any } | null,
-    loading: false,
-    version: 0,          // bumped when elements change
-    styleVersion: 0,     // bumped when style ops change
-    highlightIds: [] as string[],
-    filter: '',          // search-bar text; canvas dims nodes that don't match
-    // The canvas shows the whole graph. focusId narrows it to one program's supply chain;
-    // null means everything, which is the default. This is the only notion of a current
-    // program anywhere — the workspace has no root.
-    focusId: null as string | null,
-    focusLabel: null as string | null,
-    // The programs the focus picker offers, kept current from live deltas so one added
-    // while the canvas is open is selectable without a reload.
+    nodes: new Map<string, GNode>(), edges: new Map<string, GEdge>(),
+    selectedId: null as string | null, selectedEdgeId: null as string | null,
+    styleOps: [] as StyleOp[], legend: [] as LegendItem[],
+    lastCypher: null as { statement: string; params?: any } | null, loading: false,
+    version: 0, styleVersion: 0, highlightIds: [] as string[],
+    focusIds: [] as string[], reportFocusLabel: '', focusVendorId: '', focusFamily: '',
+    focusUnavailableIds: [] as string[], filter: '',
+    // The current program; null deliberately means the all-graph live view.
+    focusId: null as string | null, focusLabel: null as string | null,
     programs: [] as { id: string; name: string }[],
-    truncated: false,    // the whole graph did not fit under the node cap
-    fresh: [] as string[],   // ids that just arrived from a live change, for the canvas to reveal
-    freshVersion: 0,
+    truncated: false, fresh: [] as string[], freshVersion: 0,
   }),
   getters: {
-    selected: (s) => (s.selectedId ? s.nodes.get(s.selectedId) || null : null),
-    selectedEdge: (s) => (s.selectedEdgeId ? s.edges.get(s.selectedEdgeId) || null : null),
-    nodeList: (s) => [...s.nodes.values()],
-    edgeList: (s) => [...s.edges.values()],
+    selected: s => s.selectedId ? s.nodes.get(s.selectedId) || null : null,
+    selectedEdge: s => s.selectedEdgeId ? s.edges.get(s.selectedEdgeId) || null : null,
+    nodeList: s => [...s.nodes.values()], edgeList: s => [...s.edges.values()],
   },
   actions: {
     merge(sub: { nodes: GNode[]; edges: GEdge[] } | null | undefined) {
@@ -55,15 +41,24 @@ export const useGraph = defineStore('graph', {
       for (const e of sub.edges || []) if (this.nodes.has(e.source) && this.nodes.has(e.target)) this.edges.set(e.id, e)
       this.version++
     },
-    replace(sub: { nodes: GNode[]; edges: GEdge[] } | null | undefined) { this.nodes = new Map(); this.edges = new Map(); this.merge(sub) },
-    clear() { this.nodes = new Map(); this.edges = new Map(); this.selectedId = null; this.selectedEdgeId = null; this.fresh = []; this.version++ },
+    replace(sub: { nodes: GNode[]; edges: GEdge[] } | null | undefined) {
+      this.nodes = new Map(); this.edges = new Map(); this.fresh = []; this.merge(sub)
+      if (this.focusIds.length && !this.focusIds.some(id => this.nodes.has(id) || this.edges.has(id))) this.clearFocus()
+    },
+    clear() { this.nodes = new Map(); this.edges = new Map(); this.selectedId = null; this.selectedEdgeId = null; this.fresh = []; this.clearFocus(); this.version++ },
     select(id: string | null) { this.selectedId = id; if (id) this.selectedEdgeId = null },
     selectEdge(id: string | null) { this.selectedEdgeId = id; if (id) this.selectedId = null },
     setFilter(q: string) { this.filter = (q || '').trim() },
+    setFocus(ids: string[], label = '', vendorId = '', family = '') {
+      this.focusIds = [...new Set((ids || []).filter(Boolean))].sort()
+      this.reportFocusLabel = label; this.focusVendorId = vendorId; this.focusFamily = family
+      this.focusUnavailableIds = []; this.styleVersion++
+    },
+    setFocusUnavailable(ids: string[]) { this.focusUnavailableIds = [...new Set(ids)].sort() },
+    clearFocus() { this.focusIds = []; this.reportFocusLabel = ''; this.focusVendorId = ''; this.focusFamily = ''; this.focusUnavailableIds = []; this.styleVersion++ },
     applyStyleOps(ops: StyleOp[], append = false) {
       this.styleOps = append ? [...this.styleOps, ...ops] : ops
-      this.legend = deriveLegend(this.styleOps)
-      this.styleVersion++
+      this.legend = deriveLegend(this.styleOps); this.styleVersion++
     },
     clearStyleOps() { this.styleOps = [{ op: 'clear', scope: 'all' }]; this.legend = []; this.styleVersion++ },
 
