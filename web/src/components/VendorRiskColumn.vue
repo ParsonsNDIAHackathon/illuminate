@@ -9,6 +9,7 @@
             <v-chip size="x-small" variant="tonal">{{ profile.sourceMode === 'frozen' ? 'FROZEN PRESET' : 'LIVE REPORT' }}</v-chip>
           </div>
           <div class="text-caption">Framework {{ profile.contract_version }}</div>
+           <div class="identity-line">{{ identityLine(profile) }}</div>
         </div>
         <div class="score" :class="bandClass(profile.band)">
           <strong>{{ profile.score == null ? '—' : profile.score }}</strong>
@@ -100,6 +101,7 @@
 import { computed } from 'vue'
 import type { RiskCategory, VendorRiskProfile } from '../api/client'
 import TruthBadge from './TruthBadge.vue'
+import { identityLine } from '../lib/vendorIdentity'
 
 const props = defineProps<{
   profile: VendorRiskProfile
@@ -133,4 +135,5 @@ const bandClass = (band: string) => `band-${band}`
 .category-summary { display: flex; justify-content: space-between; gap: 8px; }.contribution { font: 700 17px ui-monospace, monospace; opacity: .55; }.contribution.active { color: #d32f2f; opacity: 1; }
 .evidence { border-left: 3px solid rgba(128,128,128,.3); padding: 6px 9px; margin-top: 7px; font-size: 12px; }.evidence small { opacity: .7; }
 .excluded-evidence { display: flex; gap: 5px; align-items: center; margin-top: 5px; font-size: 11px; }
+.identity-line { margin-top: 4px; font: 11px ui-monospace, monospace; opacity: .78; overflow-wrap: anywhere; }
 </style>

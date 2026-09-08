@@ -5,6 +5,11 @@ export interface EntitySummary {
   name: string
   tier: number | string | null
   simulated: boolean
+  uei?: string | null
+  cage?: string | null
+  lei?: string | null
+  kind?: string
+  source?: string | null
 }
 
 export interface OwnershipArtifact {
@@ -140,6 +145,10 @@ export type VendorRiskProfile = {
   id: string
   name: string
   simulated: boolean
+  uei?: string | null
+  cage?: string | null
+  lei?: string | null
+  tier?: number | string | null
   sourceMode: 'live' | 'frozen'
   contract_version: string
   score: number | null
@@ -253,6 +262,10 @@ export async function getVendorRiskProfile(id: string, suppliedReport?: any, roo
     id: report.identity?.id || id,
     name: report.identity?.name || id,
     simulated: Boolean(report.identity?.simulated),
+    uei: report.identity?.uei,
+    cage: report.identity?.cage,
+    lei: report.identity?.lei,
+    tier: report.identity?.tier,
     sourceMode: 'live',
     contract_version: risk.contract_version || 'unavailable',
     score: risk.score ?? null,

@@ -90,7 +90,8 @@
             <tr v-for="(row, index) in filtered" :key="row.entity.id" :class="[profileClass(row), { unavailable: !row.contract && !row.pending }]">
               <td class="rank">{{ String(index + 1).padStart(2, '0') }}</td>
               <td class="vendor"><router-link :to="vendorDestination(row.entity.id)">{{ row.entity.name }}</router-link>
-                <div><span v-if="row.entity.simulated" class="tag sim">SIMULATED</span><span v-if="row.pending" class="tag pending">ASSESSING</span><span v-else-if="!row.contract" class="tag missing">REPORT UNAVAILABLE</span><span v-else class="version">{{ row.contract.contract_version || 'unversioned contract' }}</span></div>
+                <small class="identity">{{ identityLine(row.entity) }}</small>
+                <div><span v-if="isAmbiguous(row.entity)" class="tag ambiguous">SAME-NAME — VERIFY IDENTITY</span><span v-if="row.entity.simulated" class="tag sim">SIMULATED</span><span v-if="row.pending" class="tag pending">ASSESSING</span><span v-else-if="!row.contract" class="tag missing">REPORT UNAVAILABLE</span><span v-else class="version">{{ row.contract.contract_version || 'unversioned contract' }}</span></div>
               </td>
               <td class="mono">{{ row.entity.tier ?? '—' }}</td>
               <td class="decision"><div class="score" :class="riskClass(row)">{{ number(row.contract?.score) }}</div><div><b>{{ row.contract?.band || 'Not assessed' }}</b><small>{{ row.contract?.disposition || 'No disposition available' }}</small></div></td>
@@ -110,6 +111,7 @@ import { computed, defineComponent, h, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, qs, type EntityListResponse, type EntityReportContract, type EntityRiskContract, type EntitySummary } from '../api/client'
 import { compareTrustworthy } from '../lib/portfolioTriage'
+import { identityLine } from '../lib/vendorIdentity'
 import { useGraph } from '../stores/graph'
 
 type Row = { entity: EntitySummary; contract: EntityRiskContract | null; pending?: boolean; retrying?: boolean; error?: string }
@@ -133,6 +135,14 @@ const categoryOptions = computed(() => [...new Set(rows.value.flatMap(categoryNa
 const staleCount = computed(() => rows.value.filter(hasStaleEvidence).length)
 const missionRoot = computed(() => String(route.query.root_id || graph.focusId || ''))
 const missionLabel = computed(() => graph.focusLabel || (missionRoot.value ? 'the active mission' : 'the full workspace'))
+const duplicateNames = computed(() => {
+  const counts = new Map<string, number>()
+  for (const row of rows.value) {
+    const name = row.entity.name.toLocaleLowerCase()
+    counts.set(name, (counts.get(name) || 0) + 1)
+  }
+  return counts
+})
 const advancedCount = computed(() => Number(Boolean(severity.value)) + Number(simulation.value !== 'all') + Number(freshness.value !== 'all') + Number(confidenceFloor.value > 0) + Number(completenessFloor.value > 0))
 const activeConstraints = computed(() => [
   search.value && { key: 'search', label: `Search: ${search.value}`, clear: () => { search.value = '' } },
@@ -195,6 +205,7 @@ async function retryFailed() {
 }
 function vendorDestination(id: string, tab?: 'risk' | 'artifacts') { return { path: `/entities/${id}`, query: { tab, root_id: missionRoot.value || undefined } } }
 function comparisonDestination(id: string) { return { path: '/compare/vendors', query: { left: id, root_id: missionRoot.value || undefined } } }
+function isAmbiguous(entity: EntitySummary) { return (duplicateNames.value.get(entity.name.toLocaleLowerCase()) || 0) > 1 }
 function percent(v: number | null | undefined) { if (v == null) return null; return Math.round(v <= 1 ? v * 100 : v) }
 function meetsFloor(v: number | null | undefined, floor: number) { const p = percent(v); return p == null ? floor === 0 : p >= floor }
 function number(v: number | null | undefined) { return v == null ? '—' : Number(v).toFixed(Number(v) % 1 ? 1 : 0) }
@@ -243,6 +254,7 @@ onMounted(load)
 table{min-width:1160px;font-size:12px}th{font-size:10px;letter-spacing:.06em;padding:10px 7px}td{padding:9px 7px}.eyebrow,.state-kicker,.readout span,.readout small,.range label,.table-meta{font-size:11px}.brief-head p{font-size:14px}.advisory{font-size:13px}.vendor{min-width:175px}.vendor>a{font-size:13px}.actions a{font-size:10px;padding:6px 5px}
 .primary-controls{display:grid;grid-template-columns:1.5fr repeat(3,minmax(130px,1fr)) auto;gap:8px;padding:14px 0 12px}.advanced-controls{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr)) 1.5fr 1.5fr;gap:8px;padding:12px;background:var(--control);border:1px solid var(--line)}.advanced-toggle{height:40px!important}.constraint-strip{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:10px 0;border-bottom:1px solid var(--line);font:10px 'DM Mono'}.constraint-strip>span{color:var(--muted);letter-spacing:.08em}.constraint-strip button{border:1px solid var(--teal);color:var(--teal);padding:5px 7px;background:transparent;cursor:pointer}.constraint-strip .clear-all{border-color:transparent;text-decoration:underline}.advanced-controls .range{grid-column:auto;background:var(--panel)}.decision{display:flex;align-items:center;gap:9px;min-width:180px}.evidence-summary{display:grid;gap:4px;min-width:190px}.evidence-summary>span{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:9px}
 .row-next{display:flex;align-items:center;white-space:nowrap}
+.vendor .identity{font:9px 'DM Mono',monospace;color:var(--muted);margin:2px 0 4px;max-width:270px}.tag.ambiguous{background:var(--tag-missing);color:var(--stale-ink)}
 @media(max-width:900px){.primary-controls,.advanced-controls{grid-template-columns:1fr 1fr}}@media(max-width:600px){.primary-controls,.advanced-controls{grid-template-columns:1fr}}
 @media(max-width:900px){.portfolio{padding:18px 14px 40px}.brief-head{grid-template-columns:1fr}.readout{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.controls{grid-template-columns:1fr 1fr}.range{grid-column:span 1}.table-meta{gap:10px}.legend{display:none}}@media(max-width:600px){.portfolio{padding:12px 10px 32px}.controls{grid-template-columns:1fr}.range{grid-column:span 1}.brief-head{gap:18px}.table-meta{align-items:flex-start;flex-direction:column}.state-panel{margin:28px auto;padding:22px 18px}.advisory{overflow-wrap:anywhere}}
 </style>
