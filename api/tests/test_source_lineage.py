@@ -357,6 +357,66 @@ def test_seed_artifact_reuse_preserves_original_provenance():
     assert artifact["simulated"] is True
     assert artifact["last_ingested_at"]
 
+
+def test_seed_entity_and_relationship_reuse_preserve_retrieval_time():
+    from illuminate.seed import seed as seed_module
+
+    original_write = seed_module.db.write
+    stored_entity = {}
+    stored_relationship = {}
+
+    async def fake_write(query, params=None):
+        if "MERGE (e:Entity" in query:
+            if not stored_entity:
+                stored_entity.update(params["p"])
+                stored_entity["retrieved_at"] = params["retrieved"]
+                stored_entity["first_ingested_at"] = params["ingested"]
+            stored_entity.update(params["p"])
+            stored_entity["last_ingested_at"] = params["ingested"]
+        elif "MERGE (a)-[r:SUPPLIES" in query:
+            if not stored_relationship:
+                stored_relationship.update(params["p"])
+                stored_relationship["retrieved_at"] = params["retrieved"]
+                stored_relationship["first_ingested_at"] = params["ingested"]
+            stored_relationship.update(params["p"])
+            stored_relationship["last_ingested_at"] = params["ingested"]
+
+    async def check():
+        seed_module.db.write = fake_write
+        try:
+            original_stamp = "2020-01-01T00:00:00Z"
+            await seed_module.merge_entity(
+                "ent_supplier",
+                {"name": "Supplier", "source": "fixture", "retrieved_at": original_stamp},
+            )
+            await seed_module.merge_rel(
+                "ent_supplier",
+                "SUPPLIES",
+                "ent_program",
+                {"sole_source": True, "source": "fixture", "retrieved_at": original_stamp},
+            )
+            await seed_module.merge_entity(
+                "ent_supplier",
+                {"name": "Supplier", "source": "fixture"},
+            )
+            await seed_module.merge_rel(
+                "ent_supplier",
+                "SUPPLIES",
+                "ent_program",
+                {"sole_source": True, "source": "fixture"},
+            )
+        finally:
+            seed_module.db.write = original_write
+
+    asyncio.run(check())
+    assert stored_entity["retrieved_at"] == "2020-01-01T00:00:00Z"
+    assert stored_relationship["retrieved_at"] == "2020-01-01T00:00:00Z"
+    assert stored_entity["first_ingested_at"]
+    assert stored_entity["last_ingested_at"]
+    assert stored_relationship["first_ingested_at"]
+    assert stored_relationship["last_ingested_at"]
+
+
 def test_cached_gdelt_never_falls_back_to_an_unrelated_root():
     from illuminate.seed import seed as seed_module
 

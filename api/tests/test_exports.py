@@ -92,6 +92,27 @@ async def test_schema_and_canonical_page_validate(fake_db):
     assert evidence_lineage.source_id == "opencorporates-v0.4"
     assert evidence_lineage.unknowns == "does not establish beneficial ownership"
     assert {p.edges[0].type for p in simulated_finding.paths} == {"ASSERTS", "TARGETS", "EVIDENCES"}
+    for finding in validated.findings:
+        claim_id = next(item.claim_id for item in finding.provenance if item.scope == "claim")
+        claim_nodes = {
+            node.id
+            for path in finding.paths
+            for node in path.nodes
+            if node.type == "Claim"
+        }
+        assert claim_nodes == {claim_id}
+        assert all(
+            edge.source == claim_id
+            for path in finding.paths
+            for edge in path.edges
+            if edge.type in {"ASSERTS", "TARGETS"}
+        )
+        assert all(
+            edge.target == claim_id
+            for path in finding.paths
+            for edge in path.edges
+            if edge.type == "EVIDENCES"
+        )
     assert "properties" in exports.FindingPage.model_json_schema()
 
 
@@ -207,7 +228,22 @@ def test_stable_fallback_id():
     assert exports._stable_finding_id(row) == exports._stable_finding_id(dict(row))
     assert exports._stable_finding_id(row).startswith("fnd_")
 
+@pytest.mark.parametrize("status", ["staged", "committed", "rejected"])
+def test_truth_status_and_simulation_survive_export_projection(status):
+    row = {
+        **ROWS[0],
+        "claim_id": f"clm_{status}",
+        "identity_key": f"clm_{status}|ent_1",
+        "status": status,
+        "claim_simulated": status == "staged",
+    }
+    finding = exports._finding(row)
 
+    assert finding.truth_status == status
+    assert finding.simulated is (status == "staged")
+    assert finding.finding_id == exports._stable_finding_id(row)
+    assert finding.finding_id != row["claim_id"]
+    assert finding.paths[0].nodes[0].id == row["claim_id"]
 def test_all_targets_are_exported_in_order():
     row = dict(ROWS[1])
     row["targets"] = [

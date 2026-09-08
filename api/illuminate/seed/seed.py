@@ -46,8 +46,22 @@ async def reset_graph() -> None:
 
 async def merge_entity(eid: str, props: dict) -> None:
     props = {k: v for k, v in props.items() if v is not None}
-    props.setdefault("retrieved_at", now_iso())
-    await db.write("MERGE (e:Entity {id:$id}) SET e += $p, e.name_norm = coalesce(e.name_norm, $nn)", {"id": eid, "p": props, "nn": normalize_name(props.get("name", ""))})
+    retrieved_at = props.pop("retrieved_at", None) or now_iso()
+    ingested_at = now_iso()
+    await db.write(
+        "MERGE (e:Entity {id:$id}) "
+        "ON CREATE SET e.retrieved_at=$retrieved, e.first_ingested_at=$ingested "
+        "SET e += $p, e.retrieved_at=coalesce(e.retrieved_at,$retrieved), "
+        "e.first_ingested_at=coalesce(e.first_ingested_at,$ingested), "
+        "e.last_ingested_at=$ingested, e.name_norm=coalesce(e.name_norm,$nn)",
+        {
+            "id": eid,
+            "p": props,
+            "nn": normalize_name(props.get("name", "")),
+            "retrieved": retrieved_at,
+            "ingested": ingested_at,
+        },
+    )
 
 
 async def merge_location(code: str) -> str:
@@ -58,11 +72,26 @@ async def merge_location(code: str) -> str:
 
 async def merge_rel(src: str, rel: str, dst: str, props: dict, key_props: dict | None = None) -> None:
     props = {k: v for k, v in props.items() if v is not None}
-    props.setdefault("retrieved_at", now_iso())
+    retrieved_at = props.pop("retrieved_at", None) or now_iso()
+    ingested_at = now_iso()
     key = key_props or {}
     key_clause = (" {" + ", ".join(f"{k}: $key.{k}" for k in key) + "}") if key else ""
-    await db.write(f"MATCH (a {{id:$a}}), (b {{id:$b}}) MERGE (a)-[r:{rel}{key_clause}]->(b) ON CREATE SET r.id=$rid SET r += $p",
-                   {"a": src, "b": dst, "p": props, "rid": edge_id(), "key": key})
+    await db.write(
+        f"MATCH (a {{id:$a}}), (b {{id:$b}}) MERGE (a)-[r:{rel}{key_clause}]->(b) "
+        "ON CREATE SET r.id=$rid, r.retrieved_at=$retrieved, r.first_ingested_at=$ingested "
+        "SET r += $p, r.retrieved_at=coalesce(r.retrieved_at,$retrieved), "
+        "r.first_ingested_at=coalesce(r.first_ingested_at,$ingested), "
+        "r.last_ingested_at=$ingested",
+        {
+            "a": src,
+            "b": dst,
+            "p": props,
+            "rid": edge_id(),
+            "key": key,
+            "retrieved": retrieved_at,
+            "ingested": ingested_at,
+        },
+    )
 
 
 async def merge_artifact(aid: str, props: dict, about: str) -> None:

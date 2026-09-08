@@ -102,6 +102,22 @@ def test_stale_fixture_keeps_risk_but_flags_freshness():
     assert any(f["code"] == "stale_evidence" for f in result["diligence_flags"])
 
 
+def test_repeated_fixture_projection_cannot_change_stale_graph_evidence():
+    stale_supply = supply(sole=True)
+    stale_supply["risk_evidence"][0]["retrieved_at"] = "2020-01-01"
+
+    first = evaluate_risk_contract(core(), stale_supply, [], as_of=AS_OF)
+    repeated = evaluate_risk_contract(core(), stale_supply, [], as_of=AS_OF)
+
+    assert repeated == first
+    supply_category = next(c for c in repeated["categories"] if c["id"] == "supply_criticality")
+    assert supply_category["freshness"] == "stale"
+    assert any(
+        flag["category"] == "supply_criticality" and flag["code"] == "stale_evidence"
+        for flag in repeated["diligence_flags"]
+    )
+
+
 def test_simulated_staged_and_rejected_evidence_never_scores_as_fact():
     excluded = [
         screen("cyber", "high", simulated=True),

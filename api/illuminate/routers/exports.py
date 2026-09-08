@@ -346,13 +346,14 @@ def _stable_finding_id(row: dict[str, Any]) -> str:
 def _finding(row: dict[str, Any]) -> Finding:
     fid = _stable_finding_id(row)
     subject_id = str(row.get("subject_id") or "unknown")
-    claim_node = PathNode(id=fid, type="Claim", name=row.get("predicate"))
+    claim_node_id = str(row.get("claim_id") or fid)
+    claim_node = PathNode(id=claim_node_id, type="Claim", name=row.get("predicate"))
     subject = PathNode(id=subject_id, type=row.get("subject_type") or "Node", name=row.get("subject_name"))
-    paths = [TypedPath(nodes=[claim_node, subject], edges=[PathEdge(type="ASSERTS", source=fid, target=subject_id)])]
+    paths = [TypedPath(nodes=[claim_node, subject], edges=[PathEdge(type="ASSERTS", source=claim_node_id, target=subject_id)])]
     targets = row.get("targets") or []
     for item in targets:
         target = PathNode(id=str(item["id"]), type=item.get("type") or "Node", name=item.get("name"))
-        paths.append(TypedPath(nodes=[claim_node, target], edges=[PathEdge(type="TARGETS", source=fid, target=target.id)]))
+        paths.append(TypedPath(nodes=[claim_node, target], edges=[PathEdge(type="TARGETS", source=claim_node_id, target=target.id)]))
     provenance = [Provenance(
         scope="claim", source=row.get("source"), source_id=row.get("source_id"),
         source_identifier=row.get("source_identifier"), catalog_ids=row.get("catalog_ids") or [],
@@ -372,7 +373,7 @@ def _finding(row: dict[str, Any]) -> Finding:
             continue
         aid = str(artifact["id"])
         artifact_node = PathNode(id=aid, type="Artifact", name=artifact.get("title"))
-        paths.append(TypedPath(nodes=[artifact_node, claim_node], edges=[PathEdge(type="EVIDENCES", source=aid, target=fid)]))
+        paths.append(TypedPath(nodes=[artifact_node, claim_node], edges=[PathEdge(type="EVIDENCES", source=aid, target=claim_node_id)]))
         provenance.append(Provenance(
             scope="artifact", source=artifact.get("source"), source_id=artifact.get("source_id"),
             source_identifier=artifact.get("source_identifier"), catalog_ids=artifact.get("catalog_ids") or [],
