@@ -4,12 +4,12 @@
     <p class="text-body-2 mb-4" style="opacity:.75">Credentials are encrypted at rest and decrypted only inside the connector process; they never enter a prompt. Without an OpenAI key the app degrades to graph browsing and template queries.</p>
     <v-list lines="two">
       <v-list-item v-for="c in items" :key="c.name" :title="c.label" :subtitle="c.description">
-        <template #prepend><v-icon :icon="c.connected ? 'mdi-check-circle' : (c.needs_key ? 'mdi-key-alert' : 'mdi-alert-circle')" :color="c.connected ? 'success' : 'warning'" /></template>
+        <template #prepend><v-icon :icon="statusIcon(c)" :color="statusColor(c)" /></template>
         <template #append>
           <div class="d-flex align-center ga-2">
             <v-chip size="x-small" variant="tonal" :color="c.trust === 'authoritative' ? 'primary' : undefined">{{ c.trust }}</v-chip>
-            <v-chip size="x-small" :color="c.connected ? 'success' : 'warning'" variant="tonal">{{ state(c) }}</v-chip>
-            <span class="text-caption" style="min-width: 120px; text-align: right">{{ c.detail || reason(c) }}</span>
+            <v-chip size="x-small" :color="statusColor(c)" variant="tonal">{{ statusLabel(c) }}</v-chip>
+            <span class="text-caption" style="min-width: 120px; text-align: right">{{ statusDetail(c) }}</span>
             <v-btn v-if="c.key_name" @click="open(c)">{{ c.connected ? 'Replace' : 'Add credential' }}</v-btn>
             <v-btn v-if="c.key_name && c.connected" icon="mdi-delete-outline" variant="text" @click="remove(c)" />
             <v-btn variant="text" @click="check(c)" :loading="checking[c.name]" :disabled="Boolean(c.key_name && !c.connected)">Test</v-btn>
@@ -49,7 +49,7 @@
           <p class="text-body-2 mb-3" v-if="editing.key_url">Register: <a :href="editing.key_url" target="_blank" rel="noopener">{{ editing.key_url }}</a></p>
           <v-text-field v-model="value" label="API key" type="password" autofocus hide-details @keydown.enter="save" />
         </v-card-text>
-        <v-card-actions><v-spacer /><v-btn variant="text" @click="dlg = false">Cancel</v-btn><v-btn color="primary" variant="flat" @click="save" :disabled="!value.trim()">Save</v-btn></v-card-actions>
+        <v-card-actions><v-spacer /><v-btn variant="text" @click="dlg = false">Cancel</v-btn><v-btn color="primary" variant="flat" @click="save" :disabled="!value.trim()" :loading="saving">Save & test</v-btn></v-card-actions>
       </v-card>
     </v-dialog>
   </v-container>
@@ -57,15 +57,14 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { api, type ConnectorTestResult } from '../api/client'
+import { invalidateConnectorResults, isModelBackedConnector, recordConnectorResult } from '../connectors/diagnosticState'
 import { useChat } from '../stores/chat'
-const items = ref<any[]>([]); const coverage = ref<any[]>([]); const dlg = ref(false); const editing = ref<any>(null); const value = ref(''); const checking = ref<Record<string, boolean>>({}); const checkResults = ref<Record<string, ConnectorTestResult>>({})
+const items = ref<any[]>([]); const coverage = ref<any[]>([]); const dlg = ref(false); const editing = ref<any>(null); const value = ref(''); const saving = ref(false); const checking = ref<Record<string, boolean>>({}); const checkResults = ref<Record<string, ConnectorTestResult>>({})
 async function load() {
   const [connectors, sources] = await Promise.all([api.get<any[]>('/api/connectors'), api.get<any[]>('/api/connectors/coverage')])
   items.value = connectors
   coverage.value = sources
 }
-function state(c: any) { return c.connected ? 'connected' : (c.needs_key ? 'credential required' : 'unavailable') }
-function reason(c: any) { return c.needs_key ? 'Add a credential to query this source' : 'Source is not currently reachable' }
 function sourceState(status: string) { return status === 'available' ? 'query adapter available' : status.replaceAll('_', ' ') }
 function coverageColor(status: string) { return status === 'available' ? 'primary' : (status === 'not_applicable' ? undefined : 'warning') }
 function coverageIcon(status: string) {
@@ -75,14 +74,63 @@ function coverageIcon(status: string) {
   return 'mdi-alert-circle-outline'
 }
 function open(c: any) { editing.value = c; value.value = ''; dlg.value = true }
-async function save() { await api.put(`/api/connectors/${editing.value.name}/credential`, { value: value.value }); dlg.value = false; await load(); if (editing.value.name === 'openai' || editing.value.name === 'websearch') useChat().modelKey = true }
-async function remove(c: any) { await api.del(`/api/connectors/${c.name}/credential`); await load() }
-async function check(c: any) {
+function testState(c: any): boolean | null {
+  if (checkResults.value[c.name]) return checkResults.value[c.name].ok
+  return c.key_name ? null : Boolean(c.connected)
+}
+function statusIcon(c: any) {
+  const state = testState(c)
+  return state === true ? 'mdi-check-circle' : state === false ? 'mdi-alert-circle' : c.connected ? 'mdi-key' : 'mdi-key-alert'
+}
+function statusColor(c: any) {
+  const state = testState(c)
+  return state === true ? 'success' : state === false ? 'error' : c.connected ? 'info' : 'warning'
+}
+function statusLabel(c: any) {
+  const state = testState(c)
+  return state === true ? 'available' : state === false ? 'failed' : c.connected ? 'unverified' : (c.needs_key ? 'credential required' : 'unavailable')
+}
+function statusDetail(c: any) {
+  return checkResults.value[c.name]?.detail || (c.connected ? (c.key_name ? 'Credential configured; not yet verified' : c.detail) : 'Key needed')
+}
+function updateModelAvailability(c: any, result: ConnectorTestResult) {
+  if (isModelBackedConnector(c.name)) useChat().modelKey = result.ok
+}
+function recordResult(c: any, result: ConnectorTestResult) {
+  checkResults.value = recordConnectorResult(checkResults.value, c.name, result)
+  updateModelAvailability(c, result)
+}
+async function save() {
+  const name = editing.value.name
+  saving.value = true
+  try {
+    checkResults.value = invalidateConnectorResults(checkResults.value, name)
+    if (isModelBackedConnector(name)) useChat().modelKey = false
+    await api.put(`/api/connectors/${name}/credential`, { value: value.value })
+    dlg.value = false
+    await load()
+    const connector = items.value.find(c => c.name === name)
+    if (connector) await check(connector)
+  } finally {
+    saving.value = false
+  }
+}
+async function remove(c: any) {
+  await api.del(`/api/connectors/${c.name}/credential`)
+  if (isModelBackedConnector(c.name)) useChat().modelKey = false
+  checkResults.value = invalidateConnectorResults(checkResults.value, c.name)
+  await load()
+}
+async function check(c: any): Promise<ConnectorTestResult> {
   checking.value[c.name] = true
   try {
-    checkResults.value[c.name] = await api.post<ConnectorTestResult>(`/api/connectors/${encodeURIComponent(c.name)}/test`)
+    const result = await api.post<ConnectorTestResult>(`/api/connectors/${encodeURIComponent(c.name)}/test`)
+    recordResult(c, result)
+    return result
   } catch {
-    checkResults.value[c.name] = { ok: false, status: 'unavailable', detail: 'The connectivity test could not be completed' }
+    const result: ConnectorTestResult = { ok: false, status: 'unavailable', detail: 'The connectivity test could not be completed' }
+    recordResult(c, result)
+    return result
   } finally {
     checking.value[c.name] = false
   }

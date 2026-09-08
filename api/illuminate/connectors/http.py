@@ -27,6 +27,7 @@ _fixture_store = False
 RetrievalMode = Literal["operational_live", "offline_fixture"]
 _retrieval_mode: ContextVar[RetrievalMode] = ContextVar("retrieval_mode", default="operational_live")
 _retrieval_trace: ContextVar[list[dict] | None] = ContextVar("retrieval_trace", default=None)
+from dataclasses import dataclass
 
 
 def set_cache_dir(p: Path | None, read_only: bool = False, *, fixture_store: bool = False) -> None:
@@ -105,7 +106,12 @@ class HttpError(Exception):
         super().__init__(f"HTTP {status} for {scrub(url)}")
         self.status = status
 
-
+@dataclass(frozen=True)
+class ProbeResponse:
+    """Bounded diagnostic response; callers must never return its body."""
+    status: int
+    body: bytes
+    content_type: str
 def _public_ip(address: str) -> bool:
     ip = ipaddress.ip_address(address)
     return not (
@@ -148,7 +154,7 @@ async def ensure_public_http_url(url: str) -> httpx.URL:
 
 
 async def probe_source(url: str, *, params: dict | None = None, headers: dict | None = None,
-                       timeout: float = 8.0, max_bytes: int = 4096) -> None:
+                       timeout: float = 8.0, max_bytes: int = 4096) -> ProbeResponse:
     """Make one bounded, non-cached GET used only for connector diagnostics."""
     req = httpx.Request("GET", url, params=params)
     full = str(req.url)
@@ -167,10 +173,18 @@ async def probe_source(url: str, *, params: dict | None = None, headers: dict | 
                 # Never read an upstream error body into memory or the exception.
                 raise HttpError(response.status_code, full)
             read = 0
-            async for chunk in response.aiter_raw(chunk_size=min(1024, max_bytes)):
-                read += len(chunk)
+            chunks: list[bytes] = []
+            async for chunk in response.aiter_bytes(chunk_size=min(1024, max_bytes)):
+                remaining = max_bytes - read
+                chunks.append(chunk[:remaining])
+                read += min(len(chunk), remaining)
                 if read >= max_bytes:
                     break
+            return ProbeResponse(
+                status=response.status_code,
+                body=b"".join(chunks),
+                content_type=(response.headers.get("content-type") or "").lower(),
+            )
 
 
 async def fetch_json(method: str, url: str, *, params: dict | None = None, json_body: Any = None, headers: dict | None = None,
