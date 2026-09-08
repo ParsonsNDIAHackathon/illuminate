@@ -54,6 +54,77 @@ run_fail_with() {
   printf 'ok %d - %s\n' "$pass" "$description"
 }
 
+assert_secret_absent() {
+  local secret="$1"
+  ! grep -R -F "$secret" "$TMP/output" "$2/.git/config" >/dev/null 2>&1 || {
+    printf 'FAIL: credential material leaked into output or persistent Git configuration\n' >&2
+    exit 1
+  }
+}
+
+make_auth_git_wrapper() {
+  local base="$1"
+  mkdir -p "$base/bin"
+  cat >"$base/bin/git" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "-c" && "${2:-}" == "credential.helper=" &&
+      "${3:-}" == "-c" && "${4:-}" == "credential.username=x-access-token" &&
+      ( "${5:-}" == fetch || "${5:-}" == push ) ]]; then
+  operation="$5"
+  shift 5
+  [[ "${GIT_TERMINAL_PROMPT:-}" == 0 ]]
+  [[ -x "${GIT_ASKPASS:-}" ]]
+  username="$("$GIT_ASKPASS" 'Username for https://github.com:')"
+  password="$("$GIT_ASKPASS" 'Password for https://github.com:')"
+  [[ "$username" == x-access-token ]]
+  if [[ "$password" != "$EXPECTED_GITHUB_KEY" || "${REJECT_AUTH:-0}" == 1 ]]; then
+    echo "fatal: Authentication failed for GitHub" >&2
+    exit 128
+  fi
+  printf '%s\n' "$operation" >>"$AUTH_TRACE"
+  if [[ "$operation" == fetch ]]; then
+    [[ "${1:-}" == --no-tags && "${2:-}" == origin ]]
+    exec "$REAL_GIT" fetch --no-tags "$AUTH_REMOTE" "${@:3}"
+  fi
+  [[ "${1:-}" == origin ]]
+  exec "$REAL_GIT" push "$AUTH_REMOTE" "${@:2}"
+fi
+exec "$REAL_GIT" "$@"
+EOF
+  chmod +x "$base/bin/git"
+}
+
+make_plain_git_wrapper() {
+  local base="$1"
+  mkdir -p "$base/bin"
+  cat >"$base/bin/git" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == fetch || "${1:-}" == push ]]; then
+  operation="$1"
+  shift
+  [[ "${GIT_ASKPASS:-}" != */illuminate-git-askpass.*/* ]]
+  if [[ -n "${CREDENTIAL_HELPER:-}" ]]; then
+    "$CREDENTIAL_HELPER" get <<CREDENTIAL
+protocol=https
+host=github.com
+
+CREDENTIAL
+  fi
+  printf '%s\n' "$operation" >>"$AUTH_TRACE"
+  if [[ "$operation" == fetch ]]; then
+    [[ "${1:-}" == --no-tags && "${2:-}" == origin ]]
+    exec "$REAL_GIT" fetch --no-tags "$AUTH_REMOTE" "${@:3}"
+  fi
+  [[ "${1:-}" == origin ]]
+  exec "$REAL_GIT" push "$AUTH_REMOTE" "${@:2}"
+fi
+exec "$REAL_GIT" "$@"
+EOF
+  chmod +x "$base/bin/git"
+}
+
 new_fixture equal
 run_ok "clean equality" bash -c "cd '$TMP/equal/work' && '$SYNC' --check"
 run_ok "idempotent rerun" bash -c "cd '$TMP/equal/work' && '$SYNC' --check"
@@ -102,6 +173,93 @@ new_fixture auth
 git -C "$TMP/auth/work" remote set-url origin "$TMP/auth/missing-origin.git"
 run_fail_with "fetch failure gives authentication guidance" "Confirm GitHub authentication" \
   bash -c "cd '$TMP/auth/work' && '$SYNC' --check"
+
+real_git="$(command -v git)"
+secret='sync-test-token-must-not-leak'
+
+new_fixture secret_auth
+make_auth_git_wrapper "$TMP/secret_auth"
+git -C "$TMP/secret_auth/work" remote set-url origin https://github.com/example/illuminate.git
+run_ok "Replit HTTPS fetch uses ephemeral GITHUB_KEY authentication" \
+  env PATH="$TMP/secret_auth/bin:$PATH" REAL_GIT="$real_git" \
+    AUTH_REMOTE="$TMP/secret_auth/origin.git" AUTH_TRACE="$TMP/secret_auth/trace" \
+    EXPECTED_GITHUB_KEY="$secret" GITHUB_KEY="$secret" REPL_ID=test-repl \
+    bash -c "cd '$TMP/secret_auth/work' && '$SYNC' --check"
+grep -Fx fetch "$TMP/secret_auth/trace" >/dev/null
+assert_secret_absent "$secret" "$TMP/secret_auth/work"
+[[ "$(git -C "$TMP/secret_auth/work" remote get-url origin)" == https://github.com/example/illuminate.git ]]
+! git -C "$TMP/secret_auth/work" config --get credential.helper >/dev/null
+! find "${TMPDIR:-/tmp}" -maxdepth 1 -type d -name 'illuminate-git-askpass.*' -print -quit | grep . >/dev/null
+
+new_fixture secret_push
+make_auth_git_wrapper "$TMP/secret_push"
+git -C "$TMP/secret_push/work" remote set-url origin https://github.com/example/illuminate.git
+printf 'local\n' >>"$TMP/secret_push/work/history.txt"
+git -C "$TMP/secret_push/work" commit -am local >/dev/null
+run_ok "Replit HTTPS publish uses ephemeral GITHUB_KEY authentication" \
+  env PATH="$TMP/secret_push/bin:$PATH" REAL_GIT="$real_git" \
+    AUTH_REMOTE="$TMP/secret_push/origin.git" AUTH_TRACE="$TMP/secret_push/trace" \
+    EXPECTED_GITHUB_KEY="$secret" GITHUB_KEY="$secret" REPL_ID=test-repl \
+    bash -c "cd '$TMP/secret_push/work' && '$SYNC' --publish"
+[[ "$(grep -c '^fetch$' "$TMP/secret_push/trace")" == 2 ]]
+grep -Fx push "$TMP/secret_push/trace" >/dev/null
+assert_secret_absent "$secret" "$TMP/secret_push/work"
+
+new_fixture missing_secret
+git -C "$TMP/missing_secret/work" remote set-url origin https://github.com/example/illuminate.git
+run_fail_with "missing Replit secret gives safe actionable guidance" "GITHUB_KEY is unavailable" \
+  env -u GITHUB_KEY REPL_ID=test-repl bash -c "cd '$TMP/missing_secret/work' && '$SYNC' --check"
+
+new_fixture rejected_secret
+make_auth_git_wrapper "$TMP/rejected_secret"
+git -C "$TMP/rejected_secret/work" remote set-url origin https://github.com/example/illuminate.git
+run_fail_with "rejected Replit secret gives safe actionable guidance" "Confirm GITHUB_KEY is valid" \
+  env PATH="$TMP/rejected_secret/bin:$PATH" REAL_GIT="$real_git" \
+    AUTH_REMOTE="$TMP/rejected_secret/origin.git" AUTH_TRACE="$TMP/rejected_secret/trace" \
+    EXPECTED_GITHUB_KEY="$secret" GITHUB_KEY="$secret" REPL_ID=test-repl REJECT_AUTH=1 \
+    bash -c "cd '$TMP/rejected_secret/work' && '$SYNC' --check"
+assert_secret_absent "$secret" "$TMP/rejected_secret/work"
+
+new_fixture local_credentials
+make_plain_git_wrapper "$TMP/local_credentials"
+cat >"$TMP/local_credentials/helper" <<'EOF'
+#!/usr/bin/env bash
+set -e
+printf '%s\n' "$1" >>"$HELPER_TRACE"
+cat >/dev/null
+printf 'username=local-user\npassword=local-password\n'
+EOF
+chmod +x "$TMP/local_credentials/helper"
+git -C "$TMP/local_credentials/work" remote set-url origin https://github.com/example/illuminate.git
+run_ok "non-Replit HTTPS operation preserves local credential helper behavior" \
+  env -u GITHUB_KEY -u REPL_ID -u REPL_SLUG -u REPLIT_DEV_DOMAIN \
+    PATH="$TMP/local_credentials/bin:$PATH" REAL_GIT="$real_git" \
+    AUTH_REMOTE="$TMP/local_credentials/origin.git" AUTH_TRACE="$TMP/local_credentials/trace" \
+    CREDENTIAL_HELPER="$TMP/local_credentials/helper" HELPER_TRACE="$TMP/local_credentials/helper-trace" \
+    bash -c "cd '$TMP/local_credentials/work' && '$SYNC' --check"
+grep -Fx get "$TMP/local_credentials/helper-trace" >/dev/null
+grep -Fx fetch "$TMP/local_credentials/trace" >/dev/null
+
+new_fixture ssh_bypass
+make_plain_git_wrapper "$TMP/ssh_bypass"
+git -C "$TMP/ssh_bypass/work" remote set-url origin git@github.com:example/illuminate.git
+run_ok "Replit SSH origin bypasses GITHUB_KEY authentication" \
+  env PATH="$TMP/ssh_bypass/bin:$PATH" REAL_GIT="$real_git" \
+    AUTH_REMOTE="$TMP/ssh_bypass/origin.git" AUTH_TRACE="$TMP/ssh_bypass/trace" \
+    GITHUB_KEY="$secret" REPL_ID=test-repl \
+    bash -c "cd '$TMP/ssh_bypass/work' && '$SYNC' --check"
+grep -Fx fetch "$TMP/ssh_bypass/trace" >/dev/null
+assert_secret_absent "$secret" "$TMP/ssh_bypass/work"
+
+new_fixture xtrace
+make_auth_git_wrapper "$TMP/xtrace"
+git -C "$TMP/xtrace/work" remote set-url origin https://github.com/example/illuminate.git
+run_ok "accidental shell tracing cannot print GITHUB_KEY" \
+  env PATH="$TMP/xtrace/bin:$PATH" REAL_GIT="$real_git" \
+    AUTH_REMOTE="$TMP/xtrace/origin.git" AUTH_TRACE="$TMP/xtrace/trace" \
+    EXPECTED_GITHUB_KEY="$secret" GITHUB_KEY="$secret" REPL_ID=test-repl \
+    bash -x -c "cd '$TMP/xtrace/work' && '$SYNC' --check"
+assert_secret_absent "$secret" "$TMP/xtrace/work"
 
 new_fixture rejected
 (
@@ -181,7 +339,6 @@ reviewed_oid="$(git -C "$TMP/evaluation_race/work" rev-parse HEAD)"
   git switch main >/dev/null 2>&1
 )
 mkdir "$TMP/evaluation_race/bin"
-real_git="$(command -v git)"
 cat > "$TMP/evaluation_race/bin/git" <<'EOF'
 #!/usr/bin/env bash
 set -e

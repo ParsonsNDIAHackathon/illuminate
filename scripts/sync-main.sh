@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+set +x
 
 usage() {
   cat <<'EOF'
@@ -11,7 +12,8 @@ Synchronize the checked-out main branch with origin/main without rewriting histo
   --publish  Do the same checks, then push reviewed local main commits.
 
 The command refuses dirty trees, non-main branches, unexpected tracking
-configuration, and diverged history.
+configuration, and diverged history. In Replit, HTTPS GitHub operations use the
+GITHUB_KEY secret automatically without storing it in Git configuration.
 EOF
 }
 
@@ -47,12 +49,53 @@ branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" ||
 git remote get-url origin >/dev/null 2>&1 ||
   fail "remote 'origin' is missing. Restore the GitHub origin before synchronizing."
 
+origin_url="$(git remote get-url origin)"
+git_command=(git)
+askpass_dir=
+
+cleanup() {
+  if [[ -n "$askpass_dir" ]]; then
+    rm -rf "$askpass_dir"
+  fi
+}
+trap cleanup EXIT HUP INT TERM
+
+is_replit=false
+if [[ -n "${REPL_ID:-}${REPL_SLUG:-}${REPLIT_DEV_DOMAIN:-}" ]]; then
+  is_replit=true
+fi
+
+if [[ "$is_replit" == true && "$origin_url" == https://github.com/* ]]; then
+  [[ -n "${GITHUB_KEY:-}" ]] ||
+    fail "GITHUB_KEY is unavailable in this Replit workspace. Add or restore the existing Replit secret, then rerun; never paste it into a remote URL or Git configuration."
+
+  askpass_dir="$(mktemp -d "${TMPDIR:-/tmp}/illuminate-git-askpass.XXXXXX")" ||
+    fail "could not create temporary Git authentication files."
+  chmod 700 "$askpass_dir"
+  cat >"$askpass_dir/askpass.sh" <<'EOF'
+#!/usr/bin/env bash
+set +x
+case "${1:-}" in
+  *sername*) printf '%s\n' 'x-access-token' ;;
+  *assword*) printf '%s\n' "${GITHUB_KEY:?}" ;;
+  *) exit 1 ;;
+esac
+EOF
+  chmod 700 "$askpass_dir/askpass.sh"
+  export GIT_ASKPASS="$askpass_dir/askpass.sh"
+  export GIT_TERMINAL_PROMPT=0
+  git_command=(git -c credential.helper= -c credential.username=x-access-token)
+fi
+
 fetch_main() {
-  git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+  "${git_command[@]}" fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
 }
 
 printf 'sync-main: fetching origin/main...\n'
 if ! fetch_main; then
+  if [[ "$is_replit" == true && "$origin_url" == https://github.com/* ]]; then
+    fail "authenticated fetch failed. Confirm GITHUB_KEY is valid for this repository and has read access; no local history was changed."
+  fi
   fail "fetch failed. Confirm GitHub authentication and network access; no local history was changed."
 fi
 
@@ -90,7 +133,7 @@ fi
 
 if (( ahead > 0 )); then
   printf 'sync-main: pushing %s reviewed commit(s) to origin/main...\n' "$ahead"
-  if ! git push origin "$evaluated_oid:refs/heads/main"; then
+  if ! "${git_command[@]}" push origin "$evaluated_oid:refs/heads/main"; then
     fail "push was rejected or failed. Do not force-push. Fetch again, satisfy branch protection/checks or use the required pull-request workflow, then rerun."
   fi
 fi

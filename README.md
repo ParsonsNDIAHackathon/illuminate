@@ -22,6 +22,9 @@ GitHub `origin/main` is the canonical shared history. Before starting work on a
 clean Replit `main`, run `make sync-pre`. After reviewed, validated work reaches
 Replit `main`, run `make sync-publish`; see the
 [main-branch synchronization policy](docs/ONBOARDING.md#keep-replit-main-and-github-main-synchronized).
+In Replit these guarded commands consume the existing `GITHUB_KEY` secret
+automatically. Agents and contributors must never print, copy, or embed that
+secret in commands, remote URLs, files, or Git configuration.
 
 Requires Docker and `make`. For the host-side dev loop (hot reload) you also need
 Python ≥ 3.12 and Node ≥ 20.
