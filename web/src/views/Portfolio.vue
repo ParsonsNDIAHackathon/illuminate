@@ -91,7 +91,7 @@
               <td class="rank">{{ String(index + 1).padStart(2, '0') }}</td>
               <td class="vendor"><router-link :to="vendorDestination(row.entity.id)">{{ row.entity.name }}</router-link>
                 <small class="identity">{{ identityLine(row.entity) }}</small>
-                <div><span v-if="isAmbiguous(row.entity)" class="tag ambiguous">SAME-NAME — VERIFY IDENTITY</span><span v-if="row.entity.simulated" class="tag sim">SIMULATED</span><span v-if="row.pending" class="tag pending">ASSESSING</span><span v-else-if="!row.contract" class="tag missing">REPORT UNAVAILABLE</span><span v-else class="version">{{ row.contract.contract_version || 'unversioned contract' }}</span></div>
+                <div><span v-if="isAmbiguous(row.entity)" class="tag ambiguous">SAME-NAME — VERIFY IDENTITY</span><span v-if="row.pending" class="tag pending">ASSESSING</span><span v-else-if="!row.contract" class="tag missing">REPORT UNAVAILABLE</span><span v-else class="version">{{ row.contract.contract_version || 'unversioned contract' }}</span></div>
               </td>
               <td class="mono">{{ row.entity.tier ?? '—' }}</td>
               <td class="decision"><div class="score" :class="riskClass(row)">{{ number(row.contract?.score) }}</div><div><b>{{ row.contract?.band || 'Not assessed' }}</b><small>{{ row.contract?.disposition || 'No disposition available' }}</small></div></td>

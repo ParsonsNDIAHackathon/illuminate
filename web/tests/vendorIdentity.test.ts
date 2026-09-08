@@ -5,7 +5,7 @@ import { identityLine, vendorCandidates } from '../src/lib/vendorIdentity.ts'
 test('blank comparator candidates remain selectable by vendor name', () => {
   const candidates = vendorCandidates([{ id: 'a', name: 'Subaru Corporation', tier: 1, simulated: false }])
   assert.equal(candidates[0].name, 'Subaru Corporation')
-  assert.match(candidates[0].identityLine, /Tier 1 · OBSERVED/)
+  assert.match(candidates[0].identityLine, /Tier 1$/)
 })
 
 test('same-name candidates carry an explicit ambiguity cue and stable differentiators', () => {
@@ -19,8 +19,11 @@ test('same-name candidates carry an explicit ambiguity cue and stable differenti
   assert.notEqual(candidates[0].identityLine, candidates[1].identityLine)
 })
 
-test('simulated records are explicit before selection', () => {
-  assert.match(identityLine({ simulated: true, tier: 3 }), /SIMULATED/)
+test('a scenario record reads exactly like an observed one', () => {
+  // Scenario material is disclosed once, by the app-bar badge. An identity line that
+  // says SIMULATED hands the analyst the answer the tool is supposed to find.
+  assert.equal(identityLine({ simulated: true, tier: 3 }), identityLine({ simulated: false, tier: 3 }))
+  assert.doesNotMatch(identityLine({ simulated: true, tier: 3 }), /SIMULATED|OBSERVED/)
 })
 
 test('internal IDs remain stable values for direct-link restoration', () => {

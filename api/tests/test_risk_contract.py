@@ -89,7 +89,7 @@ def all_screens(result="clear", **kwargs):
 
 def test_trustworthy_fixture_is_low_risk_and_complete():
     result = evaluate_risk_contract(core(), supply(), all_screens(), as_of=AS_OF)
-    assert result["contract_version"] == "uc11.vendor-risk.v1"
+    assert result["contract_version"] == "uc11.vendor-risk.v2"
     assert result["score"] == 0
     assert result["band"] == "low"
     assert result["completeness"] == 1.0
@@ -133,8 +133,8 @@ def test_incomplete_fixture_does_not_renormalize_available_risk():
     result = evaluate_risk_contract(core(), {"supplies": [], "risk_evidence": []}, partial, as_of=AS_OF)
     assert result["score"] == 50
     assert result["band"] == "high"
-    assert result["completeness"] == 0.286
-    assert len([f for f in result["diligence_flags"] if f["code"] == "missing_approved_evidence"]) == 5
+    assert result["completeness"] == 0.25
+    assert len([f for f in result["diligence_flags"] if f["code"] == "missing_approved_evidence"]) == 6
 
 
 def test_stale_fixture_keeps_risk_but_flags_freshness():
@@ -186,7 +186,7 @@ def test_simulated_staged_and_rejected_evidence_never_scores_as_fact():
     ]
     result = evaluate_risk_contract(core(), supply(), excluded, as_of=AS_OF)
     assert result["score"] == 0
-    assert result["completeness"] == 0.286
+    assert result["completeness"] == 0.25
     legal = next(f for f in result["diligence_flags"] if f["category"] == "legal")
     assert legal["excluded_truth_statuses"] == ["staged"]
 

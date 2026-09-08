@@ -2,7 +2,7 @@
   <v-container fluid>
     <div class="d-flex align-center ga-2 mb-2"><h2 class="text-h6">People</h2><v-text-field v-model="q" placeholder="filter" hide-details style="max-width: 280px" clearable /><v-spacer /><span class="text-caption">{{ items.length }} people · one HELD_ROLE edge per tenure</span></div>
     <v-data-table class="people-table" :items="items" :headers="headers" density="compact" :items-per-page="50" :loading="loading">
-      <template #item.name="{ item }">{{ item.name }} <v-chip v-if="item.simulated" size="x-small" color="warning" variant="tonal" class="ml-1">SIM</v-chip><v-chip v-if="item.entities > 1" size="x-small" color="secondary" variant="tonal" class="ml-1">interlock</v-chip></template>
+      <template #item.name="{ item }">{{ item.name }} <v-chip v-if="item.entities > 1" size="x-small" color="secondary" variant="tonal" class="ml-1">interlock</v-chip></template>
       <template #item.roles="{ item }">
         <div v-for="r in item.roles" :key="r.edge_id" class="text-body-2">
           <router-link :to="`/entities/${r.entity_id}`">{{ r.entity }}</router-link> — {{ r.title }} <span class="text-caption" style="opacity:.7">{{ r.role_type }} · {{ r.from || '?' }} – {{ r.current ? 'now' : (r.to || '?') }}</span>

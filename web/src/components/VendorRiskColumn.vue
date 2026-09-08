@@ -5,7 +5,6 @@
         <div>
           <div class="d-flex align-center flex-wrap ga-1">
             <h2 class="text-h6">{{ profile.name }}</h2>
-            <v-chip v-if="profile.simulated" size="x-small" color="warning" variant="flat">SIMULATED</v-chip>
             <v-chip size="x-small" variant="tonal">{{ profile.sourceMode === 'frozen' ? 'FROZEN PRESET' : 'LIVE REPORT' }}</v-chip>
           </div>
           <div class="text-caption">Framework {{ profile.contract_version }}</div>
@@ -38,7 +37,6 @@
           </div>
           <div v-for="evidence in gap.excluded_evidence || []" :key="evidence.evidence_ref || evidence.id" class="excluded-evidence">
             <TruthBadge :value="evidence.truth_status || evidence.status || 'unknown'" />
-            <v-chip v-if="evidence.simulated" size="x-small" color="warning" variant="flat">SIMULATED</v-chip>
             <span>{{ evidence.evidence_ref || evidence.id || 'Unresolved evidence' }}</span>
           </div>
         </v-alert>
@@ -76,7 +74,6 @@
               <div v-for="e in factor.evidence" :key="e.id || e.claim_id" class="evidence">
                 <div class="d-flex flex-wrap ga-1">
                   <TruthBadge :value="e.truth_status || e.status || 'unknown'" />
-                  <v-chip v-if="e.simulated" size="x-small" color="warning" variant="flat">SIMULATED</v-chip>
                 </div>
                 <b>{{ e.source || 'Source unavailable' }}</b>
                 <div>{{ e.detail || 'No evidence detail provided.' }}</div>

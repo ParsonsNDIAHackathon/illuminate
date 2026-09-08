@@ -18,7 +18,6 @@ export function identityLine(entity: Pick<EntitySummary, 'uei' | 'cage' | 'lei' 
     ...identifiers,
     !identifiers.length && entity.id ? value('Record', entity.id) : '',
     value('Tier', entity.tier),
-    entity.simulated ? 'SIMULATED' : 'OBSERVED',
   ].filter(Boolean).join(' · ')
 }
 

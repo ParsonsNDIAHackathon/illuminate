@@ -34,7 +34,11 @@ async def test_mission_portfolio_is_supply_only_paginated_and_mission_relative(m
     total_query, _ = queries[1]
     assert f"[:SUPPLIES*1..{SUPPLY_SCOPE_MAX_DEPTH}]" in rows_query
     assert "min(length(path)) AS tier" in rows_query
-    assert "OWNS" not in rows_query and "ULTIMATE_PARENT_OF" not in rows_query.split("OPTIONAL MATCH")[0]
+    # What must stay supply-only is the *scoping* walk: an ownership hop there would admit
+    # entities that do not supply the program. Ownership is still walked afterwards, per row,
+    # to name the ultimate parent — that subquery returns one value and cannot change the row set.
+    scoping = rows_query.split("OPTIONAL MATCH")[0]
+    assert "OWNS" not in scoping and "ULTIMATE_PARENT_OF" not in scoping
     assert "SKIP $offset LIMIT $limit" in rows_query
     assert "WITH DISTINCT e RETURN count(e) AS n" in total_query
     assert params["root_id"] == "program_a"

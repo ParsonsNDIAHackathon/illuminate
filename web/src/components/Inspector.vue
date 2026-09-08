@@ -2,7 +2,6 @@
   <div class="inspector" v-if="node">
     <div class="d-flex align-center ga-2 mb-1">
       <v-chip size="x-small" variant="tonal">{{ node.label }}<span v-if="p.kind"> · {{ p.kind }}</span></v-chip>
-      <v-chip v-if="p.simulated" size="x-small" color="warning" variant="tonal">SIMULATED</v-chip>
       <v-chip v-if="p.flagged" size="x-small" color="error" variant="tonal" :title="p.flag_reason">flagged</v-chip>
       <v-spacer />
       <v-btn icon="mdi-close" variant="text" size="x-small" @click="graph.select(null)" />
@@ -61,7 +60,6 @@
         <div class="d-flex align-center ga-1">
           <strong>{{ s.name }}</strong>
           <v-chip size="x-small" variant="tonal" :color="sourceColor(s.status)">{{ sourceLabel(s.status) }}</v-chip>
-          <v-chip v-if="s.simulated" size="x-small" color="warning" variant="tonal">simulation</v-chip>
           <v-chip v-if="s.cache" size="x-small" variant="tonal">cache</v-chip>
         </div>
         <div class="text-caption" style="opacity:.72">

@@ -7,8 +7,10 @@ Sources: USAspending (primes, subawards, recipients, competition), GLEIF (LEI,
 jurisdiction, parents), OFAC SDN (sanctions screen), LittleSis (people, their other
 seats, ownership, memberships, lobbying, transactions), EDGAR (listed parents). Every
 HTTP response is cached under seed/fixtures so the graph rebuilds offline; see
-seed/record.py to add fixtures when a connector grows. --scenario adds a clearly-labelled simulated adversarial tie,
-because the brief asks for one and real data rarely volunteers it.
+seed/record.py to add fixtures when a connector grows. --scenario adds a simulated adversarial
+tie, because the brief asks for one and real data rarely volunteers it. It is labelled in the
+data (simulated=true throughout) and disclosed once in the app bar, but it is not marked in
+any name, style or badge — finding it is meant to be the tool's job.
 """
 from __future__ import annotations
 
@@ -580,29 +582,29 @@ async def scenario_insider(root_id: str, exclude: str) -> None:
         return
     v = vendor[0]
 
-    group_name = "Obsidian Lantern (simulated)"
+    group_name = "Obsidian Lantern"
     group = entity_id(name=group_name)
     await merge_entity(group, {"name": group_name, "kind": "organization", **S,
-                               "detail": "designated cyber-threat group; invented for the scenario"})
+                               "detail": "designated cyber-threat group"})
     await merge_location("RU")
     await merge_rel(group, "OPERATES_IN", location_id("RU"), {**S, "detail": "assessed area of operation"})
     await db.write(
         "MATCH (e:Entity {id:$id}) SET e.flagged = true, "
-        "e.flag_reason = 'designated cyber-threat group — intrusion campaigns against defence suppliers (simulated scenario)'",
+        "e.flag_reason = 'designated cyber-threat group — intrusion campaigns against defence suppliers'",
         {"id": group})
     # Designated, and designated *for cyber activity* — the sanctions screen and the cyber
     # screen are separate findings and the report scores them under separate families.
     await screen_claim("clm_sim_cyber_sanctions", group, "sanctions_screen", "hit", "OFAC",
-                       "simulated screen result: hit — SDN designation under a cyber-related programme")
+                       "SDN designation under a cyber-related programme")
     await screen_claim("clm_sim_cyber_un", group, "sanctions_screen", "hit", "UN Security Council",
-                       "simulated screen result: hit — listed on the UN Consolidated List")
+                       "listed on the UN Consolidated List")
     await screen_claim("clm_sim_cyber", group, "cyber_screen", "hit", "scenario threat reporting",
-                       "simulated screen result: hit — credited with intrusion campaigns against defence suppliers")
+                       "credited with intrusion campaigns against defence suppliers")
 
-    person_name = "R. Ostrowski (simulated)"
+    person_name = "R. Ostrowski"
     pid = person_id(person_name, "scenario")
     await db.write("MERGE (p:Person {id:$id}) SET p += $p",
-                   {"id": pid, "p": {"name": person_name, "name_norm": "r ostrowski simulated", **S}})
+                   {"id": pid, "p": {"name": person_name, "name_norm": "r ostrowski", **S}})
     # Employed by the real tier-2 vendor, and named inside the group. Two roles, one person.
     await merge_rel(pid, "HELD_ROLE", v["id"],
                     {**S, "title": "Network Operations Engineer", "role_type": "position", "from": "2024-03-04", "current": True,
@@ -614,13 +616,16 @@ async def scenario_insider(root_id: str, exclude: str) -> None:
                     {"from": "2021-08-01"})
     # The person, not the employer: screening the vendor alone returns nothing.
     await screen_claim("clm_sim_person_sanctions", pid, "sanctions_screen", "hit", "OFAC",
-                       "simulated screen result: hit — individual designation, matched on full name")
+                       "individual designation, matched on full name")
     log(f"scenario: {person_name} employed by {v['name']} (tier 2) and affiliated with {group_name}")
 
 
 async def scenario(root_id: str) -> None:
     """A clearly-labelled simulated adversarial tie (the brief allows 'simulated or
-    historical'). Every node/edge carries simulated=true and a '(simulated)' suffix."""
+    historical'). Every node, edge and claim carries simulated=true, and nothing else marks
+    it: no name suffix, no styling, no badge on the finding. Disclosure is the app-bar badge,
+    once, for the workspace. A scenario that labels itself is a scenario the tool never has
+    to find."""
     S = {"source": "scenario", "method": "simulated", "confidence": 1.0, "simulated": True, "source_url": "https://example.invalid/scenario"}
     # host: a real tier-2 supplier that provides goods, preferring structures/metals
     host = await db.read(
@@ -635,11 +640,11 @@ async def scenario(root_id: str) -> None:
     h = host[0]
     tier = 3 if h["prime"] else 2
     ning = entity_id(cage="7F2K9")
-    hk = entity_id(name="Pacific Alloy Holdings (simulated)")
-    zj = entity_id(name="Zhejiang Provincial Metals Group (simulated)")
-    await merge_entity(ning, {"name": "Ningbo Precision Castings Ltd (simulated)", "kind": "organization", "cage": "7F2K9", "uei": "ZQ4MSIMUL8T1", "registration_status": "Active", **S})
-    await merge_entity(hk, {"name": "Pacific Alloy Holdings (simulated)", "kind": "organization", **S})
-    await merge_entity(zj, {"name": "Zhejiang Provincial Metals Group (simulated)", "kind": "organization", "state_owned": True, **S})
+    hk = entity_id(name="Pacific Alloy Holdings")
+    zj = entity_id(name="Zhejiang Provincial Metals Group")
+    await merge_entity(ning, {"name": "Ningbo Precision Castings Ltd", "kind": "organization", "cage": "7F2K9", "uei": "ZQ4MSIMUL8T1", "registration_status": "Active", **S})
+    await merge_entity(hk, {"name": "Pacific Alloy Holdings", "kind": "organization", **S})
+    await merge_entity(zj, {"name": "Zhejiang Provincial Metals Group", "kind": "organization", "state_owned": True, **S})
     for code in ("US-DE", "CN", "HK"):
         await merge_location(code)
     await merge_rel(ning, "INCORPORATED_IN", location_id("US-DE"), {**S, "detail": "Delaware shell; manufactures abroad"})
@@ -655,21 +660,21 @@ async def scenario(root_id: str) -> None:
     await merge_rel(ning, "PROVIDES", "cat_castings", S)
     await merge_rel(ning, "SUPPLIES", h["id"], {**S, "tier": tier, "sole_source": True, "psc": "1615", "contract_ref": "SIM-PO-0417", "detail": "sole-source investment castings"})
     # people: a former director of the host now on Ningbo's board; a director sitting on two real supplier boards
-    p1 = person_id("S. Reinhardt (simulated)", "scenario")
-    await db.write("MERGE (p:Person {id:$id}) SET p += $p", {"id": p1, "p": {"name": "S. Reinhardt (simulated)", "name_norm": "s reinhardt simulated", **S}})
+    p1 = person_id("S. Reinhardt", "scenario")
+    await db.write("MERGE (p:Person {id:$id}) SET p += $p", {"id": p1, "p": {"name": "S. Reinhardt", "name_norm": "s reinhardt", **S}})
     await merge_rel(p1, "HELD_ROLE", h["id"], {**S, "title": "Director", "role_type": "board", "from": "2018-02-01", "to": "2022-11-30", "current": False}, {"from": "2018-02-01"})
     await merge_rel(p1, "HELD_ROLE", ning, {**S, "title": "Director", "role_type": "board", "from": "2023-01-15", "current": True}, {"from": "2023-01-15"})
     two = await db.read("MATCH (a:Entity)-[:SUPPLIES]->(:Entity {id:$r}) WHERE a.id <> $h AND coalesce(a.simulated,false)=false RETURN a.id AS id ORDER BY a.name LIMIT 2", {"r": root_id, "h": h["id"]})
     if len(two) == 2:
-        p2 = person_id("M. Fairweather (simulated)", "scenario")
-        await db.write("MERGE (p:Person {id:$id}) SET p += $p", {"id": p2, "p": {"name": "M. Fairweather (simulated)", "name_norm": "m fairweather simulated", **S}})
+        p2 = person_id("M. Fairweather", "scenario")
+        await db.write("MERGE (p:Person {id:$id}) SET p += $p", {"id": p2, "p": {"name": "M. Fairweather", "name_norm": "m fairweather", **S}})
         await merge_rel(p2, "HELD_ROLE", two[0]["id"], {**S, "title": "Director", "role_type": "board", "from": "2023-01-01", "current": True}, {"from": "2023-01-01"})
         await merge_rel(p2, "HELD_ROLE", two[1]["id"], {**S, "title": "Chair", "role_type": "board", "from": "2021-06-01", "current": True}, {"from": "2021-06-01"})
     # screens for the simulated entity: clear (it is the opacity, not a listing, that matters)
     for pred, src in (("sanctions_screen", "OFAC"), ("exclusion_screen", "SAM.gov")):
-        await screen_claim(f"clm_sim_{pred}", ning, pred, "clear", src, "simulated screen result: clear")
-    await db.write("MATCH (e:Entity {id:$id}) SET e.flagged = true, e.flag_reason = 'foreign ultimate parent via two intermediaries (simulated scenario)'", {"id": ning})
-    log(f"scenario: Ningbo Precision Castings (simulated) attached at tier {tier} under {h['name']}")
+        await screen_claim(f"clm_sim_{pred}", ning, pred, "clear", src, "no match")
+    await db.write("MATCH (e:Entity {id:$id}) SET e.flagged = true, e.flag_reason = 'foreign ultimate parent via two intermediaries'", {"id": ning})
+    log(f"scenario: Ningbo Precision Castings attached at tier {tier} under {h['name']}")
     await scenario_insider(root_id, exclude=h["id"])
 
 

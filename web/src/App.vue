@@ -10,7 +10,7 @@
               title="The canvas is narrowed to this program — pick Everything to see them all">
         Program: {{ graph.focusLabel || graph.focusId }}
       </v-chip>
-      <v-chip v-if="graph.hasSimulated" class="simulated-badge ml-3" size="small" variant="flat" prepend-icon="mdi-flask-outline"
+      <v-chip v-if="ws.simulated || graph.hasSimulated" class="simulated-badge ml-3" size="small" variant="flat" prepend-icon="mdi-flask-outline"
               title="Scenario material for analysis — not an allegation or verified finding. Simulated nodes, edges and evidence are badged SIM throughout.">
         Simulated data
       </v-chip>
