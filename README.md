@@ -73,8 +73,14 @@ never printed.
 ## Start
 
 ```bash
-make up          # neo4j + api + web in containers
+cp .env.example .env    # then set NEO4J_PASSWORD and SESSION_SECRET in it
+make up                 # neo4j + api + web in containers
 ```
+
+`.env` sits next to `docker-compose.yml`, so compose picks it up automatically; it also
+configures the host-side API under `make dev`. Both secrets are required and have no
+defaults — `make up` stops with a named variable rather than booting insecurely. `.env`
+is gitignored.
 
 Open http://localhost:8080. Then **Settings › Connectors** → paste an OpenAI key to enable
 chat and Cypher generation. Without a key the app still browses the graph and answers
@@ -98,11 +104,10 @@ cd api && .venv/bin/python -m illuminate.seed.record littlesis   # adds fixtures
 ```
 
 Other addresses: API and docs at http://localhost:8000/docs, Neo4j browser at
-http://localhost:7474. Set unique `NEO4J_PASSWORD` and `SESSION_SECRET` environment
-values before `make up`; the username is `neo4j`. `make down` stops everything and keeps
-the data. `make dev` runs Neo4j in Docker with the API and web on the host with hot reload
-(web on http://localhost:5173).
-
+http://localhost:7474. The Neo4j username is `neo4j`; its password is whatever you set
+for `NEO4J_PASSWORD`. `make down` stops everything and keeps the data. `make dev` runs
+Neo4j in Docker with the API and web on the host with hot reload (web on
+http://localhost:5173).
 
 ### Docker operations
 
