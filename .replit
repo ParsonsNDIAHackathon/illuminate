@@ -5,16 +5,6 @@ channel = "stable-25_05"
 packages = ["cargo", "jdk21", "libiconv", "libxcrypt", "neo4j", "openssl", "pkg-config", "postgresql", "rapidfuzz-cpp", "rustc", "taskflow"]
 
 [[ports]]
-localPort = 7474
-externalPort = 3002
-exposeLocalhost = true
-
-[[ports]]
-localPort = 7687
-externalPort = 3001
-exposeLocalhost = true
-
-[[ports]]
 localPort = 8000
 externalPort = 80
 
@@ -58,13 +48,3 @@ timeoutMs = 180000
 deploymentTarget = "vm"
 build = ["bash", "-c", "UV_PROJECT_ENVIRONMENT=$PWD/api/.venv uv sync --project api --frozen --no-dev && npm --prefix web ci && npm --prefix web run build"]
 run = ["bash", "scripts/replit-production.sh"]
-
-[userenv]
-
-[userenv.production]
-ILLUMINATE_FETCH_CACHE_AUTHORITY_ENABLED = "true"
-ILLUMINATE_FETCH_CACHE_NAMESPACE = "illuminate-v1"
-ILLUMINATE_FETCH_CACHE_REQUIRED = "true"
-
-[userenv.development]
-ILLUMINATE_FETCH_CACHE_REQUIRED = "true"

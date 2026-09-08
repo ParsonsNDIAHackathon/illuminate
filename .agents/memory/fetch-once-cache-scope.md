@@ -1,18 +1,18 @@
 ---
-name: Fetch-once cache scope
-description: Why immutable retrieval caching is deployment-scoped rather than exposed across project environments.
+name: Optional fetch-once cache
+description: Why deployment must not require the shared retrieval cache or managed PostgreSQL.
 ---
 
-Each operational deployment owns its fetch-once authority and durable cache.
-Production workers coordinate over loopback through managed PostgreSQL. Task and
-development environments must fail closed for live retrievals unless explicitly
-configured with their own authority; offline fixtures remain available.
+The fetch-once cache may remain available as an opt-in capability, but production
+startup must not require cache authority, cache credentials, or managed
+PostgreSQL. When no authority is configured, connectors use their ordinary live
+HTTP path and offline fixtures remain available.
 
-**Why:** The main deployment must remain password-protected, and the project
-account does not provide external-access tokens for machine callers. Exposing the
-whole app publicly just to share the cache was rejected in favor of per-instance
-durability across process restarts and redeployments.
+**Why:** Making the cache mandatory introduced a deployment bootstrap dependency
+on a production database and stopped otherwise healthy builds from starting. The
+user chose restoring deployability by removing the offending mandatory
+functionality rather than retaining that coordination guarantee.
 
-**How to apply:** Keep production cache traffic local to the deployment and
-persist immutable records in its managed database. Do not point task branches at
-the protected production URL or silently bypass an unavailable local authority.
+**How to apply:** Keep cache authority and required-mode defaults disabled in
+deployment configuration. Do not gate launcher readiness on cache schema state
+or require `DATABASE_URL` solely for retrieval caching.

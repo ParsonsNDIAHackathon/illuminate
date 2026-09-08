@@ -14,17 +14,7 @@ export NEO4J_URI="${NEO4J_URI:-bolt://127.0.0.1:7687}"
 export NEO4J_USER="${NEO4J_USER:-neo4j}"
 export NEO4J_PASSWORD="${NEO4J_PASSWORD:-${SESSION_SECRET:-}}"
 export ILLUMINATE_DATA_DIR="${ILLUMINATE_DATA_DIR:-$STATE_ROOT/illuminate}"
-export ILLUMINATE_FETCH_CACHE_NAMESPACE="${ILLUMINATE_FETCH_CACHE_NAMESPACE:-illuminate-v1}"
-export ILLUMINATE_FETCH_CACHE_TOKEN="${ILLUMINATE_FETCH_CACHE_TOKEN:-${SESSION_SECRET:-}}"
-export ILLUMINATE_FETCH_CACHE_SCOPE_KEY="${ILLUMINATE_FETCH_CACHE_SCOPE_KEY:-$ILLUMINATE_FETCH_CACHE_TOKEN}"
-export ILLUMINATE_FETCH_CACHE_REQUIRED=true
 export ILLUMINATE_CORS_ORIGINS="${ILLUMINATE_CORS_ORIGINS:-}"
-
-if [ "${ILLUMINATE_FETCH_CACHE_AUTHORITY_ENABLED:-false}" = "true" ]; then
-  # The authority deployment coordinates its own connector workers over loopback;
-  # task environments use the protected published URL.
-  export ILLUMINATE_FETCH_CACHE_URL="${ILLUMINATE_FETCH_CACHE_URL:-http://127.0.0.1:${PORT}}"
-fi
 
 [ -x "$PYTHON" ] || {
   echo "Locked Python environment is missing; run the configured deployment build command." >&2
@@ -34,31 +24,6 @@ fi
   echo "NEO4J_PASSWORD or SESSION_SECRET must be configured as a Replit secret." >&2
   exit 1
 }
-[ -n "${ILLUMINATE_FETCH_CACHE_URL:-}" ] || {
-  echo "ILLUMINATE_FETCH_CACHE_URL must point to this environment's cache authority." >&2
-  exit 1
-}
-[ -n "$ILLUMINATE_FETCH_CACHE_TOKEN" ] || {
-  echo "ILLUMINATE_FETCH_CACHE_TOKEN or SESSION_SECRET must protect the cache authority." >&2
-  exit 1
-}
-if [ "${ILLUMINATE_FETCH_CACHE_AUTHORITY_ENABLED:-false}" = "true" ]; then
-  [ -n "${DATABASE_URL:-}" ] || {
-    echo "DATABASE_URL is required by the shared cache authority." >&2
-    exit 1
-  }
-  echo "Verifying managed fetch-cache schema..."
-  (cd api && "$PYTHON" - <<'PY'
-import asyncio
-from illuminate.fetch_cache import ensure_schema
-
-asyncio.run(ensure_schema())
-PY
-  ) || {
-    echo "Fetch-cache schema is unavailable; apply api/migrations/001_fetch_cache.sql." >&2
-    exit 1
-  }
-fi
 export NEO4J_server_directories_data="$NEO4J_ROOT/data"
 export NEO4J_server_directories_logs="$NEO4J_ROOT/logs"
 export NEO4J_server_directories_run="$NEO4J_ROOT/run"
@@ -162,7 +127,7 @@ API_PID=$!
 while true; do
   health_json="$(curl --max-time 5 -fsS "http://127.0.0.1:$PORT/api/health?refresh=true" 2>/dev/null || true)"
   if [ -n "$health_json" ] && "$PYTHON" -c \
-    'import json,sys; h=json.load(sys.stdin); c=h.get("required",{}).get("fetch_cache",{}); raise SystemExit(0 if h.get("ok") and h.get("neo4j") and (not c or c.get("status")=="ready") else 1)' \
+    'import json,sys; h=json.load(sys.stdin); raise SystemExit(0 if h.get("ok") and h.get("neo4j") else 1)' \
     <<<"$health_json"; then
     break
   fi
