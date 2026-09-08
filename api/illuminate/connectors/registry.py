@@ -14,6 +14,7 @@ from .ofac import OFACConnector
 from .opencorporates import OpenCorporatesConnector
 from .sam import SAMConnector
 from .sam_exclusions import SAMExclusionsConnector
+from .un_sanctions import UNSanctionsConnector
 from .usaspending import USAspendingConnector
 from .websearch import WebSearchConnector
 from .source_contract import coverage_contract, coverage_for_adapter
@@ -81,6 +82,14 @@ SOURCE_METADATA: dict[str, dict] = {
         "quality_note": "Name screening can produce false positives/negatives and requires identifier-based review of hits.",
         "supports": "Point-in-time screening against OFAC SDN names and aliases.",
         "unknowns": "A clear result does not cover every sanctions program, ownership rule, or future designation.",
+    },
+    "un_sanctions": {
+        "source_id": "un-sc-consolidated",
+        "catalog_ids": [],
+        "usage_note": "Public UN Security Council sanctions data; screening is informational and not legal advice.",
+        "quality_note": "Transliterated names and aliases make fuzzy matching necessary; hits require identifier-based review and a clear result is point-in-time.",
+        "supports": "Point-in-time screening against UN Consolidated List entity and individual designations, with committee regime and listing date.",
+        "unknowns": "Covers UN designations only; national and EU lists, ownership-by-designated-party rules, and pending designations are out of scope.",
     },
     "sam_exclusions": {
         "source_id": "sam-exclusions-public-extract",
@@ -259,8 +268,8 @@ def _openai_diagnostics(response, user: str) -> dict:
 
 REGISTRY: list[Connector] = [
     SAMConnector(), SAMExclusionsConnector(), USAspendingConnector(), GLEIFConnector(), LittleSisConnector(), EDGARConnector(), GDELTConnector(),
-    OFACConnector(), MarketConnector(), OpenCorporatesConnector(), OpenStreetMapConnector(), FARConnector(), EPSSConnector(),
-    WebSearchConnector(), OpenAIPseudoConnector(),
+    OFACConnector(), UNSanctionsConnector(), MarketConnector(), OpenCorporatesConnector(), OpenStreetMapConnector(), FARConnector(),
+    EPSSConnector(), WebSearchConnector(), OpenAIPseudoConnector(),
 ]
 
 # Explicit, non-mutating probes. Parameters are intentionally minimal and never
@@ -281,6 +290,7 @@ _DIAGNOSTICS = {
     "edgar": ("https://www.sec.gov/files/company_tickers.json", {}),
     "gdelt": ("https://api.gdeltproject.org/api/v2/doc/doc", {"query": "sourcecountry:US", "mode": "artlist", "format": "json", "maxrecords": "1"}),
     "ofac": ("https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV", {}),
+    "un_sanctions": ("https://scsanctions.un.org/resources/xml/en/consolidated.xml", {}),
     "market": ("https://finnhub.io/api/v1/quote", {"symbol": "AAPL", "token": "$credential"}),
     "opencorporates": ("https://api.opencorporates.com/v0.4/companies/search", {"q": "__illuminate_connectivity_probe_no_match__", "api_token": "$credential", "per_page": "1"}),
     "openstreetmap": ("https://nominatim.openstreetmap.org/status", {"format": "json"}),

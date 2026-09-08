@@ -3,10 +3,16 @@
     <v-app-bar density="compact" flat border>
       <v-btn class="nav-trigger" icon="mdi-menu" variant="text" aria-label="Open navigation" @click="drawer = !drawer" />
       <span class="brand">ILLUMINATE</span>
-      <!-- What the canvas is showing, not a workspace setting: it follows the focus picker. -->
-      <v-chip class="context-chip ml-3" size="small" variant="tonal" :prepend-icon="graph.focusId ? 'mdi-target' : 'mdi-graph-outline'" to="/"
-              :title="graph.focusId ? 'The canvas is narrowed to this program — pick Everything to see them all' : 'The canvas shows every program'">
-        {{ graph.focusId ? `Program: ${graph.focusLabel || graph.focusId}` : 'All programs' }}
+      <!-- What the canvas is showing, not a workspace setting: it follows the focus picker.
+           Unfocused is the default, so it goes unsaid and the space carries the simulation
+           notice instead — where it cannot sit on top of the graph or push every page down. -->
+      <v-chip v-if="graph.focusId" class="context-chip ml-3" size="small" variant="tonal" prepend-icon="mdi-target" to="/"
+              title="The canvas is narrowed to this program — pick Everything to see them all">
+        Program: {{ graph.focusLabel || graph.focusId }}
+      </v-chip>
+      <v-chip v-if="graph.hasSimulated" class="simulated-badge ml-3" size="small" variant="flat" prepend-icon="mdi-flask-outline"
+              title="Scenario material for analysis — not an allegation or verified finding. Simulated nodes, edges and evidence are badged SIM throughout.">
+        Simulated data
       </v-chip>
       <v-spacer />
       <v-select v-if="route.name === 'graph'" class="depth-select mr-2" :model-value="ws.depth" @update:model-value="ws.setDepth" :items="[1,2,3,4,5,6]" label="Depth" hide-details />
@@ -22,11 +28,6 @@
       </v-list>
     </v-navigation-drawer>
     <v-main>
-      <v-alert v-if="hasSimulation" class="simulation-banner" type="warning" variant="tonal"
-               density="compact" rounded="0" icon="mdi-alert-outline">
-        <strong>SIMULATION DATA</strong>
-        <span>Scenario material for analysis — not an allegation or verified finding.</span>
-      </v-alert>
       <router-view />
     </v-main>
     <PermissionDialog />
@@ -49,7 +50,6 @@ const { smAndDown } = useDisplay()
 const narrow = smAndDown
 const drawer = ref(!narrow.value)
 const staged = ref(0); const snack = ref(false); const snackText = ref('')
-const hasSimulation = computed(() => graph.nodeList.some(n => n.props?.simulated) || graph.edgeList.some(e => e.props?.simulated))
 const nav = computed(() => [
   { to: '/', icon: 'mdi-target', title: 'Mission' },
   { to: '/explorer', icon: 'mdi-graph', title: 'Graph' },
@@ -71,9 +71,7 @@ watch(narrow, value => { drawer.value = !value })
 </script>
 <style>
 .brand { font-family: 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .18em; font-weight: 700; margin-left: 12px; }
-.simulation-banner .v-alert__content { display: flex; align-items: center; gap: 10px; font-size: 12px; }
-.simulation-banner strong { letter-spacing: .12em; white-space: nowrap; }
-@media (max-width: 600px) { .simulation-banner .v-alert__content { align-items: flex-start; flex-direction: column; gap: 2px; } }
+.simulated-badge { background: #fff4cf; color: #563b00; border: 1px solid #9a6700; font-weight: 600; letter-spacing: .04em; }
 html, body { overscroll-behavior: none; }
 .nav-trigger { display: none; }
 .depth-select { width: 110px; flex: 0 0 110px; }
@@ -87,6 +85,7 @@ html, body { overscroll-behavior: none; }
 }
 @media (max-width: 430px) {
   .context-chip { display: none !important; }
+  .simulated-badge { margin-left: 6px !important; }
   .brand { letter-spacing: .11em; }
 }
 </style>

@@ -6,7 +6,7 @@ Illuminate fuses public supplier data into an evidence-backed graph. Its central
 
 ```text
 PUBLIC SOURCE
-  USAspending / GLEIF / SEC EDGAR / LittleSis / SAM / OFAC
+  USAspending / GLEIF / SEC EDGAR / LittleSis / SAM / OFAC / UN Security Council
         │  retrieve + retain source identity, URL, time, method, quality
         ▼
 ARTIFACT ──EVIDENCES──► CLAIM (staged / committed / rejected)

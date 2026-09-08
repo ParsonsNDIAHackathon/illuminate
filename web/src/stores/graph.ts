@@ -34,6 +34,9 @@ export const useGraph = defineStore('graph', {
     selected: s => s.selectedId ? s.nodes.get(s.selectedId) || null : null,
     selectedEdge: s => s.selectedEdgeId ? s.edges.get(s.selectedEdgeId) || null : null,
     nodeList: s => [...s.nodes.values()], edgeList: s => [...s.edges.values()],
+    // Scenario material is on the canvas: the app bar says so once, instead of an overlay
+    // sitting on top of the graph.
+    hasSimulated: s => [...s.nodes.values()].some(n => n.props?.simulated) || [...s.edges.values()].some(e => e.props?.simulated),
   },
   actions: {
     merge(sub: { nodes: GNode[]; edges: GEdge[] } | null | undefined) {

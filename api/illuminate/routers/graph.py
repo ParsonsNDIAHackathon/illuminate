@@ -146,9 +146,15 @@ async def entities(q: str | None = None, kind: str | None = None, flagged: bool 
         OPTIONAL MATCH (e)-[s:SUPPLIES]->(c:Entity)
         OPTIONAL MATCH (e)-[:INCORPORATED_IN]->(inc:Location)
         OPTIONAL MATCH (e)-[:PARENT_SEATED_IN]->(seat:Location)
-        OPTIONAL MATCH (up:Entity)-[:ULTIMATE_PARENT_OF]->(e)
         WITH e, {"tier" if root_id else "min(s.tier)"} AS tier, count(DISTINCT c) AS consumers, head(collect(DISTINCT inc.code)) AS inc, head(collect(DISTINCT seat.code)) AS seat,
-             head(collect(DISTINCT up.name)) AS parent, any(x IN collect(s.sole_source) WHERE x = true) AS sole_source
+             any(x IN collect(s.sole_source) WHERE x = true) AS sole_source
+        // The ultimate parent is the root of the control chain, walked rather than looked up.
+        CALL {{
+          WITH e
+          OPTIONAL MATCH path=(up:Entity)-[:OWNS|ULTIMATE_PARENT_OF*1..6]->(e)
+          WHERE up.id <> e.id AND NOT EXISTS {{ (:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(up) }}
+          RETURN up.name AS parent ORDER BY length(path), up.name LIMIT 1
+        }}
         RETURN e.id AS id, e.name AS name, e.kind AS kind, e.uei AS uei, e.cage AS cage, e.lei AS lei, tier, consumers, inc AS incorporated, seat AS parent_seat, parent,
                sole_source, coalesce(e.flagged,false) AS flagged, coalesce(e.simulated,false) AS simulated, e.source AS source
         ORDER BY tier, name SKIP $offset LIMIT $limit

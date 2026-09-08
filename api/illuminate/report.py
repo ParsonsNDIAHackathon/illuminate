@@ -43,6 +43,54 @@ RISK_DISPOSITIONS = {
 }
 
 
+"""How far up a control chain the ultimate-parent walk will go before giving up."""
+ULTIMATE_PARENT_DEPTH = 6
+
+
+async def ultimate_parents(entity_id: str) -> list[dict]:
+    """Who ultimately controls this entity, derived rather than asserted.
+
+    Nothing in the graph declares an ultimate parent — an :ULTIMATE_PARENT_OF edge only ever
+    arrives when a registry (GLEIF) states one outright. The answer is the root of the control
+    chain, so it is found by walking OWNS upstream to an owner nobody owns. That is what makes
+    an ownership risk *discoverable*: the chain is the evidence, and a party that only appears
+    two or three hops up is exactly the one a single-hop lookup would miss.
+
+    Simulation status propagates down the chain: a derived parent is simulated if any hop or
+    node along the path to it is. The path itself is returned as provenance, and every element
+    id on it goes into `relationship_ids` so a report can highlight the whole chain.
+    """
+    rows = await db.read(
+        f"""
+        MATCH path=(up:Entity)-[:OWNS|ULTIMATE_PARENT_OF*1..{ULTIMATE_PARENT_DEPTH}]->(e:Entity {{id:$id}})
+        WHERE up.id <> $id AND NOT EXISTS {{ (:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(up) }}
+        WITH up, path, relationships(path) AS hops, nodes(path) AS chain
+        // Shortest first: the nearest root wins when a node is reachable by several routes.
+        ORDER BY length(path), up.name
+        WITH up, head(collect({{hops: hops, chain: chain}})) AS best
+        RETURN up.id AS id, up.name AS name,
+               coalesce(up.simulated, false) AS simulated,
+               size(best.hops) AS hops,
+               [h IN best.hops | coalesce(h.id, elementId(h))] AS relationship_ids,
+               [n IN best.chain | n.name] AS chain,
+               coalesce(head(best.hops).id, elementId(head(best.hops))) AS relationship_id,
+               any(h IN best.hops WHERE coalesce(h.simulated, false))
+                 OR any(n IN best.chain WHERE coalesce(n.simulated, false)) AS relationship_simulated,
+               head([h IN best.hops WHERE h.claim_id IS NOT NULL | h.claim_id]) AS claim_id,
+               head([h IN best.hops WHERE h.source IS NOT NULL | h.source]) AS source,
+               head([h IN best.hops WHERE h.source_url IS NOT NULL | h.source_url]) AS source_url
+        ORDER BY hops, name
+        """,
+        {"id": entity_id},
+    )
+    for row in rows:
+        # A single stated hop is the registry's claim; anything longer is our inference, and the
+        # report should say so rather than borrow the top link's source as if it named the parent.
+        if row["hops"] > 1:
+            row["source"] = f"derived: ownership chain via {' → '.join(row['chain'][1:-1])}" if len(row["chain"]) > 2 else "derived: ownership chain"
+    return [r for r in rows if r.get("id")]
+
+
 async def entity_core(entity_id: str) -> dict | None:
     rows = await db.read(
         """
@@ -51,8 +99,6 @@ async def entity_core(entity_id: str) -> dict | None:
         OPTIONAL MATCH (e)-[ps:PARENT_SEATED_IN]->(seat:Location)
         OPTIONAL MATCH (e)-[:MANUFACTURES_IN]->(mfg:Location)
         OPTIONAL MATCH (e)-[:OPERATES_IN]->(ops:Location)
-        OPTIONAL MATCH (up:Entity)-[uo:ULTIMATE_PARENT_OF]->(e)
-        OPTIONAL MATCH (uc:Claim {id:uo.claim_id})
         OPTIONAL MATCH (dp:Entity)-[o:OWNS]->(e)
         OPTIONAL MATCH (e)-[:PROVIDES]->(c:Category)
         RETURN e{.*} AS e,
@@ -63,18 +109,6 @@ async def entity_core(entity_id: str) -> dict | None:
                    source:ps.source, source_url:ps.source_url} AS parent_seat,
                collect(DISTINCT mfg{.code,.name}) AS manufactures,
                collect(DISTINCT ops{.code,.name}) AS operates,
-               collect(DISTINCT up{.id,.name, simulated:coalesce(up.simulated,false),
-                   relationship_id:coalesce(uo.id, elementId(uo)),
-                   relationship_simulated:coalesce(uo.simulated,false),
-                   claim_id:uo.claim_id, claim_simulated:coalesce(uc.simulated,false),
-                   artifact_simulated:CASE WHEN uc IS NULL THEN false ELSE EXISTS {
-                     MATCH (ua:Artifact)-[:EVIDENCES]->(uc) WHERE coalesce(ua.simulated,false)
-                   } END,
-                   evidence_simulated:CASE WHEN uc IS NULL THEN false ELSE EXISTS {
-                     MATCH (:Artifact)-[ue:EVIDENCES]->(uc) WHERE coalesce(ue.simulated,false)
-                   } END,
-                   source:coalesce(uo.source,uc.source),
-                   source_url:coalesce(uo.source_url,head([(ua:Artifact)-[:EVIDENCES]->(uc) | ua.url]))}) AS ultimate_parents,
                collect(DISTINCT {id: dp.id, name: dp.name, pct: o.pct,
                    simulated:coalesce(dp.simulated,false),
                    relationship_id:coalesce(o.id, elementId(o)),
@@ -89,7 +123,7 @@ async def entity_core(entity_id: str) -> dict | None:
         return None
     r = rows[0]
     r["direct_parents"] = [d for d in r["direct_parents"] if d.get("id")]
-    r["ultimate_parents"] = [d for d in r["ultimate_parents"] if d and d.get("id")]
+    r["ultimate_parents"] = await ultimate_parents(entity_id)
     r["manufactures"] = [d for d in r["manufactures"] if d and d.get("code")]
     r["operates"] = [d for d in r["operates"] if d and d.get("code")]
     r["categories"] = [d for d in r["categories"] if d and d.get("id")]
@@ -866,8 +900,12 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
             fact for fact in core.get("parent_seat_evidence", [])
             if fact.get("id") == seat_ref.get("relationship_id") or fact.get("seat_code") == seat
         ]
+        # The whole chain, not just its endpoints: highlighting a derived parent is only
+        # meaningful if the hops that lead to it light up with it.
         ownership_ids = [
-            i for u in ups for i in (u.get("id"), u.get("relationship_id"), u.get("claim_id")) if i
+            i for u in ups
+            for i in (u.get("id"), u.get("relationship_id"), u.get("claim_id"), *(u.get("relationship_ids") or ()))
+            if i
         ]
         ownership_ids += [i for i in (seat_ref.get("id"), seat_ref.get("relationship_id")) if i]
         ownership_ids += [
@@ -961,15 +999,27 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
     # 3. People
     interlocks = [p for p in ppl["current"] if p.get("interlock")]
     moved = [p for p in ppl["former"] if p.get("moved_to_flagged")]
+    # Someone on staff *now* who also sits inside a flagged entity *now*. This is the
+    # sharpest form of the tie and it used to fall through: flagged_in below only caught
+    # a lapsed role at the flagged entity, so a concurrent one scored as clear.
+    flagged_now = [p for p in ppl["current"] if any(x["flagged"] and x["current"] for x in p["elsewhere"])]
     flagged_in = [p for p in ppl["current"] if any(x["flagged"] and not x["current"] for x in p["elsewhere"])]
-    if moved or flagged_in:
-        who = (moved or flagged_in)[0]
-        other = next((x for x in who["elsewhere"] if x["flagged"]), None)
+    if moved or flagged_now or flagged_in:
+        who = (moved or flagged_now or flagged_in)[0]
+        concurrent = not moved and bool(flagged_now)
+        # Prefer the live role at the flagged entity when the person holds more than one.
+        flagged_roles = [x for x in who["elsewhere"] if x["flagged"]]
+        other = next((x for x in flagged_roles if x["current"]), None) if concurrent else None
+        other = other or next(iter(flagged_roles), None)
         people_ids = [who.get("person_id"), who.get("edge_id"), who.get("claim_id")]
         if other:
             people_ids += [other.get("entity_id"), other.get("role_edge_id"), other.get("claim_id")]
-        inds.append(_ind("people", f"{'Former' if moved else 'Current'} {who['title'] or 'officer'} linked to flagged entity" + (f" ({other['entity']})" if other else ""),
-                         "medium", who.get("source") or (other or {}).get("source") or "LittleSis", who["name"],
+        role = who["title"] or "officer"
+        label = (f"Current {role} concurrently at flagged entity" if concurrent
+                 else f"{'Former' if moved else 'Current'} {role} linked to flagged entity")
+        inds.append(_ind("people", label + (f" ({other['entity']})" if other else ""),
+                         "high" if concurrent else "medium",
+                         who.get("source") or (other or {}).get("source") or "LittleSis", who["name"],
                          who.get("source_url") or (other or {}).get("source_url"), ids=people_ids,
                           simulated=bool(_graph_fact_simulated(who) or _graph_fact_simulated(other or {}))))
     elif any(p.get("formerly_elsewhere") for p in ppl["current"]):

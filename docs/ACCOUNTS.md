@@ -12,7 +12,8 @@ prompt. Record passwords in your own password manager, not here.
 |---|---|---|
 | USAspending | api.usaspending.gov | primes, subawards, recipients (UEI), NAICS/PSC, competition |
 | GLEIF | api.gleif.org | LEI, legal jurisdiction, level-2 direct/ultimate parents |
-| OFAC SDN | treasury.gov sdn.csv | sanctions screen (fuzzy name match, list cached daily) |
+| OFAC SDN | treasury.gov sdn.csv | sanctions screen (fuzzy name match, list cached daily); organisation and individual designations screened separately |
+| **UN Security Council Consolidated List** | scsanctions.un.org consolidated.xml | multilateral sanctions screen; 275 entity and 736 individual designations with committee regime and listing date. The published URL 302s to a short-lived signed blob, so the fetch follows redirects and the diagnostic reads a 3xx as healthy |
 | LittleSis | littlesis.org/api | officers, directors, tenures (CC BY-SA 4.0) |
 | SEC EDGAR | sec.gov / data.sec.gov | tickers, submissions; needs the descriptive User-Agent we send |
 | GDELT | api.gdeltproject.org | news; rate-limited (~1 req / 5 s, 429 otherwise) — treated as best-effort |
