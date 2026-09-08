@@ -174,6 +174,9 @@ function restyle() {
   // Focus classes determine which same-name members must remain visible when collapsed.
   applyZoomGrouping(true)
   markFresh()
+  // Style ops and layer toggles change which components are drawn. Only adjust a simulation that is
+  // already running: while the static layout is in flight there is none, and it starts one itself.
+  if (live.length) startLive()
 }
 const FAMILY_EDGES: Record<string, Set<string>> = {
   ownership: new Set(['OWNS', 'ULTIMATE_PARENT_OF', 'BENEFICIAL_OWNER_OF', 'PARENT_SEATED_IN']),
@@ -261,16 +264,43 @@ function applyLayers() {
 // over in infinite mode — a force simulation that keeps running, so dragging a node pulls its
 // neighbours through the edges and the rest of the graph relaxes, the way d3-force does in Neo4j
 // Browser. Cola pins the grabbed node to the pointer itself; nothing here handles drag events.
-let live: any = null
-function stopLive() { if (live) { try { live.stop() } catch {} live = null } }
-function startLive() {
+//
+// Cola models the canvas as a stress system: every pair of nodes is given an ideal separation taken
+// from the shortest path between them, and a pair with no path at all is given Number.MAX_VALUE.
+// One stranded node is therefore enough to make the whole simulation diverge — it is pushed towards
+// a separation of 1e308, it drags its neighbours after it, and nothing ever comes to rest. Nodes get
+// stranded routinely: a layer toggle that hides people leaves their organizations edgeless, and a
+// subgraph can simply arrive without the edge that would join it. So the live layout runs one
+// simulation per connected component of what is actually drawn, where every distance is finite. A
+// node on its own has nothing to relax against and stays where the static layout put it.
+let live: any[] = []
+let liveKey = ''
+function stopLive() {
+  live.forEach(l => { try { l.stop() } catch {} })
+  live = []
+  liveKey = ''
+}
+function liveGroups() {
+  if (!cy) return []
+  return cy.elements().filter(e => e.visible()).components().filter(c => c.nodes().length > 1)
+}
+/** Restart the simulations when the drawn components change; `force` also picks up moved nodes. */
+function startLive(force = false) {
+  if (!cy) return
+  const groups = liveGroups()
+  const key = groups.map(g => g.map(e => e.id()).sort().join(',')).join('|')
+  if (!force && live.length && key === liveKey) return
   stopLive()
-  if (!cy || cy.nodes().length === 0) return
-  live = cy.layout({
-    name: 'cola', infinite: true, fit: false, randomize: false, animate: true,
-    edgeLength: 115, nodeSpacing: () => 26, avoidOverlap: true, handleDisconnected: true, convergenceThreshold: 0.02,
-  } as any)
-  live.run()
+  if (!groups.length) return
+  liveKey = key
+  live = groups.map(group => {
+    const l = group.layout({
+      name: 'cola', infinite: true, fit: false, randomize: false, animate: true,
+      edgeLength: 115, nodeSpacing: () => 26, avoidOverlap: true, convergenceThreshold: 0.02,
+    } as any)
+    l.run()
+    return l
+  })
 }
 // Nodes added to a running canvas would otherwise appear at the origin and fly across it; drop
 // each one next to a neighbour that already has a position and let the simulation settle it.
@@ -353,7 +383,8 @@ function applyZoomGrouping(force = false) {
       })
     }
   })
-  if (wasCollapsed && !collapse) startLive()
+  // Ungrouping moves every member; cola only reads positions it set itself, so it must restart.
+  if (wasCollapsed && !collapse) startLive(true)
 }
 
 // Keep a collapsed group stacked on its painted node wherever that node goes — dragged by the user
