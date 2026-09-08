@@ -2,8 +2,10 @@
   <v-app :theme="ws.theme">
     <v-app-bar density="compact" flat border>
       <span class="brand">ILLUMINATE</span>
-      <v-chip class="ml-3" size="small" variant="tonal" prepend-icon="mdi-target" :to="ws.ws.root_id ? `/entities/${ws.ws.root_id}` : '/settings'">
-        Consumer: {{ ws.ws.root_label || 'not set' }}
+      <!-- What the canvas is showing, not a workspace setting: it follows the focus picker. -->
+      <v-chip class="ml-3" size="small" variant="tonal" :prepend-icon="graph.focusId ? 'mdi-target' : 'mdi-graph-outline'" to="/"
+              :title="graph.focusId ? 'The canvas is narrowed to this program — pick Everything to see them all' : 'The canvas shows every program'">
+        {{ graph.focusId ? `Program: ${graph.focusLabel || graph.focusId}` : 'All programs' }}
       </v-chip>
       <v-spacer />
       <v-select v-if="route.name === 'graph'" :model-value="ws.depth" @update:model-value="ws.setDepth" :items="[1,2,3,4,5,6]" label="Depth" hide-details style="max-width: 110px" class="mr-2" />
@@ -28,13 +30,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useGraph } from './stores/graph'
 import { useWorkspace } from './stores/workspace'
 import { useChat } from './stores/chat'
 import { usePermissions } from './stores/permissions'
 import { useJobs } from './stores/jobs'
 import { api } from './api/client'
 import PermissionDialog from './components/PermissionDialog.vue'
-const ws = useWorkspace(); const chat = useChat(); const perms = usePermissions(); const jobs = useJobs(); const route = useRoute()
+const ws = useWorkspace(); const graph = useGraph(); const chat = useChat(); const perms = usePermissions(); const jobs = useJobs(); const route = useRoute()
 const staged = ref(0); const snack = ref(false); const snackText = ref('')
 const nav = computed(() => [
   { to: '/', icon: 'mdi-graph', title: 'Graph' },

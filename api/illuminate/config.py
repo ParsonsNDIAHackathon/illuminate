@@ -74,16 +74,24 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
-class WorkspaceSettings(BaseModel):
-    """Single-workspace settings (multi-tenant auth is an explicit hackathon cut)."""
+# Canvas layers and whether each is drawn by default. "entities" is always on. Artifacts split by
+# kind over "artifacts" (documents: filings, news, awards, web) and "sources" (registry entries and
+# source records); "claims" is the reified assertions those artifacts evidence.
+LAYER_DEFAULTS = {"entities": True, "people": True, "countries": False, "categories": False, "artifacts": False, "sources": False, "claims": False}
 
-    root_id: str | None = None
-    root_label: str | None = None
+
+class WorkspaceSettings(BaseModel):
+    """Single-workspace settings (multi-tenant auth is an explicit hackathon cut).
+
+    No consumer lives here. A workspace holds every program at once; which one is in
+    view is a property of the canvas the user is looking at, not of the workspace.
+    """
+
     permission_mode: PermissionMode = "ask_always"
     model_strong: str | None = None
     model_fast: str | None = None
     openai_base_url: str | None = None
-    layers: dict[str, bool] = {"entities": True, "people": True, "countries": False, "artifacts": False, "categories": False}
+    layers: dict[str, bool] = dict(LAYER_DEFAULTS)
 
 
 def _ws_path() -> Path:
@@ -94,7 +102,10 @@ def load_workspace() -> WorkspaceSettings:
     p = _ws_path()
     if p.exists():
         try:
-            return WorkspaceSettings.model_validate_json(p.read_text())
+            ws = WorkspaceSettings.model_validate_json(p.read_text())
+            # A workspace saved before a layer existed keeps its choices and gains the new default.
+            ws.layers = {**LAYER_DEFAULTS, **ws.layers}
+            return ws
         except Exception:
             pass
     return WorkspaceSettings()

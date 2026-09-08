@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from .. import events
 from ..enrichment import claims
 
 router = APIRouter(prefix="/api/claims", tags=["claims"])
@@ -25,9 +26,12 @@ async def list_source_records(entity_id: str | None = None, limit: int = 200):
 @router.post("/{claim_id}/commit")
 async def commit(claim_id: str, body: Note):
     try:
-        return {"status": await claims.commit(claim_id, body.note or "approved by user")}
+        touched = await claims.endpoints(claim_id)
+        status = await claims.commit(claim_id, body.note or "approved by user")
     except KeyError:
         raise HTTPException(404, "no such claim")
+    await events.announce(touched, reason="claim:commit", source="ui")
+    return {"status": status}
 
 
 @router.post("/{claim_id}/reject")

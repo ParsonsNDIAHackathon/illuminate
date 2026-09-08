@@ -12,7 +12,7 @@
       </template>
       <template #item.status="{ item }"><TruthBadge :value="item.claim.simulated ? 'simulated' : item.claim.status" /><div v-if="item.claim.simulated" class="simulation-note">Training scenario; not an allegation</div></template>
       <template #item.source="{ item }"><b>{{ item.claim.source || 'Unavailable' }}</b><div class="text-caption">Method {{ item.claim.method || 'Unavailable' }}<span v-if="item.claim.model"> · {{ item.claim.model }}</span></div><div class="text-caption">Confidence {{ confidence(item.claim.confidence) }} · {{ item.claim.trust || 'trust unknown' }}</div></template>
-      <template #item.artifacts="{ item }"><span v-for="a in item.artifacts" :key="a.id" class="mr-2 text-no-wrap"><TruthBadge v-if="a.simulated" value="simulated" /><a :href="a.url" target="_blank" rel="noopener">{{ a.kind }}</a><v-btn icon="mdi-text-box-search-outline" size="x-small" variant="text" density="compact" title="View contents" @click="rawId = a.id" /></span><span v-if="!item.artifacts.length" class="text-caption">Missing</span></template>
+      <template #item.artifacts="{ item }"><span v-for="a in item.artifacts" :key="a.id" class="mr-2 text-no-wrap"><TruthBadge v-if="a.simulated" value="simulated" /><SourceLink :href="a.url" :artifact-id="a.id">{{ a.kind }}</SourceLink><v-btn icon="mdi-text-box-search-outline" size="x-small" variant="text" density="compact" title="View contents" @click="rawId = a.id" /></span><span v-if="!item.artifacts.length" class="text-caption">Missing</span></template>
       <template #item.when="{ item }">{{ date(item.claim.retrieved_at) }}</template>
       <template #item.actions="{ item }">
         <template v-if="item.claim.status === 'staged'">
@@ -29,6 +29,7 @@
 import { onMounted, ref, watch } from 'vue'
 import { api } from '../api/client'
 import ArtifactViewer from '../components/ArtifactViewer.vue'
+import SourceLink from '../components/SourceLink.vue'
 import TruthBadge from '../components/TruthBadge.vue'
 import { useRoute } from 'vue-router'
 const route = useRoute()

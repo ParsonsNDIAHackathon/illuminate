@@ -236,15 +236,34 @@ def _neighbourhood(p):
         rel_filter += ["HELD_ROLE", "BENEFICIAL_OWNER_OF"]
     if layers.get("countries", False):
         rel_filter += ["INCORPORATED_IN", "OPERATES_IN", "MANUFACTURES_IN", "PARENT_SEATED_IN"]
-    if layers.get("artifacts", False):
-        rel_filter += ["EVIDENCES", "ASSERTS", "TARGETS", "ABOUT"]
+    # Artifacts and sources share a label and its edges; the canvas hides whichever kind is off.
+    if layers.get("artifacts", False) or layers.get("sources", False):
+        rel_filter += ["EVIDENCES", "ABOUT"]
+    if layers.get("claims", False):
+        rel_filter += ["ASSERTS", "TARGETS", "EVIDENCES"]
+    rel_filter = list(dict.fromkeys(rel_filter))
     rf = "|".join(rel_filter)
+    bound = {"id": p["entity_id"], "limit": _subgraph_limit(p.get("limit", 400))}
+    if p.get("program_id"):
+        # Keep the walk inside one program. Suppliers sell to several programs, so an
+        # unconstrained walk hops supplier -> another program -> that program's own
+        # suppliers, and the single-program view quietly becomes the whole graph again.
+        # Blacklisting every other program cuts those paths at the crossing point.
+        bound["program"] = p["program_id"]
+        cy = (
+            "MATCH (root:Entity {id:$id})\n"
+            "OPTIONAL MATCH (other:Entity) WHERE other.kind = 'program' AND other.id <> $program\n"
+            "WITH root, collect(other) AS blocked\n"
+            f"CALL apoc.path.subgraphAll(root, {{maxLevel:{d}, relationshipFilter:'{rf}', limit:$limit, blacklistNodes:blocked}}) YIELD nodes, relationships\n"
+            "RETURN nodes, relationships LIMIT 1"
+        )
+        return cy, bound
     cy = (
         "MATCH (root:Entity {id:$id})\n"
         f"CALL apoc.path.subgraphAll(root, {{maxLevel:{d}, relationshipFilter:'{rf}', limit:$limit}}) YIELD nodes, relationships\n"
         "RETURN nodes, relationships LIMIT 1"
     )
-    return cy, {"id": p["entity_id"], "limit": _subgraph_limit(p.get("limit", 400))}
+    return cy, bound
 
 
 TEMPLATES: dict[str, Template] = {
@@ -309,8 +328,10 @@ TEMPLATES: dict[str, Template] = {
         ),
         Template(
             "neighbourhood",
-            "Subgraph around an entity to a depth, honouring layer toggles (people, countries, artifacts).",
-            {"entity_id": {"type": "string"}, "depth": {"type": "integer", "default": 2}, "limit": {"type": "integer", "default": 400}, "layers": {"type": "object"}}, ["entity_id"], _neighbourhood, None,
+            "Subgraph around an entity to a depth, honouring layer toggles (people, countries, categories, artifacts, sources, claims).",
+            {"entity_id": {"type": "string"}, "depth": {"type": "integer", "default": 2}, "limit": {"type": "integer", "default": 400}, "layers": {"type": "object"},
+             "program_id": {"type": "string", "description": "confine the walk to this program's supply chain; other programs, and whatever hangs off only them, are left out"}},
+            ["entity_id"], _neighbourhood, None,
         ),
     ]
 }

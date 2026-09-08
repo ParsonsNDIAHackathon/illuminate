@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
-from .. import db
+from .. import db, events
 from ..config import settings
 from ..connectors import REGISTRY, get_connector
 from . import claims
@@ -123,6 +123,7 @@ class Worker:
         self._set_status(job)
         job.finished_at = time.time()
         await self._emit("job_update", job.to_dict())
+        await events.announce([job.entity_id], reason="enrich:done", source="enrichment")
 
     async def _execute(self, job: Job) -> None:
         rows = await db.read("MATCH (e:Entity {id:$id}) RETURN e{.*} AS e", {"id": job.entity_id})
@@ -134,6 +135,16 @@ class Worker:
             conn = get_connector(name)
             if not conn:
                 job.results[name] = {"status": "failed", "error": "unknown connector", "action": "remove or configure this connector", "attempts": 0}
+                continue
+            applies_to = getattr(conn, "applies_to", None)
+            if applies_to and not applies_to(entity):
+                job.results[name] = {
+                    "status": "skipped",
+                    "error": f"source does not speak about a {entity.get('kind') or 'organization'}",
+                    "action": "choose a connector that applies to this entity kind",
+                    "attempts": 0,
+                }
+                await self._emit("job_update", job.to_dict())
                 continue
             try:
                 st = await asyncio.wait_for(conn.status(job.user), timeout=settings.connector_timeout_s)
@@ -151,6 +162,7 @@ class Worker:
                 await self._emit("job_update", job.to_dict())
                 continue
             res = {"status": "running", "facts": 0, "staged": 0, "committed": 0, "error": None, "attempts": 0}
+            touched: dict[str, None] = {job.entity_id: None}
             job.results[name] = res
             facts = None
             connector_error = None
@@ -182,7 +194,7 @@ class Worker:
                 else:
                     try:
                         await asyncio.wait_for(
-                            self._process_facts(conn, facts, res),
+                            self._process_facts(conn, facts, res, touched),
                             timeout=settings.connector_processing_timeout_s,
                         )
                         if res.get("fact_errors"):
@@ -200,13 +212,16 @@ class Worker:
                         )
             job.results[name] = res
             await self._emit("job_update", job.to_dict())
+            # Claims commit straight to the graph, so the canvas is told after every connector
+            # rather than at the end of the job: facts appear as they are found.
+            if res["committed"] or res["staged"] or res.get("rejected"):
+                await events.announce(list(touched), reason=f"enrich:{name}", source="enrichment")
             # entity may have gained identifiers (LEI, CIK…) that later connectors use
             rows = await db.read("MATCH (e:Entity {id:$id}) RETURN e{.*} AS e", {"id": job.entity_id})
             if rows:
                 entity = rows[0]["e"]
         await self._refresh_summary(job)
-
-    async def _process_facts(self, conn, facts, res: dict) -> None:
+    async def _process_facts(self, conn, facts, res: dict, touched: dict[str, None]) -> None:
         res["rejected"] = 0
         res["fact_errors"] = 0
         for fact in facts:
@@ -214,6 +229,11 @@ class Worker:
                 model = fact.props.pop("_model", None) if "_model" in fact.props else None
                 cid = await claims.stage(fact, source=conn.name, trust=conn.trust, model=model)
                 res["staged"] += 1
+                # stage() resolves refs before writing; invalidate the actual graph
+                # endpoints so multi-hop additions reach open canvases immediately.
+                touched[fact.subject.id] = None
+                if fact.object:
+                    touched[fact.object.id] = None
                 status = await claims.decide(cid, trust=conn.trust)
                 if status in ("committed", "rejected"):
                     res["staged"] -= 1

@@ -57,9 +57,16 @@ class Connector:
     key_note: str | None = None
     diagnostic_url: str | None = None
     diagnostic_params: dict[str, Any] = {}
+    # Entity kinds this source can say anything about. A registry, sanctions list or
+    # officer database speaks about companies; screening a *program* name against the
+    # SDN list only manufactures noise, so the default excludes them.
+    kinds: tuple[str, ...] = ("organization",)
 
     def needs_key(self) -> bool:
         return self.key_name is not None
+
+    def applies_to(self, entity: dict) -> bool:
+        return (entity.get("kind") or "organization") in self.kinds
 
     async def status(self, user: str) -> dict:
         from ..vault import vault
@@ -94,7 +101,6 @@ class Connector:
         return {"name": self.name, "label": self.label, "description": self.description, "trust": self.trust,
                 "key_name": self.key_name, "key_url": self.key_url, "key_note": self.key_note,
                 **source_metadata(self.name)}
-
 
 _DIAGNOSTIC_DETAILS: dict[str, str] = {
     "missing_credentials": "Add a credential before testing this connector",

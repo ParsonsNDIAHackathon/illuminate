@@ -21,6 +21,7 @@ class GDELTConnector(Connector):
     label = "GDELT"
     description = "Recent news, entity clusters, tone"
     trust = "open"
+    kinds = ("organization", "program", "agency")   # a program is a thing the news writes about
 
     async def enrich(self, entity: dict, user: str) -> list[Fact]:
         facts: list[Fact] = []

@@ -261,7 +261,7 @@
       <div class="tablewrap"><table>
         <thead><tr><th>Source</th><th class="num">Cached calls</th><th>Contributes</th></tr></thead>
         <tbody>
-          <tr><td><span class="d">USAspending</span></td><td class="num">92</td><td>Top-20 prime recipients by obligated amount since FY2020 (UEI, business types, address, place of performance, PSC/NAICS, competition → <code>sole_source</code>) plus all reported sub-awardees at tier 2. Awards are <code>Artifact {kind:'award'}</code> nodes.</td></tr>
+          <tr><td><span class="d">USAspending</span></td><td class="num">92</td><td>Top-20 prime recipients by obligated amount since FY2020 (UEI, business types, address, place of performance, PSC/NAICS, competition → <code>sole_source</code>) plus all reported sub-awardees at tier 2. Awards are <code>Artifact {kind:'award'}</code> nodes. The same keyword award search runs on demand for any program added later, through the <code>discover_suppliers</code> tool — the one source that proposes <code>SUPPLIES</code>.</td></tr>
           <tr><td><span class="d">GLEIF</span></td><td class="num">77</td><td>LEI, legal jurisdiction (<code>INCORPORATED_IN</code>), level-2 direct and ultimate parents (<code>OWNS</code>, <code>ULTIMATE_PARENT_OF</code>, <code>PARENT_SEATED_IN</code>). Real finding: eight tier-1 suppliers resolve to a foreign ultimate parent, Subaru to Japan and Canadian Commercial Corporation to Canada among them.</td></tr>
           <tr><td><span class="d">LittleSis</span></td><td class="num">71</td><td>Officers and directors as <code>Person</code> nodes with one tenured <code>HELD_ROLE</code> edge per term.</td></tr>
           <tr><td><span class="d">SEC EDGAR</span></td><td class="num">6</td><td>Tickers, CIKs and filings for the listed firms.</td></tr>
@@ -344,7 +344,7 @@
         </div>
         <div class="arrow">→</div>
         <div class="col">
-          <div class="box key">One tool contract<small>tools/contract.py · nine tools</small></div>
+          <div class="box key">One tool contract<small>tools/contract.py · ten tools</small></div>
           <div class="box key">dispatch + permission gate<small>tools/handlers.py · tools/permissions.py</small></div>
         </div>
         <div class="arrow">→</div>
@@ -355,7 +355,7 @@
       </div>
 
       <div class="decisions">
-        <div><div class="id">D1</div><div><div class="ttl">One contract, two transports</div><p><code>tools/contract.py</code> defines nine tools once. The chat module hands them to the model and the MCP server publishes the identical list. Both call the same dispatch, so the permission gate applies to external agents too.</p></div></div>
+        <div><div class="id">D1</div><div><div class="ttl">One contract, two transports</div><p><code>tools/contract.py</code> defines ten tools once. The chat module hands them to the model and the MCP server publishes the identical list. Both call the same dispatch, so the permission gate applies to external agents too.</p></div></div>
         <div><div class="id">D2</div><div><div class="ttl">Graph-first retrieval</div><p>Templates and generated Cypher return real subgraphs through <code>graphio.py</code>; the canvas draws what the query returned. A vector index over filings is a stated post-hackathon cut.</p></div></div>
         <div><div class="id">D3</div><div><div class="ttl">Validated Cypher</div><p>The validator classifies every statement READ, WRITE, DESTRUCTIVE or SCHEMA, enforces the label, relationship and APOC allowlist, caps variable-length hops at 6, appends or clamps <code>LIMIT</code>, and rejects <code>CALL db.*</code>, <code>LOAD CSV</code>, admin commands and multi-statements. Reads run under a read session with a timeout. The executed Cypher is always shown in the UI.</p></div></div>
         <div><div class="id">D4</div><div><div class="ttl">Ask before writing</div><p>A WRITE or DESTRUCTIVE statement executes inside a transaction that is rolled back to obtain real counters, then is held for the user: approve once, approve this shape for the session, edit, or refuse. Destructive statements require the affected count to be acknowledged and never auto-approve. Refusals return to the model as tool results.</p></div></div>

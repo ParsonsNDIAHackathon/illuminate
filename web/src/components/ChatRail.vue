@@ -59,7 +59,8 @@ chat.bind()
 function ask(s: string) { draft.value = s; submit() }
 function submit() {
   const t = draft.value.trim(); if (!t) return
-  chat.send(t, [...graph.nodes.keys()], ws.ws.layers)
+  // the focused program travels with the message: "the program" means whatever is on screen
+  chat.send(t, [...graph.nodes.keys()], ws.ws.layers, graph.focusId, graph.focusLabel)
   draft.value = ''
 }
 function esc(s: string) { return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' } as any)[c]) }

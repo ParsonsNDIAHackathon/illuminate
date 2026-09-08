@@ -53,7 +53,7 @@
                 <dt>Manufactures</dt><dd>{{ rep.geography.manufactures?.map((m:any) => m.code).join(', ') || '—' }}</dd>
                 <dt>Employees</dt><dd>{{ rep.entity.employees || '—' }}</dd>
                 <dt>Awards</dt><dd>{{ rep.supply.awards.count }} on record</dd>
-                <dt>Tier</dt><dd>{{ rep.supply.tier_from_root != null ? `${rep.supply.tier_from_root} from root` : '—' }}</dd>
+                <dt>Tier</dt><dd>{{ rep.supply.tier_from_root != null ? `${rep.supply.tier_from_root} from ${graph.focusLabel || 'the focused program'}` : '—' }}</dd>
               </dl>
             </v-card-text></v-card>
             <v-card variant="outlined" class="mb-3"><v-card-text>
@@ -133,7 +133,7 @@
       </v-window-item>
       <v-window-item value="artifacts">
         <v-table density="compact"><thead><tr><th>Kind</th><th>Title</th><th>Source</th><th>Date</th><th>View</th></tr></thead>
-          <tbody><tr v-for="a in rep.artifacts" :key="a.id" :class="{ 'finding-simulated': a.simulated }"><td>{{ a.kind }} <TruthBadge v-if="a.simulated" value="simulated" /></td><td><a :href="a.url" target="_blank" rel="noopener">{{ a.title }}</a><div v-if="a.simulated" class="simulation-copy">Training scenario only — not a real allegation.</div></td><td>{{ a.source }}</td><td>{{ a.published_at || (a.retrieved_at || '').slice(0, 10) }}</td><td><v-btn icon="mdi-text-box-search-outline" size="x-small" variant="text" title="View contents" @click="rawId = a.id" /></td></tr></tbody></v-table>
+          <tbody><tr v-for="a in rep.artifacts" :key="a.id" :class="{ 'finding-simulated': a.simulated }"><td>{{ a.kind }} <TruthBadge v-if="a.simulated" value="simulated" /></td><td><SourceLink :href="a.url" :artifact-id="a.id">{{ a.title }}</SourceLink><div v-if="a.simulated" class="simulation-copy">Training scenario only — not a real allegation.</div></td><td>{{ a.source }}</td><td>{{ a.published_at || (a.retrieved_at || '').slice(0, 10) }}</td><td><v-btn icon="mdi-text-box-search-outline" size="x-small" variant="text" title="View contents" @click="rawId = a.id" /></td></tr></tbody></v-table>
         <ArtifactViewer :artifact-id="rawId" @close="rawId = null" />
         <p v-if="!rep.artifacts.length" class="text-body-2 mt-2" style="opacity:.6">No artifacts attached yet.</p>
       </v-window-item>
@@ -147,9 +147,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, getVendorRiskProfile, type VendorRiskProfile } from '../api/client'
+import { api, getVendorRiskProfile, qs, type VendorRiskProfile } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
 import ArtifactViewer from '../components/ArtifactViewer.vue'
+import SourceLink from '../components/SourceLink.vue'
 import TruthBadge from '../components/TruthBadge.vue'
 import { useGraph } from '../stores/graph'
 const rawId = ref<string | null>(null)
@@ -164,7 +165,7 @@ const riskProfile = ref<VendorRiskProfile | null>(null)
 const selectedFinding = ref<string | null>(null)
 const activeFinding = computed(() => rep.value?.risk?.indicators?.find((i: any) => i.family === selectedFinding.value) || null)
 async function load() {
-  const report = await api.get(`/api/entities/${props.id}/report`)
+  const report = await api.get(`/api/entities/${props.id}/report?${qs({ root_id: graph.focusId })}`)
   rep.value = report
   riskProfile.value = await getVendorRiskProfile(props.id, report)
 }

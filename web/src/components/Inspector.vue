@@ -58,7 +58,7 @@
     <section v-if="node.label === 'Artifact'">
       <h4>Artifact</h4>
       <dl>
-        <template v-if="p.url"><dt>Page</dt><dd><a :href="p.url" target="_blank" rel="noopener">{{ p.url }}</a></dd></template>
+        <template v-if="p.url"><dt>Page</dt><dd><SourceLink :href="p.url" :artifact-id="node.id">{{ p.url }}</SourceLink></dd></template>
         <template v-if="p.published_at"><dt>Published</dt><dd>{{ p.published_at }}</dd></template>
         <template v-if="p.amount"><dt>Amount</dt><dd>${{ Number(p.amount).toLocaleString() }}</dd></template>
         <template v-if="p.award_id"><dt>Award</dt><dd>{{ p.award_id }}</dd></template>
@@ -67,33 +67,67 @@
     </section>
     <div class="d-flex flex-wrap ga-1 mt-2">
       <v-btn v-if="node.label === 'Artifact'" prepend-icon="mdi-text-box-search-outline" @click="rawId = node.id">Contents</v-btn>
+      <v-btn v-if="node.label === 'Artifact'" prepend-icon="mdi-eye-outline" @click="viewId = node.id">View</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-file-document-outline" :to="`/entities/${node.id}`">Report</v-btn>
       <v-btn prepend-icon="mdi-arrow-expand-all" @click="$emit('expand', node.id)">Expand</v-btn>
+      <v-btn v-if="isProgram" prepend-icon="mdi-sitemap-outline" @click="openDiscover" :loading="discovering">Find suppliers</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-auto-fix" @click="enrich" :loading="enriching">Enrich</v-btn>
-      <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-target" variant="text" @click="setRoot" title="Make this the consumer (root)">Set as root</v-btn>
+      <v-btn v-if="isProgram && node.id !== graph.focusId" prepend-icon="mdi-target" variant="text" @click="focusHere" :loading="focusing" title="Show only this program and its supply chain">Focus</v-btn>
     </div>
+    <v-dialog v-model="discoverDlg" max-width="520">
+      <v-card>
+        <v-card-title class="text-subtitle-1">Find suppliers of {{ node.name }}</v-card-title>
+        <v-card-text>
+          <p class="text-body-2 mb-3" style="opacity:.75">
+            Federal award records are searched for these words. Prime recipients become tier-1 suppliers and their
+            reported sub-awardees tier-2. Use the designation the contracts carry — “E-2D”, not the full programme
+            title — since a broad word pulls in unrelated companies that happen to share it.
+          </p>
+          <v-combobox v-model="kw" label="Award keywords" multiple chips closable-chips clearable
+                      hint="Press enter after each" persistent-hint density="comfortable" />
+          <div class="d-flex ga-3 mt-3">
+            <v-text-field v-model="agency" label="Awarding agency" density="comfortable" hide-details
+                          placeholder="Department of Defense" />
+            <v-text-field v-model.number="maxSubs" label="Max sub-awardees" type="number" density="comfortable" hide-details style="max-width:150px" />
+          </div>
+          <p v-if="discoverError" class="text-body-2 mt-3 text-error">{{ discoverError }}</p>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="discoverDlg = false">Cancel</v-btn>
+          <v-btn color="primary" :disabled="!kw.length" :loading="discovering" @click="runDiscover">Search awards</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
     <ArtifactViewer :artifact-id="rawId" @close="rawId = null" />
+    <SourceFrame v-if="viewId" :artifact-id="viewId" @close="viewId = null" />
   </div>
 </template>
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { api } from '../api/client'
+import { api, qs } from '../api/client'
 import { useGraph } from '../stores/graph'
 import { useJobs } from '../stores/jobs'
 import { useWorkspace } from '../stores/workspace'
 import ArtifactViewer from './ArtifactViewer.vue'
+import SourceFrame from './SourceFrame.vue'
+import SourceLink from './SourceLink.vue'
 const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace()
-const rawId = ref<string | null>(null)
+const rawId = ref<string | null>(null); const viewId = ref<string | null>(null)
 defineEmits<{ (e: 'expand', id: string): void }>()
 const node = computed(() => graph.selected)
 const p = computed(() => node.value?.props || {})
-const detail = ref<any>(null); const supplies = ref<any[]>([]); const personRoles = ref<any[]>([]); const enriching = ref(false)
+const detail = ref<any>(null); const supplies = ref<any[]>([]); const personRoles = ref<any[]>([]); const enriching = ref(false); const focusing = ref(false)
+const isProgram = computed(() => node.value?.label === 'Entity' && p.value.kind === 'program')
+const discoverDlg = ref(false); const discovering = ref(false); const discoverError = ref('')
+const kw = ref<string[]>([]); const agency = ref(''); const maxSubs = ref<number | null>(null)
 watch(node, async (n) => {
   detail.value = null; supplies.value = []; personRoles.value = []
   if (!n) return
   if (n.label === 'Entity') {
     try {
-      const rep = await api.get(`/api/entities/${n.id}/report`)
+      // tier is counted towards the focused program; with nothing focused there is no tier
+      const rep = await api.get(`/api/entities/${n.id}/report?${qs({ root_id: graph.focusId })}`)
       detail.value = { ...rep.geography, ...rep.control, categories: rep.categories, tier: rep.supply.tier_from_root, suppliers_count: rep.supply.suppliers_count }
       supplies.value = rep.supply.supplies
     } catch {}
@@ -102,7 +136,32 @@ watch(node, async (n) => {
   }
 }, { immediate: true })
 async function enrich() { enriching.value = true; try { await jobs.enqueue(node.value!.id) } finally { enriching.value = false } }
-async function setRoot() { await ws.save({ root_id: node.value!.id, root_label: node.value!.name }) }
+function openDiscover() {
+  // the keywords a previous search used, never a guess from the name: guessing is how
+  // "Hawkeye" pulls in a satellite company that has nothing to do with the aircraft
+  kw.value = [...(p.value.keywords || [])]
+  agency.value = p.value.award_agency ?? ''
+  maxSubs.value = p.value.max_subs ?? null
+  discoverError.value = ''
+  discoverDlg.value = true
+}
+async function runDiscover() {
+  discovering.value = true; discoverError.value = ''
+  try {
+    // the write is held at the permission gate, so this resolves when the user decides
+    await api.post(`/api/programs/${node.value!.id}/suppliers`, {
+      keywords: kw.value, agency: agency.value || null, max_subs: maxSubs.value ?? null,
+    })
+    discoverDlg.value = false
+  } catch (e: any) {
+    discoverError.value = e?.message || 'the award search was refused'
+  } finally { discovering.value = false }
+}
+async function focusHere() {
+  focusing.value = true
+  const id = node.value!.id
+  try { await graph.focus(id, node.value!.name, ws.depth, ws.ws.layers); graph.select(id) } finally { focusing.value = false }
+}
 </script>
 <style scoped>
 .inspector { padding: 12px; font-size: 13px; overflow-y: auto; height: 100%; }

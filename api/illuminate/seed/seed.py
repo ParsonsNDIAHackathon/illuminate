@@ -23,6 +23,7 @@ from ..config import load_workspace, save_workspace
 from ..connectors import get_connector
 from ..connectors.base import now_iso
 from ..connectors.http import set_cache_dir
+from ..connectors.registry import source_metadata
 from ..connectors.usaspending import award_detail, award_url, is_sole_source, psc_category, recipient, recipient_url, search_awards
 from ..enrichment import claims
 from ..ids import edge_id, entity_id, location_id, normalize_name, person_id, artifact_id
@@ -32,7 +33,6 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 CATALOG_FIXTURE = FIXTURES / "catalog_lineage.json"
 PROV = {"source": "USAspending", "method": "connector", "confidence": 0.95}
 SEED_VERSION = "uc7-fixtures-v1"
-from ..connectors.registry import source_metadata
 
 
 def log(msg: str) -> None:

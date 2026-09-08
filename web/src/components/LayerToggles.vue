@@ -4,14 +4,16 @@
     <v-chip value="people" size="small">People</v-chip>
     <v-chip value="countries" size="small">Countries</v-chip>
     <v-chip value="categories" size="small" title="Goods / services taxonomy nodes">Categories</v-chip>
-    <v-chip value="artifacts" size="small">Artifacts</v-chip>
+    <v-chip value="artifacts" size="small" title="Documents: filings, awards, news, web pages">Artifacts</v-chip>
+    <v-chip value="sources" size="small" title="Where data came from: registry entries and source records (LittleSis, GLEIF, SAM.gov, OFAC…)">Sources</v-chip>
+    <v-chip value="claims" size="small" title="Reified assertions the evidence supports">Claims</v-chip>
   </v-chip-group>
 </template>
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useWorkspace } from '../stores/workspace'
 const ws = useWorkspace()
-const TOGGLABLE = ['people', 'countries', 'categories', 'artifacts']
+const TOGGLABLE = ['people', 'countries', 'categories', 'artifacts', 'sources', 'claims']
 const active = computed(() => Object.entries(ws.ws.layers).filter(([, v]) => v).map(([k]) => k))
 const emit = defineEmits<{ (e: 'change'): void }>()
 function onChange(vals: string[]) {
@@ -19,4 +21,4 @@ function onChange(vals: string[]) {
   emit('change')
 }
 </script>
-<style scoped>.layers { position: absolute; top: 8px; left: 12px; }</style>
+<style scoped>.layers { flex: 0 0 auto; }</style>

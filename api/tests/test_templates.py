@@ -3,7 +3,7 @@ from illuminate.cypher.validator import validate
 
 
 def test_all_templates_validate_as_reads():
-    sample = {"entity_id": "ent_x", "root_id": "ent_root", "country": "CN", "date": "2019-03-01", "depth": 3, "layers": {"people": True, "countries": True, "artifacts": True}}
+    sample = {"entity_id": "ent_x", "root_id": "ent_root", "country": "CN", "date": "2019-03-01", "depth": 3, "layers": {"people": True, "countries": True, "artifacts": True, "sources": True, "claims": True}}
     for t in TEMPLATES.values():
         cy, params = t.build(sample)
         v = validate(cy, params=params)

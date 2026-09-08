@@ -42,10 +42,12 @@ const SAME_NAME_COLLAPSE_ZOOM = 1
 function baseColor(n: any) {
   const t = ws.theme
   if (n.props?.kind === 'program') return LABEL_COLORS.Program[t]
+  if (layerOf(n) === 'sources') return LABEL_COLORS.Source[t]
   return (LABEL_COLORS[n.label] || LABEL_COLORS.Entity)[t]
 }
 function shapeFor(n: any) {
   if (n.props?.kind === 'program') return 'round-rectangle'
+  if (layerOf(n) === 'sources') return 'barrel'
   return ({ Entity: 'ellipse', Person: 'diamond', Category: 'hexagon', Location: 'round-triangle', Artifact: 'rectangle', Claim: 'tag' } as any)[n.label] || 'ellipse'
 }
 function badgeFor(n: any) {
@@ -115,6 +117,9 @@ function styleSheet(): any[] {
     { selector: 'node.focus-path', style: { opacity: 1, 'z-index': 30, 'border-width': 4, 'border-color': dark ? '#7dd3c7' : '#006b62', 'font-size': 13, 'font-weight': 'bold', 'text-max-width': 170 } },
     { selector: 'edge.focus-path', style: { opacity: 1, 'z-index': 29, width: 5, 'line-color': dark ? '#7dd3c7' : '#006b62', 'target-arrow-color': dark ? '#7dd3c7' : '#006b62', 'font-size': 10, color: text } },
     { selector: 'node.focus-risk', style: { 'border-color': dark ? '#ff9b80' : '#a93622', 'border-width': 5 } },
+    // a node or edge that arrived from a live change — held for a few seconds, then released
+    { selector: 'node.fresh', style: { 'border-width': 5, 'border-color': dark ? '#34d399' : '#059669', 'z-index': 30 } },
+    { selector: 'edge.fresh', style: { width: 3.4, 'line-color': dark ? '#34d399' : '#059669', 'target-arrow-color': dark ? '#34d399' : '#059669', 'z-index': 30 } },
     // search-bar filter: matches stay bright, everything else recedes
     { selector: '.q-dim', style: { opacity: 0.12, 'z-index': 0 } },
     { selector: 'node.q-match', style: { 'border-width': 3, 'border-color': dark ? '#fbbf24' : '#d97706', 'z-index': 20 } },
@@ -132,7 +137,7 @@ function styleSheet(): any[] {
 }
 
 function toElements() {
-  const root = ws.ws.root_id
+  const root = graph.focusId
   const zoom = cy?.zoom() || 1
   const nodes = graph.nodeList.map(n => {
     const size = n.props?.kind === 'program' ? 56 : n.label === 'Entity' ? 34 : n.label === 'Person' ? 26 : 22
@@ -180,6 +185,7 @@ function restyle() {
   applyFindingFocus()
   // Focus classes determine which same-name members must remain visible when collapsed.
   applyZoomGrouping(true)
+  markFresh()
 }
 const FAMILY_EDGES: Record<string, Set<string>> = {
   ownership: new Set(['OWNS', 'ULTIMATE_PARENT_OF', 'BENEFICIAL_OWNER_OF', 'PARENT_SEATED_IN']),
@@ -265,13 +271,22 @@ function keepSimulationVisible() {
 // Layer toggles gate what the server sends, but nodes can arrive by other routes (chat results,
 // generated Cypher, an API that predates the flag). The canvas enforces the toggles too, so an
 // unchecked layer is never drawn. Edges to hidden nodes are hidden by Cytoscape automatically.
-const LAYER_OF: Record<string, string> = { Person: 'people', Location: 'countries', Category: 'categories', Artifact: 'artifacts', Claim: 'artifacts' }
-const LAYER_DEFAULT: Record<string, boolean> = { people: true, countries: false, categories: false, artifacts: false }
+// The server names each node's layer (graphio.layer_of); the fallback mirrors it for nodes from
+// a route that predates the field. Artifacts split by kind: registry entries and source records
+// are "sources", documents (filings, news, awards, web pages) are "artifacts".
+const SOURCE_KINDS = new Set(['record', 'registry'])
+const LAYER_OF: Record<string, string> = { Person: 'people', Location: 'countries', Category: 'categories', Artifact: 'artifacts', Claim: 'claims' }
+const LAYER_DEFAULT: Record<string, boolean> = { people: true, countries: false, categories: false, artifacts: false, sources: false, claims: false }
+function layerOf(n: any): string | null {
+  if (n.layer !== undefined) return n.layer
+  if (n.label === 'Artifact') return SOURCE_KINDS.has(n.props?.kind || 'record') ? 'sources' : 'artifacts'
+  return LAYER_OF[n.label] || null
+}
 function applyLayers() {
   if (!cy) return
   const L = ws.ws.layers || {}
   cy.nodes().forEach(n => {
-    const layer = LAYER_OF[n.data('label')]
+    const layer = n.data('layer')
     const on = !layer || (L[layer] ?? LAYER_DEFAULT[layer])
     n.toggleClass('layer-hide', !on)
   })
@@ -294,15 +309,20 @@ function startLive() {
 }
 // Nodes added to a running canvas would otherwise appear at the origin and fly across it; drop
 // each one next to a neighbour that already has a position and let the simulation settle it.
+// A node with no neighbour on the canvas — a program added from chat before anything supplies it —
+// has nothing to anchor to, so it goes where the user is looking rather than at the origin.
 function seedNearNeighbours(ids: string[]) {
   if (!cy) return
   const fresh = new Set(ids)
+  const ext = cy.extent()
+  const mid = { x: (ext.x1 + ext.x2) / 2, y: (ext.y1 + ext.y2) / 2 }
+  const spread = Math.min(ext.w, ext.h) / 4
   for (const id of ids) {
     const n = cy.getElementById(id)
     const anchor = n.neighborhood('node').filter(m => !fresh.has(m.id()))[0]
-    if (!anchor) continue
-    const p = anchor.position()
-    n.position({ x: p.x + (Math.random() - 0.5) * 80, y: p.y + (Math.random() - 0.5) * 80 })
+    const p = anchor ? anchor.position() : mid
+    const jitter = anchor ? 80 : spread
+    n.position({ x: p.x + (Math.random() - 0.5) * jitter, y: p.y + (Math.random() - 0.5) * jitter })
   }
 }
 
@@ -357,6 +377,29 @@ function applyZoomGrouping(force = false) {
   if (wasCollapsed && !collapse) startLive()
 }
 
+// What a live change touched, marked on the canvas and — if it landed off-screen — brought into view.
+// Nothing here reloads: the delta already carried the elements.
+function freshElements() {
+  if (!cy) return null
+  const eles = cy.collection(graph.fresh.map(id => cy!.getElementById(id)).filter(e => e && e.nonempty()) as any)
+  return eles.nonempty() ? eles : null
+}
+function markFresh() {
+  if (!cy) return
+  cy.elements().removeClass('fresh')
+  freshElements()?.addClass('fresh')
+}
+function revealFresh() {
+  if (!cy) return
+  markFresh()
+  const eles = freshElements()
+  if (!eles) return
+  const visible = eles.nodes().filter(n => !n.hasClass('layer-hide'))
+  if (visible.empty()) return
+  const ext = cy.extent()
+  const offscreen = visible.filter(n => { const p = n.position(); return p.x < ext.x1 || p.x > ext.x2 || p.y < ext.y1 || p.y > ext.y2 })
+  if (offscreen.nonempty()) cy.animate({ center: { eles: visible }, duration: 350 })
+}
 /** Everything searchable about a node, folded: name, label and every scalar prop (UEI, CAGE, aliases, country…). */
 function haystack(n: any) {
   const parts = [n.name, n.label, ...Object.values(n.props || {}).filter(v => typeof v === 'string' || typeof v === 'number')]
@@ -402,6 +445,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => { stopLive(); cy?.destroy() })
 watch(() => graph.version, sync)
+watch(() => graph.freshVersion, revealFresh)
 watch(() => graph.styleVersion, restyle)
 watch(() => graph.filter, applyFilter)
 watch(() => ws.ws.layers, applyLayers, { deep: true })

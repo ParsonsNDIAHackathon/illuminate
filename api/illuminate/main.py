@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, db
+from . import __version__, db, events
 from .config import settings
 from .enrichment.worker import worker
 from .readiness import build_readiness
@@ -19,8 +19,6 @@ from .tools.permissions import gate
 from .routers import catalog, chat, claims, connectors, enrichment, exports, graph, permissions, query
 
 from .mcp_server import build_server
-
-
 class _MCPMount:
     """ASGI shim so the MCP transport (whose session manager runs once per
     lifespan) can be re-created each time the app starts — tests start it twice."""
@@ -47,6 +45,7 @@ async def lifespan(app: FastAPI):
         print(f"[illuminate] schema init deferred: {e}")
     gate.add_listener(chat.manager.broadcast)
     worker.add_listener(chat.manager.broadcast)
+    events.add_listener(chat.manager.broadcast)
     worker.start()
     # MCP over streamable HTTP, same handlers (D1). Its session manager has its own lifespan; run it inside ours.
     server = build_server()

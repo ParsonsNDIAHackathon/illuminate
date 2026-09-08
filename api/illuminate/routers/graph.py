@@ -4,16 +4,18 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from .. import db
+from .. import db, events
 from ..content import document, summarize
 from ..connectors.http import HttpError, fetch_document
+from ..graphio import subgraph_from_graph
 from ..raw import find_raw
 from ..report import build_report, deterministic_summary, persist_summary
+from ..supply_chain import SupplyChainAnalysis, get_supply_chain_analysis
+from ..schema import SOURCE_KINDS
 from ..tools.handlers import ToolContext, expand_subgraph, search_entities
 from .deps import user_id
 
 router = APIRouter(prefix="/api", tags=["graph"])
-from ..supply_chain import SupplyChainAnalysis, get_supply_chain_analysis
 
 
 @router.get("/graph/stats")
@@ -32,10 +34,58 @@ async def search(q: str, kind: str = "any", limit: int = Query(10, ge=1, le=50),
 
 
 @router.get("/graph/subgraph")
-async def subgraph(entity_id: str, depth: int = Query(2, ge=1, le=6), people: bool = True, countries: bool = False, artifacts: bool = False, categories: bool = False, user: str = Depends(user_id)):
+async def subgraph(entity_id: str, depth: int = Query(2, ge=1, le=6), people: bool = True, countries: bool = False, artifacts: bool = False,
+                   sources: bool = False, claims: bool = False, categories: bool = False,
+                   program_id: str | None = None, user: str = Depends(user_id)):
+    """A neighbourhood around one entity. program_id — the program the canvas is focused
+    on — keeps the walk inside that program's supply chain instead of crossing into
+    another program through a supplier they share."""
     ctx = ToolContext.from_workspace(source="ui", user=user)
-    r = await expand_subgraph(ctx, entity_id, depth, {"people": people, "countries": countries, "artifacts": artifacts, "categories": categories})
+    layers = {"people": people, "countries": countries, "artifacts": artifacts, "sources": sources, "claims": claims, "categories": categories}
+    r = await expand_subgraph(ctx, entity_id, depth, layers, program_id)
     return {"subgraph": r.subgraph, "cypher": r.cypher, "params": r.params}
+
+
+@router.get("/graph/programs")
+async def programs():
+    """The programs the canvas can be narrowed to. The list the focus picker is built from."""
+    rows = await db.read(
+        "MATCH (e:Entity) WHERE e.kind = 'program' RETURN e.id AS id, e.name AS name ORDER BY e.name"
+    )
+    return {"items": rows}
+
+
+# Layer name -> the node labels it governs. Entities are always drawn. Artifacts are one label
+# split over two layers by kind (see schema.SOURCE_KINDS), handled separately in the query.
+_LAYER_LABELS = {"people": ["Person"], "countries": ["Location"], "categories": ["Category"], "claims": ["Claim"]}
+
+
+@router.get("/graph/all")
+async def graph_all(people: bool = True, countries: bool = False, artifacts: bool = False, sources: bool = False, claims: bool = False,
+                    categories: bool = False, limit: int = Query(1500, le=5000)):
+    """The whole graph, not one consumer's neighbourhood. A workspace holds several
+    programs and the entities that supply them; the canvas shows all of it by default
+    and narrows to a single consumer only when the user asks for that."""
+    on = {"people": people, "countries": countries, "categories": categories, "claims": claims}
+    labels = ["Entity"] + [l for k, v in on.items() if v for l in _LAYER_LABELS[k]]
+    # Collected into two lists rather than a row per edge: the read cap counts records, and
+    # the graph is hydrated from whatever the row references however deeply it is nested.
+    _, graph, _ = await db.read_graph(
+        """
+        MATCH (n) WHERE any(l IN labels(n) WHERE l IN $labels)
+           OR (n:Artifact AND CASE WHEN coalesce(n.kind, 'record') IN $source_kinds THEN $sources ELSE $artifacts END)
+        WITH n, CASE WHEN n:Entity THEN 0 WHEN n:Person THEN 1 WHEN n:Location THEN 2
+                     WHEN n:Category THEN 3 WHEN n:Artifact THEN 4 ELSE 5 END AS rank
+        ORDER BY rank, coalesce(n.name, n.id)
+        WITH collect(n)[..$limit] AS nodes
+        UNWIND nodes AS n
+        OPTIONAL MATCH (n)-[r]->(m) WHERE m IN nodes
+        RETURN nodes, collect(DISTINCT r) AS rels
+        """,
+        {"labels": labels, "limit": limit, "artifacts": artifacts, "sources": sources, "source_kinds": list(SOURCE_KINDS)},
+    )
+    sub = subgraph_from_graph(graph)
+    return {"subgraph": sub, "truncated": len(sub["nodes"]) >= limit}
 
 
 @router.get("/graph/node/{node_id}")
@@ -205,12 +255,13 @@ async def locations():
 
 
 @router.get("/entities/{entity_id}/report")
-async def report(entity_id: str, user: str = Depends(user_id)):
-    from ..config import load_workspace
-    rep = await build_report(entity_id, load_workspace().root_id)
+async def report(entity_id: str, root_id: str | None = None, user: str = Depends(user_id)):
+    """root_id — the focused program, when there is one — is what tier_from_root counts to."""
+    rep = await build_report(entity_id, root_id)
     if not rep:
         raise HTTPException(404, "no such entity")
     return rep
+
 
 @router.get("/entities/{entity_id}/supply-chain", response_model=SupplyChainAnalysis)
 async def supply_chain(entity_id: str):
@@ -219,6 +270,8 @@ async def supply_chain(entity_id: str):
     if analysis is None:
         raise HTTPException(404, "no such program or root entity")
     return analysis
+
+
 @router.post("/entities/{entity_id}/summary")
 async def regenerate_summary(entity_id: str, user: str = Depends(user_id)):
     from ..config import settings
@@ -236,4 +289,5 @@ async def regenerate_summary(entity_id: str, user: str = Depends(user_id)):
     except Exception:
         out = deterministic_summary(rep, "model_unavailable_or_invalid")
     await persist_summary(entity_id, out)
+    await events.announce([entity_id], reason="summary", source="ui")
     return out

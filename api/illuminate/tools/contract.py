@@ -27,7 +27,7 @@ TOOLS: list[dict] = [
             "properties": {
                 "entity_id": {"type": "string"},
                 "depth": {"type": "integer", "default": 2, "minimum": 1, "maximum": 6},
-                "layers": {"type": "object", "description": "override toggles: {people, countries, artifacts, categories}"},
+                "layers": {"type": "object", "description": "override toggles: {people, countries, categories, artifacts, sources, claims}"},
             },
             "required": ["entity_id"],
         },
@@ -69,6 +69,8 @@ TOOLS: list[dict] = [
                 "kind": {"type": "string", "enum": ["organization", "program", "agency"], "default": "organization"},
                 "uei": {"type": "string"}, "cage": {"type": "string"}, "lei": {"type": "string"},
                 "aliases": {"type": "array", "items": {"type": "string"}},
+                "keywords": {"type": "array", "items": {"type": "string"},
+                             "description": "kind='program' only: the designations its contracts carry, e.g. ['E-2D']. What discover_suppliers searches award text for."},
                 "incorporated_in": {"type": "string", "description": "ISO2 country or 'US-XX' state code"},
                 "manufactures_in": {"type": "array", "items": {"type": "string"}},
                 "operates_in": {"type": "array", "items": {"type": "string"}},
@@ -143,8 +145,28 @@ TOOLS: list[dict] = [
         "parameters": {"type": "object", "properties": {"entity_id": {"type": "string"}}, "required": ["entity_id"]},
     },
     {
+        "name": "discover_suppliers",
+        "description": "Build a program's supplier network from federal award records: prime recipients become tier-1 SUPPLIES edges and their reported sub-awardees tier-2. Use this for an entity of kind 'program' — enrich_entity asks what a *recipient* has won, which a program never has, so it finds nothing. "
+                       "Keywords are matched against award text, so pick the designation the contracts actually carry ('E-2D', 'V-22', 'AN/APY-9') rather than the program's full title: a broad word pulls in unrelated companies that merely share it. "
+                       "The search parameters are saved on the program so the discovery can be repeated and audited. Suppliers arrive with their award records as evidence; run enrich_entity on the interesting ones afterwards for identity, ownership, geography and screens.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "entity_id": {"type": "string", "description": "id of the program entity"},
+                "keywords": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "award-text keywords, e.g. ['E-2D']"},
+                "agency": {"type": "string", "description": "awarding agency filter; defaults to 'Department of Defense'. Empty string searches every agency."},
+                "since": {"type": "string", "description": "award period start, YYYY-MM-DD (default 2019-10-01)"},
+                "until": {"type": "string", "description": "award period end, YYYY-MM-DD (default 2026-09-30)"},
+                "max_primes": {"type": "integer", "minimum": 1, "maximum": 100, "description": "how many top prime recipients to keep (default 20)"},
+                "max_subs": {"type": "integer", "minimum": 0, "maximum": 200, "description": "how many top sub-awardees to keep (default 40); 0 skips the tier-2 pass"},
+                "rationale": {"type": "string", "description": "one sentence shown to the user with the write"},
+            },
+            "required": ["entity_id", "keywords"],
+        },
+    },
+    {
         "name": "enrich_entity",
-        "description": "Queue background enrichment of an entity from the configured connectors (registry, ownership, sanctions, people, news, web). Facts arrive as Claims; authoritative connectors auto-commit, open-web facts wait for review.",
+        "description": "Queue background enrichment of an entity from the configured connectors (registry, ownership, sanctions, people, news, web). Facts arrive as Claims; authoritative connectors auto-commit, open-web facts wait for review. For a program, use discover_suppliers instead: the company-shaped sources are skipped for programs because screening a program name only manufactures noise.",
         "parameters": {
             "type": "object",
             "properties": {

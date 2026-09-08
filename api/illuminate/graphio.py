@@ -7,6 +7,8 @@ from typing import Any
 from neo4j.graph import Node, Path, Relationship
 from neo4j.time import Date, DateTime
 
+from .schema import SOURCE_KINDS
+
 
 def _clean(v: Any) -> Any:
     """JSON-safe conversion that also handles graph objects nested inside lists
@@ -26,6 +28,18 @@ def _clean(v: Any) -> Any:
     return v
 
 
+_LABEL_LAYER = {"Person": "people", "Location": "countries", "Category": "categories", "Claim": "claims"}
+
+
+def layer_of(label: str, props: dict) -> str | None:
+    """The canvas layer a node belongs to, or None for entities, which are always drawn.
+    Artifacts split by kind: a registry entry or a source record is a pointer at where data
+    came from, not a document, and sits on its own layer so the evidence layer stays readable."""
+    if label == "Artifact":
+        return "sources" if (props.get("kind") or "record") in SOURCE_KINDS else "artifacts"
+    return _LABEL_LAYER.get(label)
+
+
 def node_dict(n: Node) -> dict:
     props = {k: _clean(v) for k, v in dict(n).items()}
     labels = list(n.labels)
@@ -34,6 +48,7 @@ def node_dict(n: Node) -> dict:
         "id": props.get("id") or n.element_id,
         "label": primary,
         "labels": labels,
+        "layer": layer_of(primary, props),
         "name": props.get("name") or props.get("title") or props.get("id") or n.element_id,
         "props": props,
     }
