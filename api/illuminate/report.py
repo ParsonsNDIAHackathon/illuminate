@@ -103,7 +103,7 @@ async def entity_core(entity_id: str) -> dict | None:
           retrieved_at:ps.retrieved_at, confidence:ps.confidence,
           status:ps.status, simulated:coalesce(ps.simulated,false),
           seat_code:seat.code, seat_simulated:coalesce(seat.simulated,false),
-          claim_status:pc.status, claim_simulated:coalesce(pc.simulated,false),
+          claim_status:pc.status, claim_method:pc.method, claim_simulated:coalesce(pc.simulated,false),
           artifact_simulated:CASE WHEN pc IS NULL THEN false ELSE EXISTS {
             MATCH (pa:Artifact)-[:EVIDENCES]->(pc) WHERE coalesce(pa.simulated,false)
           } END,
@@ -158,6 +158,7 @@ async def supply_position(entity_id: str, root_id: str | None) -> dict:
           connector_error_status:s.connector_error_status,
           evidence_id:coalesce(s.id, elementId(s)), claim_id:s.claim_id,
           status:s.status, retrieved_at:s.retrieved_at, confidence:s.confidence,
+          method:coalesce(sc.method,s.method),
           simulated:coalesce(s.simulated,false),
           entity_simulated:coalesce(e.simulated,false) OR coalesce(c.simulated,false),
           claim_status:sc.status, claim_simulated:coalesce(sc.simulated,false),
@@ -296,7 +297,7 @@ async def screens(entity_id: str) -> list[dict]:
           evidence_simulated:coalesce(evidences.simulated,false)}) AS artifacts
         ORDER BY c.retrieved_at DESC, c.id
         RETURN collect({
-          claim_id:c.id, predicate:c.predicate, result:c.object_value, source:c.source,
+          claim_id:c.id, predicate:c.predicate, result:c.object_value, source:c.source, method:c.method,
           source_id:c.source_id, source_identifier:c.source_identifier, catalog_ids:c.catalog_ids,
           source_url:c.source_url, usage_note:c.usage_note, quality_note:c.quality_note,
           supports:c.supports, unknowns:c.unknowns, source_status:c.source_status,
@@ -327,6 +328,13 @@ def _parse_date(value: str | None) -> date | None:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
     except (TypeError, ValueError):
         return None
+
+
+def _factor_freshness(value: str | None, max_age_days: int, as_of: date) -> str:
+    retrieved = _parse_date(value)
+    if not retrieved:
+        return "unavailable"
+    return "stale" if (as_of - retrieved).days > max_age_days else "current"
 
 
 def _severity(value: str | None) -> str | None:
@@ -419,10 +427,13 @@ def evaluate_risk_contract(
                 refs = [x for x in (evidence.get("claim_id"), evidence.get("id")) if x]
                 factors.append({"rule_id": "ownership.foreign-parent.v1", "severity": severity,
                                 "evidence_refs": refs, "truth_status": "committed",
+                                 "claim_status": evidence.get("claim_status") if evidence.get("claim_id") else None,
+                                 "freshness": _factor_freshness(evidence.get("retrieved_at"), spec["max_age_days"], as_of),
                                 "provenance": {
                                     "source": evidence.get("source") or "graph",
                                     "retrieved_at": evidence.get("retrieved_at"),
-                                    "confidence": _confidence(evidence.get("confidence"), default=0.0),
+                                     "confidence": _confidence(evidence.get("confidence"), default=0.0),
+                                     "method": evidence.get("claim_method"),
                                 },
                                 "explanation": f"Ultimate parent jurisdiction is {seat}."})
         elif category == "supply_criticality" and supply.get("risk_evidence"):
@@ -437,9 +448,12 @@ def evaluate_risk_contract(
                 refs = [str(x) for x in (ref.get("claim_id"), ref.get("evidence_id")) if x]
                 factors.append({"rule_id": "supply.sole-source.v1", "severity": severity,
                                 "evidence_refs": refs, "truth_status": "committed",
+                                 "claim_status": ref.get("claim_status") if ref.get("claim_id") else None,
+                                 "freshness": _factor_freshness(ref.get("retrieved_at"), spec["max_age_days"], as_of),
                                 "provenance": {"source": ref.get("source") or "graph",
                                                "retrieved_at": ref.get("retrieved_at"),
-                                               "confidence": _confidence(ref.get("confidence"), default=0.0)},
+                                               "confidence": _confidence(ref.get("confidence"), default=0.0),
+                                               "method": ref.get("method")},
                                 "explanation": "A sole-source supply relationship exists." if ref["sole_source"] else "The supply relationship is explicitly recorded as non-sole-source."})
 
         for item in approved:
@@ -453,8 +467,11 @@ def evaluate_risk_contract(
                 "severity": severity,
                 "evidence_refs": refs or [f"claim:{item.get('predicate')}"],
                 "truth_status": "committed",
+                "claim_status": item.get("status"),
+                "freshness": _factor_freshness(item.get("retrieved_at"), spec["max_age_days"], as_of),
                 "provenance": {"source": item.get("source"), "retrieved_at": item.get("retrieved_at"),
-                               "confidence": _confidence(item.get("confidence"), default=0.0)},
+                               "confidence": _confidence(item.get("confidence"), default=0.0),
+                               "method": item.get("method")},
                 "explanation": item.get("detail") or f"{item.get('predicate')} returned {item.get('result')}.",
             })
 
@@ -522,7 +539,7 @@ def evaluate_risk_contract(
             "input_contract": {
                 "screen_evidence": {
                     "required_fields": ["claim_id", "predicate", "result", "status", "simulated"],
-                    "provenance_fields": ["source", "confidence", "retrieved_at", "detail"],
+                    "provenance_fields": ["source", "confidence", "retrieved_at", "method", "detail"],
                     "artifact_fields": ["id", "source", "retrieved_at", "simulated"],
                     "artifact_container": "artifacts (plural); legacy artifact is also validated",
                 },
@@ -530,7 +547,7 @@ def evaluate_risk_contract(
                     "container": "parent_seat_evidence",
                     "fields": ["id", "claim_id", "claim_status", "claim_simulated",
                                "artifact_simulated", "evidence_simulated", "seat_code", "seat_simulated",
-                               "source", "retrieved_at", "confidence", "status", "simulated"],
+                               "source", "retrieved_at", "method", "confidence", "status", "simulated"],
                 },
                 "supply_graph_evidence": {
                     "container": "risk_evidence",
@@ -557,6 +574,7 @@ async def artifacts(entity_id: str, limit: int = 50) -> list[dict]:
         UNWIND arts AS a
         WITH DISTINCT a WHERE a IS NOT NULL
         RETURN a.id AS id, a.kind AS kind, a.title AS title, a.url AS url, a.source AS source, a.retrieved_at AS retrieved_at,
+               coalesce(a.simulated,false) AS simulated,
                a.published_at AS published_at, a.sentiment AS sentiment, a.amount AS amount, a.summary AS summary
         ORDER BY coalesce(a.published_at, a.retrieved_at) DESC LIMIT $limit
         """,
@@ -917,7 +935,7 @@ def approved_risk_projection(report: dict) -> dict:
         } | {
             "factors": [{
                 key: factor.get(key)
-                for key in ("rule_id", "severity", "evidence_refs", "truth_status", "provenance", "explanation")
+                for key in ("rule_id", "severity", "evidence_refs", "truth_status", "claim_status", "freshness", "provenance", "explanation")
             } for factor in category.get("factors") or [] if factor.get("truth_status") == "committed"],
         })
     return {

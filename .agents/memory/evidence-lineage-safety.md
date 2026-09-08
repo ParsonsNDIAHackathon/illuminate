@@ -20,3 +20,9 @@ Public finding exports must preserve claim, artifact, and evidence-link provenan
 **Why:** Flattening provenance drops claim-specific retrieval and simulation state, while excluding it from fingerprints leaves downstream consumers unaware of lineage corrections.
 
 **How to apply:** Any new machine-consumer contract must serialize all three scopes and derive revisions from the full exported payload.
+
+Presentation must never infer verified claim status, retrieval method, scoring rule, or freshness from a related aggregate. Show unavailable unless that exact evidence or factor provides the value.
+
+**Why:** Evaluation eligibility is not claim verification, and category freshness can differ from an individual factor's timestamp; inferred labels overstate provenance.
+
+**How to apply:** Keep derived status separate from nullable claim status, compute freshness per factor, and resolve supply lineage by exact relationship/evidence ID—never by a non-unique contract reference.

@@ -57,6 +57,8 @@ export type RiskEvidence = {
   claim_id?: string
   evidence_ref?: string
   source?: string
+  source_url?: string
+  method?: string
   detail?: string
   retrieved_at?: string
   confidence?: number
@@ -73,6 +75,7 @@ export type RiskFactor = {
   confidence?: number
   freshness?: string
   truth_status?: string
+  claim_status?: string
   evidence_refs: string[]
   evidence?: RiskEvidence[]
   explanation?: string
@@ -90,6 +93,13 @@ export type RiskCategory = {
   factors: RiskFactor[]
 }
 
+export type RiskDiligenceFlag = {
+  category?: string
+  code: string
+  message: string
+  excluded_truth_statuses?: string[]
+  excluded_evidence?: RiskEvidence[]
+}
 export type VendorRiskProfile = {
   id: string
   name: string
@@ -103,17 +113,11 @@ export type VendorRiskProfile = {
   completeness: number
   freshness: string
   categories: RiskCategory[]
-  diligence_flags: Array<{
-    category?: string
-    code: string
-    message: string
-    excluded_truth_statuses?: string[]
-    excluded_evidence?: RiskEvidence[]
-  }>
+  diligence_flags: RiskDiligenceFlag[]
 }
 
-export async function getVendorRiskProfile(id: string): Promise<VendorRiskProfile> {
-  const report = await api.get<any>(`/api/entities/${encodeURIComponent(id)}/report`)
+export async function getVendorRiskProfile(id: string, suppliedReport?: any): Promise<VendorRiskProfile> {
+  const report = suppliedReport || await api.get<any>(`/api/entities/${encodeURIComponent(id)}/report`)
   const risk = report.risk || {}
   const evidenceByRef = new Map<string, RiskEvidence>()
   for (const evidence of report.screen_evidence || []) {
@@ -122,6 +126,8 @@ export async function getVendorRiskProfile(id: string): Promise<VendorRiskProfil
       claim_id: evidence.claim_id,
       source: evidence.source,
       detail: evidence.detail,
+      method: evidence.method,
+      source_url: evidence.source_url || evidence.artifact?.url,
       retrieved_at: evidence.retrieved_at,
       confidence: evidence.confidence,
       status: evidence.status,
@@ -143,8 +149,9 @@ export async function getVendorRiskProfile(id: string): Promise<VendorRiskProfil
         ...factor,
         contribution: factor.contribution ?? (contributors.includes(factor) ? category.contribution / contributors.length : 0),
         confidence: factor.confidence ?? factor.provenance?.confidence,
-        freshness: factor.freshness ?? category.freshness,
+        claim_status: factor.claim_status,
         truth_status: 'derived',
+        freshness: factor.freshness || 'unavailable',
         evidence: factor.evidence_refs.map(ref => evidenceByRef.get(ref)).filter(Boolean) as RiskEvidence[],
       }))
     })(),
