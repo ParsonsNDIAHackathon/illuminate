@@ -197,12 +197,14 @@ async def test_current_decision_is_scoped_to_the_active_program(monkeypatch):
 
 async def test_unrelated_program_or_evidence_is_rejected_before_event_creation(monkeypatch):
     created = False
+    scope_query = ""
 
     async def handle(query, params):
-        nonlocal created
+        nonlocal created, scope_query
         if "current_version" in query:
             return [{"id": "ent_1", "simulated": False, "current_version": 0, "current_sequence": 0}]
         if "OPTIONAL MATCH path=" in query:
+            scope_query = query
             return [{"id": "program_other", "simulated": False, "related": False}]
         if "CREATE (decision:AnalystDecision" in query:
             created = True
@@ -216,6 +218,7 @@ async def test_unrelated_program_or_evidence_is_rejected_before_event_creation(m
             finding_ids=["finding:risk:test"], expected_version=0,
         )
     assert created is False
+    assert f"SUPPLIES*0..{decisions.SUPPLY_SCOPE_MAX_DEPTH}" in scope_query
 
 
 async def test_api_rejects_a_finding_not_present_in_the_vendor_report(monkeypatch):

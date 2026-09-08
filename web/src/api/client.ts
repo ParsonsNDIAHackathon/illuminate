@@ -19,11 +19,12 @@ export interface OwnershipArtifact {
   evidence_id?: string
   evidence_simulated?: boolean
 }
-async function request<T = any>(method: string, path: string, body?: any, headers?: Record<string, string>): Promise<T> {
+async function request<T = any>(method: string, path: string, body?: any, headers?: Record<string, string>, signal?: AbortSignal): Promise<T> {
   const r = await fetch(path, {
     method,
     headers: { 'Content-Type': 'application/json', 'X-User': USER, ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   })
   if (!r.ok) {
     let detail = r.statusText
@@ -34,7 +35,7 @@ async function request<T = any>(method: string, path: string, body?: any, header
 }
 
 export const api = {
-  get: <T = any>(p: string) => request<T>('GET', p),
+  get: <T = any>(p: string, options?: { signal?: AbortSignal }) => request<T>('GET', p, undefined, undefined, options?.signal),
   post: <T = any>(p: string, b?: any, headers?: Record<string, string>) => request<T>('POST', p, b ?? {}, headers),
   put: <T = any>(p: string, b?: any) => request<T>('PUT', p, b ?? {}),
   del: <T = any>(p: string) => request<T>('DELETE', p),
@@ -202,8 +203,8 @@ export function supportedDecisionEvidenceRefs(refs: string[]): string[] {
   return [...new Set(refs.filter(ref => ref.startsWith('clm_') || ref.startsWith('art_')))].sort()
 }
 
-export async function getVendorRiskProfile(id: string, suppliedReport?: any): Promise<VendorRiskProfile> {
-  const report = suppliedReport || await api.get<any>(`/api/entities/${encodeURIComponent(id)}/report`)
+export async function getVendorRiskProfile(id: string, suppliedReport?: any, rootId?: string): Promise<VendorRiskProfile> {
+  const report = suppliedReport || await api.get<any>(`/api/entities/${encodeURIComponent(id)}/report?${qs({ root_id: rootId })}`)
   const risk = report.risk || {}
   const evidenceByRef = new Map<string, RiskEvidence>()
   for (const evidence of report.screen_evidence || []) {

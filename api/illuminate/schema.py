@@ -48,6 +48,9 @@ RELS: dict[str, str] = {
 # "sources" layer and the remaining kinds (filing, news, award, web, document) on "artifacts".
 SOURCE_KINDS = ("record", "registry")
 
+# One mission-scoping bound shared by portfolio membership, reports, and analyst decisions.
+SUPPLY_SCOPE_MAX_DEPTH = 6
+
 # Provenance every node and edge written by the system carries (Entity metadata table).
 PROVENANCE_FIELDS = [
     "source", "source_id", "catalog_ids", "source_url", "retrieved_at",

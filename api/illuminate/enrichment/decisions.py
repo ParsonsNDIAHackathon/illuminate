@@ -5,6 +5,7 @@ import uuid
 
 from .. import db
 from ..connectors.base import now_iso
+from ..schema import SUPPLY_SCOPE_MAX_DEPTH
 
 DISPOSITIONS = {
     "investigate",
@@ -60,7 +61,7 @@ async def record(
                 tx,
                 "MATCH (e:Entity {id:$entity_id}), (program:Entity {id:$program_id}) "
                 "WHERE program.kind='program' "
-                "OPTIONAL MATCH path=(e)-[:SUPPLIES*0..4]->(program) "
+                f"OPTIONAL MATCH path=(e)-[:SUPPLIES*0..{SUPPLY_SCOPE_MAX_DEPTH}]->(program) "
                 "RETURN program.id AS id, coalesce(program.simulated,false) AS simulated, path IS NOT NULL AS related",
                 {"entity_id": entity_id, "program_id": program_id},
             )

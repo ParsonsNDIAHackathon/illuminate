@@ -43,6 +43,7 @@ const route = useRoute()
 const profiles = ref<[VendorRiskProfile, VendorRiskProfile] | null>(null)
 const leftId = ref(String(route.query.left || ''))
 const rightId = ref(String(route.query.right || ''))
+const rootId = computed(() => String(route.query.root_id || ''))
 const loading = ref(false)
 const error = ref('')
 const asOf = '2026-09-08'
@@ -64,8 +65,8 @@ async function loadLive() {
   error.value = ''
   try {
     profiles.value = await Promise.all([
-      getVendorRiskProfile(leftId.value.trim()),
-      getVendorRiskProfile(rightId.value.trim()),
+      getVendorRiskProfile(leftId.value.trim(), undefined, rootId.value),
+      getVendorRiskProfile(rightId.value.trim(), undefined, rootId.value),
     ]) as [VendorRiskProfile, VendorRiskProfile]
   } catch (cause: any) {
     error.value = `Live comparison unavailable: ${cause.message}. The frozen preset remains available offline.`

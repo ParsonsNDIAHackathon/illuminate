@@ -6,7 +6,7 @@
       <v-chip v-if="rep.identity.simulated" size="x-small" color="warning" variant="tonal">SIMULATED</v-chip>
       <v-chip v-if="rep.entity.flagged" size="x-small" color="error" variant="tonal">flagged</v-chip>
       <v-spacer />
-      <v-btn prepend-icon="mdi-compare-horizontal" :to="`/compare/vendors?left=${encodeURIComponent(props.id)}`">Compare</v-btn>
+      <v-btn prepend-icon="mdi-compare-horizontal" :to="{ path: '/compare/vendors', query: { left: props.id, root_id: reportRoot || undefined } }">Compare</v-btn>
       <v-btn prepend-icon="mdi-graph" @click="openInGraph">Open in graph</v-btn>
       <v-btn prepend-icon="mdi-auto-fix" @click="enrich" :loading="enriching">Enrich</v-btn>
     </div>
@@ -69,7 +69,7 @@
               <span class="section">Supply relationships</span>
               <v-table density="compact"><thead><tr><th>Supplies</th><th>Tier</th><th>PSC</th><th>Sole source</th><th>Amount</th><th>Contract</th><th>Source</th></tr></thead>
                 <tbody><template v-for="s in rep.supply.supplies" :key="s.edge_id || s.id + s.contract_ref"><tr><td><router-link :to="`/entities/${s.id}`">{{ s.name }}</router-link></td><td>{{ s.tier }}</td><td>{{ s.psc }}</td><td>{{ formatSoleSource(s.sole_source) }}</td><td>{{ s.amount ? '$' + Number(s.amount).toLocaleString() : '—' }}</td><td>{{ s.contract_ref || '—' }}</td><td><a v-if="s.source_url" :href="s.source_url" target="_blank" rel="noopener">{{ s.source }}</a><span v-else>{{ s.source || 'Unavailable' }}</span></td></tr>
-                  <tr class="lineage-row"><td colspan="7"><div class="lineage"><TruthBadge :value="supplyTruthStatus(s)" /><span>Retrieved {{ formatDate(supplyEvidence(s)?.retrieved_at) }}</span><span>Method {{ supplyEvidence(s)?.method || 'Unavailable' }}</span><span>Rule <span class="mono">{{ supplyFactor(s)?.rule_id || 'Unavailable' }}</span></span><span>Confidence {{ formatConfidence(supplyEvidence(s)?.confidence) }}</span><span>Freshness <TruthBadge :value="supplyFactor(s)?.freshness || 'unavailable'" /></span><span v-if="supplySimulated(s)" class="simulation-copy">Training scenario only — not a real allegation.</span><router-link v-if="supplyEvidence(s)?.claim_id" :to="{ path: '/claims', query: { entity_id: props.id, program_id: graph.focusId || undefined, status: supplyEvidence(s)?.claim_status || 'committed' } }">Review claim</router-link><span v-else>No backing claim available</span></div></td></tr>
+                  <tr class="lineage-row"><td colspan="7"><div class="lineage"><TruthBadge :value="supplyTruthStatus(s)" /><span>Retrieved {{ formatDate(supplyEvidence(s)?.retrieved_at) }}</span><span>Method {{ supplyEvidence(s)?.method || 'Unavailable' }}</span><span>Rule <span class="mono">{{ supplyFactor(s)?.rule_id || 'Unavailable' }}</span></span><span>Confidence {{ formatConfidence(supplyEvidence(s)?.confidence) }}</span><span>Freshness <TruthBadge :value="supplyFactor(s)?.freshness || 'unavailable'" /></span><span v-if="supplySimulated(s)" class="simulation-copy">Training scenario only — not a real allegation.</span><router-link v-if="supplyEvidence(s)?.claim_id" :to="{ path: '/claims', query: { entity_id: props.id, program_id: reportRoot || undefined, status: supplyEvidence(s)?.claim_status || 'committed' } }">Review claim</router-link><span v-else>No backing claim available</span></div></td></tr>
                 </template></tbody></v-table>
             </v-card-text></v-card>
           </v-col>
@@ -127,7 +127,7 @@
                 <span v-if="flag.excluded_truth_statuses?.length" class="text-caption">Excluded: <TruthBadge v-for="state in flag.excluded_truth_statuses" :key="state" :value="state" /></span>
               </div>
             </div>
-            <div class="deep-links mt-2"><v-btn size="small" variant="text" prepend-icon="mdi-check-decagram" :to="{ path: '/claims', query: { entity_id: props.id, program_id: graph.focusId || undefined, status: 'committed' } }">Review claims</v-btn><v-btn size="small" variant="text" prepend-icon="mdi-file-document-multiple" :to="{ path: '/artifacts', query: { entity_id: props.id } }">Inspect artifacts</v-btn></div>
+            <div class="deep-links mt-2"><v-btn size="small" variant="text" prepend-icon="mdi-check-decagram" :to="{ path: '/claims', query: { entity_id: props.id, program_id: reportRoot || undefined, status: 'committed' } }">Review claims</v-btn><v-btn size="small" variant="text" prepend-icon="mdi-file-document-multiple" :to="{ path: '/artifacts', query: { entity_id: props.id, root_id: reportRoot || undefined } }">Inspect artifacts</v-btn></div>
           </v-card-text>
         </v-card>
         <v-card variant="outlined" class="mb-3 decision-card">
@@ -240,6 +240,7 @@ import { useJobs } from '../stores/jobs'
 import { useWorkspace } from '../stores/workspace'
 const props = defineProps<{ id: string }>()
 const router = useRouter(); const route = useRoute(); const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace()
+const reportRoot = computed(() => String(route.query.root_id || graph.focusId || ''))
 const requestedTab = String(route.query.tab || '')
 const tab = ref(requestedTab === 'evidence' ? 'artifacts' : requestedTab || 'overview')
 const rep = ref<any>(null); const enriching = ref(false); const regen_busy = ref(false)
@@ -270,7 +271,7 @@ const decisionForm = ref<AnalystDecisionInput>({ disposition: 'investigate', rat
 const selectedFinding = ref<string | null>(null)
 const activeFinding = computed(() => rep.value?.risk?.indicators?.find((i: any) => i.family === selectedFinding.value) || null)
 async function load() {
-  const report = await api.get(`/api/entities/${props.id}/report?${qs({ root_id: graph.focusId })}`)
+  const report = await api.get(`/api/entities/${props.id}/report?${qs({ root_id: reportRoot.value })}`)
   rep.value = report
   decisionHistory.value = report.analyst_decisions || { current: null, events: [] }
   riskProfile.value = await getVendorRiskProfile(props.id, report)
@@ -307,10 +308,18 @@ function sevIcon(s: string | null) { return s === 'high' ? 'mdi-alert-octagon' :
 function sevColor(s: string | null) { return s === 'high' ? 'error' : s === 'medium' ? 'warning' : s === 'low' ? 'secondary' : s === 'clear' ? 'success' : undefined }
 async function enrich() { enriching.value = true; try { await jobs.enqueue(props.id) } finally { enriching.value = false } }
 async function regen() { regen_busy.value = true; try { await api.post(`/api/entities/${props.id}/summary`); await load() } catch (e: any) { alert(e.message) } finally { regen_busy.value = false } }
-async function openInGraph() { await graph.loadNeighbourhood(props.id, 2, ws.ws.layers); graph.select(props.id); router.push({ name: 'graph' }) }
+async function loadReportGraph() {
+  if (reportRoot.value && graph.focusId !== reportRoot.value) await graph.focus(reportRoot.value, null, 2, ws.ws.layers)
+  await graph.loadNeighbourhood(props.id, 2, { ...ws.ws.layers, people: true, countries: true }, true)
+  graph.select(props.id)
+}
+async function openInGraph() {
+  await loadReportGraph()
+  router.push({ name: 'graph', query: { root_id: reportRoot.value || undefined } })
+}
 function traceFinding(i: any) {
   const ids = [...new Set((i.element_ids || []).filter(Boolean))].sort()
-  router.push({ name: 'graph', query: { vendor: props.id, focus: ids.join(','), finding: i.label, family: i.family, evidence: i.source_url || undefined } })
+  router.push({ name: 'graph', query: { root_id: reportRoot.value || undefined, vendor: props.id, focus: ids.join(','), finding: i.label, family: i.family, evidence: i.source_url || undefined } })
 }
 function openDecision() {
   const current = decisionHistory.value.current
@@ -319,7 +328,7 @@ function openDecision() {
     rationale: '',
     owner: current?.owner || 'Supply Risk Team',
     due_date: current?.due_date || null,
-    program_id: graph.focusId || null,
+    program_id: reportRoot.value || null,
     finding_ids: current?.finding_ids || [],
     evidence_refs: current?.evidence_refs || [],
     expected_version: current?.version || 0,
@@ -342,7 +351,7 @@ async function saveDecision() {
     decisionError.value = error.message
   } finally { decisionSaving.value = false }
 }
-watch(tab, async (t) => { if (t === 'graph') { await graph.loadNeighbourhood(props.id, 2, { ...ws.ws.layers, people: true, countries: true }, true); graph.select(props.id) } })
+watch(tab, async (t) => { if (t === 'graph') await loadReportGraph() })
 watch(() => jobs.jobs.filter(j => j.entity_id === props.id && ['succeeded', 'empty', 'partial', 'failed', 'timed_out'].includes(j.status)).length, load)
 onMounted(load); watch(() => props.id, load)
 </script>

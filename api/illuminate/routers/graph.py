@@ -12,7 +12,7 @@ from ..raw import find_raw
 from ..report import build_report, deterministic_summary, persist_summary
 from ..enrichment import decisions
 from ..supply_chain import SupplyChainAnalysis, get_supply_chain_analysis
-from ..schema import SOURCE_KINDS
+from ..schema import SOURCE_KINDS, SUPPLY_SCOPE_MAX_DEPTH
 from ..tools.handlers import ToolContext, expand_subgraph, search_entities
 from .deps import user_id
 
@@ -111,7 +111,7 @@ async def node(node_id: str):
 
 
 @router.get("/entities")
-async def entities(q: str | None = None, kind: str | None = None, flagged: bool | None = None, limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0, le=100000)):
+async def entities(q: str | None = None, kind: str | None = None, flagged: bool | None = None, root_id: str | None = None, limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0, le=100000)):
     where = ["1=1"]
     params: dict = {"limit": limit, "offset": offset}
     if q:
@@ -123,14 +123,31 @@ async def entities(q: str | None = None, kind: str | None = None, flagged: bool 
     if flagged is not None:
         where.append("coalesce(e.flagged,false) = $flagged")
         params["flagged"] = flagged
+    if root_id:
+        params["root_id"] = root_id
+        scoped_match = (
+            f"MATCH path=(e:Entity)-[:SUPPLIES*1..{SUPPLY_SCOPE_MAX_DEPTH}]->"
+            "(program:Entity {id:$root_id}) "
+            f"WHERE program.kind='program' AND {' AND '.join(where)} "
+            "WITH e, min(length(path)) AS tier"
+        )
+        total_query = (
+            f"MATCH path=(e:Entity)-[:SUPPLIES*1..{SUPPLY_SCOPE_MAX_DEPTH}]->"
+            "(program:Entity {id:$root_id}) "
+            f"WHERE program.kind='program' AND {' AND '.join(where)} "
+            "WITH DISTINCT e RETURN count(e) AS n"
+        )
+    else:
+        scoped_match = f"MATCH (e:Entity) WHERE {' AND '.join(where)} WITH e, null AS scoped_tier"
+        total_query = f"MATCH (e:Entity) WHERE {' AND '.join(where)} RETURN count(e) AS n"
     rows = await db.read(
         f"""
-        MATCH (e:Entity) WHERE {' AND '.join(where)}
+        {scoped_match}
         OPTIONAL MATCH (e)-[s:SUPPLIES]->(c:Entity)
         OPTIONAL MATCH (e)-[:INCORPORATED_IN]->(inc:Location)
         OPTIONAL MATCH (e)-[:PARENT_SEATED_IN]->(seat:Location)
         OPTIONAL MATCH (up:Entity)-[:ULTIMATE_PARENT_OF]->(e)
-        WITH e, min(s.tier) AS tier, count(DISTINCT c) AS consumers, head(collect(DISTINCT inc.code)) AS inc, head(collect(DISTINCT seat.code)) AS seat,
+        WITH e, {"tier" if root_id else "min(s.tier)"} AS tier, count(DISTINCT c) AS consumers, head(collect(DISTINCT inc.code)) AS inc, head(collect(DISTINCT seat.code)) AS seat,
              head(collect(DISTINCT up.name)) AS parent, any(x IN collect(s.sole_source) WHERE x = true) AS sole_source
         RETURN e.id AS id, e.name AS name, e.kind AS kind, e.uei AS uei, e.cage AS cage, e.lei AS lei, tier, consumers, inc AS incorporated, seat AS parent_seat, parent,
                sole_source, coalesce(e.flagged,false) AS flagged, coalesce(e.simulated,false) AS simulated, e.source AS source
@@ -138,7 +155,7 @@ async def entities(q: str | None = None, kind: str | None = None, flagged: bool 
         """,
         params,
     )
-    total = await db.read(f"MATCH (e:Entity) WHERE {' AND '.join(where)} RETURN count(e) AS n", params)
+    total = await db.read(total_query, params)
     return {"items": rows, "total": total[0]["n"] if total else 0}
 
 
