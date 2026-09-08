@@ -66,13 +66,13 @@
       </dl>
     </section>
     <div class="d-flex flex-wrap ga-1 mt-2">
-      <v-btn v-if="node.label === 'Artifact'" prepend-icon="mdi-code-json" @click="rawId = node.id">Raw</v-btn>
+      <v-btn v-if="node.label === 'Artifact'" prepend-icon="mdi-text-box-search-outline" @click="rawId = node.id">Contents</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-file-document-outline" :to="`/entities/${node.id}`">Report</v-btn>
       <v-btn prepend-icon="mdi-arrow-expand-all" @click="$emit('expand', node.id)">Expand</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-auto-fix" @click="enrich" :loading="enriching">Enrich</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-target" variant="text" @click="setRoot" title="Make this the consumer (root)">Set as root</v-btn>
     </div>
-    <ArtifactRaw :artifact-id="rawId" @close="rawId = null" />
+    <ArtifactViewer :artifact-id="rawId" @close="rawId = null" />
   </div>
 </template>
 <script setup lang="ts">
@@ -81,7 +81,7 @@ import { api } from '../api/client'
 import { useGraph } from '../stores/graph'
 import { useJobs } from '../stores/jobs'
 import { useWorkspace } from '../stores/workspace'
-import ArtifactRaw from './ArtifactRaw.vue'
+import ArtifactViewer from './ArtifactViewer.vue'
 const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace()
 const rawId = ref<string | null>(null)
 defineEmits<{ (e: 'expand', id: string): void }>()
