@@ -16,3 +16,5 @@ api/data/
 .neo4j/
 # misc
 .DS_Store
+# backups (make backup)
+backups/

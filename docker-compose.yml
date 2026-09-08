@@ -1,7 +1,41 @@
 services:
+  # Runs before neo4j on every `up`. No-op unless BACKUP names an archive in ./backups, e.g.
+  #   docker compose down && BACKUP=illuminate-20260908-101500.tgz docker compose up
+  # (or BACKUP=latest). Do not put BACKUP in .env — it would restore on every start.
+  restore:
+    image: python:3.12-alpine
+    environment:
+      BACKUP: ${BACKUP:-}
+      HOST_UID: ${HOST_UID:-1000}
+      HOST_GID: ${HOST_GID:-1000}
+    volumes:
+      - ./scripts/restore.sh:/restore.sh:ro
+      - ./backups:/backups:ro
+      - neo4j-data:/neo4j
+      - ./api/data:/api-data
+    command: sh /restore.sh
+
+  # `make backup` (or `docker compose run --rm backup`) with neo4j stopped.
+  backup:
+    image: python:3.12-alpine
+    profiles: [tools]
+    environment:
+      NAME: ${NAME:-}
+      HOST_UID: ${HOST_UID:-1000}
+      HOST_GID: ${HOST_GID:-1000}
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - ./backups:/backups
+      - neo4j-data:/neo4j:ro
+      - ./api/data:/api-data:ro
+    command: sh /backup.sh
+
   neo4j:
     image: neo4j:5
     container_name: illuminate-neo4j
+    depends_on:
+      restore:
+        condition: service_completed_successfully
     ports:
       - "7474:7474"
       - "7687:7687"
@@ -33,7 +67,8 @@ services:
       ILLUMINATE_DATA_DIR: /data
       ILLUMINATE_CORS_ORIGINS: http://localhost:5173,http://localhost:8080
     volumes:
-      - api-data:/data
+      # Same directory the host-side API uses, so keys and settings are shared and backed up.
+      - ./api/data:/data
     ports:
       - "8000:8000"
 
@@ -47,4 +82,3 @@ services:
 
 volumes:
   neo4j-data:
-  api-data:

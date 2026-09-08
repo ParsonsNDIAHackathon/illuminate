@@ -34,7 +34,31 @@ cd ../web && npm install && npm run dev                                  # http:
 
 Or everything in containers: `docker compose up --build` → web on http://localhost:8080,
 API on :8000, Neo4j browser on :7474 (`neo4j` / `illuminate-dev`). `scripts/dev.sh` runs
-the host-side variant; `scripts/seed.sh [--offline]` rebuilds the graph.
+the host-side variant; `scripts/seed.sh [--offline]` rebuilds the graph. `make help` lists
+the shortcuts for all of this.
+
+### Backup and restore
+
+State lives in two places: the `neo4j-data` Docker volume (the graph) and `api/data/`
+(encrypted credential vault, workspace settings, download caches — shared by the host-side
+and containerised API). Chat history is in-memory only.
+
+```bash
+make backup                       # → backups/illuminate-YYYYmmdd-HHMMSS.tgz (neo4j stopped briefly)
+make backups                      # list archives
+make restore BACKUP=latest        # or BACKUP=illuminate-....tgz; replaces the volume and api/data
+```
+
+To boot a fresh checkout straight from a backup, drop the archive in `backups/` and name
+it when starting compose — the `restore` service runs before Neo4j and is a no-op when
+`BACKUP` is unset:
+
+```bash
+docker compose down
+BACKUP=illuminate-20260908-101500.tgz docker compose up --build
+```
+
+Don't put `BACKUP` in `.env`: it would restore on every start.
 
 Then open **Settings › Connectors** and paste an OpenAI key to enable chat, Cypher
 generation, summaries and web-search enrichment. Without one the app degrades to graph
