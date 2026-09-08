@@ -24,7 +24,7 @@ from ..connectors.base import now_iso
 from ..connectors.registry import source_metadata
 from ..connectors.usaspending import award_detail, award_url, is_sole_source, psc_category, recipient, recipient_url, search_awards
 from ..enrichment import claims
-from ..ids import edge_id, entity_id, location_id, normalize_name, person_id, artifact_id
+from ..ids import edge_id, entity_id, location_id, normalize_name, person_id, artifact_id, stable_id
 from ..schema import ensure_schema
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -171,6 +171,55 @@ async def merge_artifact(
     )
 
 
+async def merge_supply_claim(
+    cid: str,
+    aid: str,
+    supplier_id: str,
+    consumer_id: str,
+    sole_source: bool,
+    source_url: str,
+    retrieved_at: str,
+    source_status: str,
+    retrieval_mode: str,
+) -> None:
+    """Persist the reviewable award -> claim chain behind a supply determination."""
+    ingested_at = now_iso()
+    await db.write(
+        """
+        MERGE (c:Claim {id:$cid})
+        ON CREATE SET c.predicate='supply_sole_source', c.subject_id=$supplier,
+                      c.object_id=$consumer, c.object_value=$sole_source,
+                      c.source='USAspending', c.method='connector',
+                      c.confidence=0.95, c.status='committed',
+                      c.retrieved_at=$retrieved_at, c.first_ingested_at=$ingested_at,
+                      c.source_url=$source_url, c.simulated=false
+        SET c.latest_retrieved_at=$retrieved_at, c.last_ingested_at=$ingested_at,
+            c.source_status=$source_status, c.retrieval_mode=$retrieval_mode
+        WITH c
+        MATCH (supplier:Entity {id:$supplier}), (consumer:Entity {id:$consumer}),
+              (a:Artifact {id:$aid})
+        MERGE (c)-[asserts:ASSERTS]->(supplier)
+          ON CREATE SET asserts.id=$asserts_id
+        MERGE (c)-[targets:TARGETS]->(consumer)
+          ON CREATE SET targets.id=$targets_id
+        MERGE (a)-[e:EVIDENCES]->(c)
+          ON CREATE SET e.id=$evidence_id, e.source='USAspending',
+                        e.method='connector', e.retrieved_at=$retrieved_at,
+                        e.first_ingested_at=$ingested_at,
+                        e.confidence=0.95, e.simulated=false
+        SET e.latest_retrieved_at=$retrieved_at, e.last_ingested_at=$ingested_at,
+            e.source_status=$source_status, e.retrieval_mode=$retrieval_mode
+        """,
+        {
+            "cid": cid, "aid": aid, "supplier": supplier_id, "consumer": consumer_id,
+            "sole_source": sole_source, "source_url": source_url,
+            "retrieved_at": retrieved_at, "source_status": source_status,
+            "retrieval_mode": retrieval_mode, "ingested_at": ingested_at,
+            "asserts_id": edge_id(), "targets_id": edge_id(), "evidence_id": edge_id(),
+        },
+    )
+
+
 def _country(loc: dict | None) -> str | None:
     if not loc:
         return None
@@ -231,7 +280,8 @@ async def seed_program(keywords: list[str], root_name: str, *, since: str, until
         prime_ids[rid] = eid
         # top awards → detail for competition + PSC/NAICS
         top = sorted(slot["awards"], key=lambda a: -float(a.get("Award Amount") or 0))[:3]
-        sole_any, psc, naics, why = False, None, None, None
+        psc, naics = None, None
+        determinations: list[dict] = []
         for a in top:
             gid = a.get("generated_internal_id")
             if not gid:
@@ -247,9 +297,20 @@ async def seed_program(keywords: list[str], root_name: str, *, since: str, until
             ltx = det.get("latest_transaction_contract_data") or {}
             psc = psc or ltx.get("product_or_service_code")
             naics = naics or ltx.get("naics")
-            s, w = is_sole_source(det) if det else (False, None)
-            sole_any, why = sole_any or s, why or w
-            await merge_artifact(artifact_id(award_url(gid)), {"kind": "award", "title": f"{a.get('Award ID')} — {(a.get('Description') or '')[:140]}", "url": award_url(gid),
+            s, w = is_sole_source(det) if det else (None, None)
+            award_source_url = award_url(gid)
+            award_artifact_id = artifact_id(award_source_url)
+            retrieval_truth = _with_retrieval_truth(PROV, award_retrievals)
+            source_retrieved_at = retrieval_truth.get("retrieved_at")
+            if det and s is not None and source_retrieved_at:
+                determinations.append({
+                    "award": a, "sole_source": s, "why": w, "url": award_source_url,
+                    "artifact_id": award_artifact_id, "retrieved_at": source_retrieved_at,
+                    "source_status": retrieval_truth["source_status"],
+                    "retrieval_mode": retrieval_truth["retrieval_mode"],
+                    "retrievals": award_retrievals,
+                })
+            await merge_artifact(award_artifact_id, {"kind": "award", "title": f"{a.get('Award ID')} — {(a.get('Description') or '')[:140]}", "url": award_source_url,
                                                                  "source": "USAspending", "published_at": a.get("Start Date"), "amount": a.get("Award Amount"),
                                                                  "agency": a.get("Awarding Sub Agency"), "award_id": a.get("Award ID"), "psc": psc, "naics": naics,
                                                                   "competition": (ltx.get("extent_competed_description") or None)}, eid,
@@ -263,10 +324,41 @@ async def seed_program(keywords: list[str], root_name: str, *, since: str, until
         if cat:
             await merge_rel(eid, "PROVIDES", cat, {**PROV, "confidence": 0.7, "detail": f"PSC {psc}"},
                             retrievals=prime_retrievals)
-        await merge_rel(eid, "SUPPLIES", root_id, {"tier": 1, "sole_source": bool(sole_any), "competition": why, "amount": round(slot["total"], 2), "award_count": len(slot["awards"]),
-                                                  "contract_ref": top[0].get("Award ID") if top else None, "psc": psc, "naics": naics, **PROV,
-                                                   "source_url": award_url(top[0]["generated_internal_id"]) if top and top[0].get("generated_internal_id") else None},
-                        retrievals=prime_retrievals)
+        determination = next((d for d in determinations if d["sole_source"]), None)
+        if determination is None and determinations:
+            determination = determinations[0]
+        supply_claim_id = None
+        if determination:
+            supply_claim_id = stable_id(
+                "clm", "supply_sole_source", eid, root_id,
+                determination["artifact_id"], str(bool(determination["sole_source"])),
+            )
+            await merge_supply_claim(
+                supply_claim_id, determination["artifact_id"], eid, root_id,
+                bool(determination["sole_source"]), determination["url"],
+                determination["retrieved_at"], determination["source_status"],
+                determination["retrieval_mode"],
+            )
+        await merge_rel(
+            eid,
+            "SUPPLIES",
+            root_id,
+            {
+                "tier": 1,
+                "sole_source": bool(determination["sole_source"]) if determination else None,
+                "competition": determination["why"] if determination else None,
+                "amount": round(slot["total"], 2),
+                "award_count": len(slot["awards"]),
+                "contract_ref": determination["award"].get("Award ID") if determination else None,
+                "psc": psc,
+                "naics": naics,
+                "status": "committed",
+                "claim_id": supply_claim_id,
+                **PROV,
+                "source_url": determination["url"] if determination else None,
+            },
+            retrievals=determination["retrievals"] if determination else prime_retrievals,
+        )
         # USAspending parent recipient → OWNS
         puei = rec.get("parent_uei")
         if puei and puei != uei and rec.get("parent_name"):

@@ -24,11 +24,38 @@ def core(*, foreign=False):
 
 
 def supply(*, sole=False):
+    award_id = "SJP10A21F0142"
+    award_url = "https://www.usaspending.gov/award/CONT_AWD_SJP10A21F0142_9700_N6264921D0037_9700"
     edge = {
             "sole_source": sole,
-            "contract_ref": "award-1",
+            "contract_ref": award_id,
             "evidence_id": "edge_supply",
-            "source": "fixture",
+            "claim_id": "clm_supply",
+            "claim_status": "committed",
+            "claim_predicate": "supply_sole_source",
+            "claim_object_value": sole,
+            "claim_subject_id": "ent_subaru",
+            "claim_target_id": "ent_v22",
+            "claim_conflicting": False,
+            "supplier_id": "ent_subaru",
+            "consumer_id": "ent_v22",
+            "method": "connector",
+            "source_url": award_url,
+            "claim_source_url": award_url,
+            "artifacts": [{
+                "id": "art_subaru_award",
+                "kind": "award",
+                "award_id": award_id,
+                "url": award_url,
+                "source": "USAspending",
+                "retrieved_at": "2026-09-01",
+                "evidence_retrieved_at": "2026-09-01",
+                "method": "connector",
+                "confidence": 0.9,
+                "simulated": False,
+                "evidence_simulated": False,
+            }],
+            "source": "USAspending",
             "retrieved_at": "2026-09-01",
             "confidence": 0.9,
             "status": "committed",
@@ -83,7 +110,24 @@ def test_risky_fixture_has_fixed_weight_contributions_and_explanations():
                 assert factor["evidence_refs"]
                 assert factor["truth_status"] == "committed"
 
-
+def test_subaru_sole_source_factor_exposes_complete_reviewable_lineage():
+    result = evaluate_risk_contract(core(), supply(sole=True), [], as_of=AS_OF)
+    category = next(c for c in result["categories"] if c["id"] == "supply_criticality")
+    factor = category["factors"][0]
+    assert category["contribution"] == 10
+    assert factor["claim_status"] == "committed"
+    assert factor["evidence_refs"] == ["clm_supply", "art_subaru_award", "edge_supply"]
+    assert factor["artifacts"][0]["award_id"] == "SJP10A21F0142"
+    assert factor["artifacts"][0]["url"] == "https://www.usaspending.gov/award/CONT_AWD_SJP10A21F0142_9700_N6264921D0037_9700"
+    assert factor["provenance"] == {
+        "source": "USAspending", "retrieved_at": "2026-09-01",
+        "confidence": 0.9, "method": "connector",
+    }
+    assert factor["graph_path"] == {
+        "relationship_id": "edge_supply",
+        "supplier_id": "ent_subaru",
+        "consumer_id": "ent_v22",
+    }
 def test_incomplete_fixture_does_not_renormalize_available_risk():
     partial = [screen("cyber", "high")]
     result = evaluate_risk_contract(core(), {"supplies": [], "risk_evidence": []}, partial, as_of=AS_OF)
@@ -101,6 +145,23 @@ def test_stale_fixture_keeps_risk_but_flags_freshness():
     assert result["freshness"] == "diligence_required"
     assert any(f["code"] == "stale_evidence" for f in result["diligence_flags"])
 
+def test_repeated_fixture_projection_cannot_promote_stale_graph_evidence():
+    stale_supply = supply(sole=True)
+    stale_supply["risk_evidence"][0]["retrieved_at"] = "2020-01-01"
+
+    first = evaluate_risk_contract(core(), stale_supply, [], as_of=AS_OF)
+    repeated = evaluate_risk_contract(core(), stale_supply, [], as_of=AS_OF)
+
+    assert repeated == first
+    supply_category = next(c for c in repeated["categories"] if c["id"] == "supply_criticality")
+    assert supply_category["freshness"] == "missing"
+    assert any(
+        flag["category"] == "supply_criticality"
+        and flag["code"] == "missing_approved_evidence"
+        and "stale" in flag["excluded_truth_statuses"]
+        for flag in repeated["diligence_flags"]
+    )
+
 
 def test_refreshed_observation_uses_latest_retrieval_for_freshness():
     refreshed = all_screens("medium", retrieved_at="2020-01-01")
@@ -115,22 +176,6 @@ def test_refreshed_observation_uses_latest_retrieval_for_freshness():
         for factor in category["factors"]:
             if factor["rule_id"].endswith(".screen-result.v1"):
                 assert factor["provenance"]["retrieved_at"] == "2026-09-08"
-
-
-def test_repeated_fixture_projection_cannot_change_stale_graph_evidence():
-    stale_supply = supply(sole=True)
-    stale_supply["risk_evidence"][0]["retrieved_at"] = "2020-01-01"
-
-    first = evaluate_risk_contract(core(), stale_supply, [], as_of=AS_OF)
-    repeated = evaluate_risk_contract(core(), stale_supply, [], as_of=AS_OF)
-
-    assert repeated == first
-    supply_category = next(c for c in repeated["categories"] if c["id"] == "supply_criticality")
-    assert supply_category["freshness"] == "stale"
-    assert any(
-        flag["category"] == "supply_criticality" and flag["code"] == "stale_evidence"
-        for flag in repeated["diligence_flags"]
-    )
 
 
 def test_simulated_staged_and_rejected_evidence_never_scores_as_fact():
@@ -226,9 +271,9 @@ def test_all_supply_evidence_participates_beyond_display_rows():
         as_of=AS_OF,
     )
     category = next(c for c in result["categories"] if c["id"] == "supply_criticality")
-    assert category["severity"] == "medium"
-    assert category["freshness"] == "stale"
-    assert len(category["factors"]) == 2
+    assert category["severity"] == "clear"
+    assert category["freshness"] == "current"
+    assert len(category["factors"]) == 1
 
 
 def test_all_parent_seats_participate_regardless_of_display_projection():
@@ -337,3 +382,65 @@ def test_summary_projection_excludes_simulated_evidence_but_keeps_real_refs():
     assert cyber["evidence_ids"] == []
     assert legal["severity"] == "medium"
     assert legal["evidence_ids"] == ["art_legal", "clm_legal"]
+
+def test_stale_supply_evidence_cannot_influence_verified_scoring():
+    data = supply(sole=True)
+    data["risk_evidence"][0]["retrieved_at"] = "2020-01-01"
+    result = evaluate_risk_contract(core(), data, [], as_of=AS_OF)
+    category = next(c for c in result["categories"] if c["id"] == "supply_criticality")
+    assert category["severity"] is None
+    assert category["contribution"] == 0
+
+def test_claimless_or_artifactless_supply_relationship_cannot_score():
+    for missing_field in ("claim_id", "artifacts"):
+        data = supply(sole=True)
+        data["risk_evidence"][0].pop(missing_field)
+        result = evaluate_risk_contract(core(), data, [], as_of=AS_OF)
+        category = next(c for c in result["categories"] if c["id"] == "supply_criticality")
+        assert category["severity"] is None
+        assert category["factors"] == []
+
+def test_mismatched_or_unreviewable_supply_lineage_cannot_score():
+    mutations = [
+        {"status": "rejected"},
+        {"claim_status": "staged"},
+        {"claim_status": "rejected"},
+        {"claim_status": "disputed"},
+        {"claim_predicate": "unrelated"},
+        {"claim_object_value": False},
+        {"claim_subject_id": "ent_other"},
+        {"claim_target_id": "ent_other"},
+        {"claim_conflicting": True},
+        {"claim_source_url": "https://example.test/different-award"},
+        {"source": "Untrusted source"},
+    ]
+    for mutation in mutations:
+        data = supply(sole=True)
+        data["risk_evidence"][0].update(mutation)
+        result = evaluate_risk_contract(core(), data, [], as_of=AS_OF)
+        category = next(c for c in result["categories"] if c["id"] == "supply_criticality")
+        assert category["severity"] is None, mutation
+        assert category["contribution"] == 0, mutation
+
+def test_non_award_mismatched_unsafe_or_incomplete_artifact_cannot_score():
+    mutations = [
+        {"kind": "news"},
+        {"url": "https://example.test/different-award"},
+        {"url": "javascript:alert(1)"},
+        {"award_id": "DIFFERENT-AWARD"},
+        {"source": "Untrusted source"},
+        {"source": None},
+        {"method": None},
+        {"confidence": None},
+        {"retrieved_at": "2020-01-01"},
+        {"evidence_retrieved_at": "2020-01-01"},
+        {"simulated": True},
+        {"evidence_simulated": True},
+    ]
+    for mutation in mutations:
+        data = supply(sole=True)
+        data["risk_evidence"][0]["artifacts"][0].update(mutation)
+        result = evaluate_risk_contract(core(), data, [], as_of=AS_OF)
+        category = next(c for c in result["categories"] if c["id"] == "supply_criticality")
+        assert category["severity"] is None, mutation
+        assert category["contribution"] == 0, mutation

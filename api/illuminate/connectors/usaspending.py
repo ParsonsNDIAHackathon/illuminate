@@ -75,13 +75,15 @@ async def awards_for_recipient(name_or_uei: str, *, start: str, end: str, limit:
     return await fetch_json("POST", f"{BASE}/search/spending_by_award/", json_body=body)
 
 
-def is_sole_source(detail: dict) -> tuple[bool, str | None]:
+def is_sole_source(detail: dict) -> tuple[bool | None, str | None]:
     ltx = detail.get("latest_transaction_contract_data") or {}
     ext = (ltx.get("extent_competed_description") or "").upper()
     sol = (ltx.get("solicitation_procedures_description") or "").upper()
     offers = ltx.get("number_of_offers_received")
+    if not ext and not sol and offers is None:
+        return None, None
     sole = "NOT COMPETED" in ext or "ONLY ONE SOURCE" in sol or (offers in (1, "1"))
-    why = ext or sol or None
+    why = ext or sol or (f"{offers} offers received" if offers is not None else None)
     return sole, why
 
 
@@ -194,7 +196,7 @@ class USAspendingConnector(Connector):
                 continue          # a program cannot supply itself
             primes[rid] = ref
             gid = top.get("generated_internal_id")
-            psc, naics, sole, why = top.get("PSC"), top.get("NAICS"), False, None
+            psc, naics, sole, why = top.get("PSC"), top.get("NAICS"), None, None
             art = _award_artifact(top, gid) if gid else None
             if gid:
                 try:
@@ -209,7 +211,7 @@ class USAspendingConnector(Connector):
                     art = _award_artifact(top, gid, psc=psc, naics=naics)
             facts.append(Fact(ref, "SUPPLIES", object=program, artifact=art, confidence=0.95,
                               detail=f"{len(slot['awards'])} prime award(s) matching {', '.join(cfg['keywords'])}",
-                              props={"tier": 1, "sole_source": bool(sole), "competition": why, "amount": round(slot["total"], 2),
+                              props={"tier": 1, "sole_source": sole, "competition": why, "amount": round(slot["total"], 2),
                                      "award_count": len(slot["awards"]), "contract_ref": top.get("Award ID"), "psc": psc, "naics": naics}))
             cat = psc_category(psc)
             if cat:

@@ -121,6 +121,11 @@ export type RiskFactor = {
   evidence?: RiskEvidence[]
   explanation?: string
   provenance?: RiskEvidence
+  graph_path?: {
+    relationship_id?: string
+    supplier_id?: string
+    consumer_id?: string
+  }
 }
 
 export type RiskCategory = {
@@ -218,6 +223,16 @@ export function supportedDecisionEvidenceRefs(refs: string[]): string[] {
   return [...new Set(refs.filter(ref => ref.startsWith('clm_') || ref.startsWith('art_')))].sort()
 }
 
+function safeEvidenceUrl(value?: string): string | undefined {
+  if (!value) return undefined
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && !url.username && !url.password ? url.toString() : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export async function getVendorRiskProfile(id: string, suppliedReport?: any, rootId?: string): Promise<VendorRiskProfile> {
   const report = suppliedReport || await api.get<any>(`/api/entities/${encodeURIComponent(id)}/report?${qs({ root_id: rootId })}`)
   const risk = report.risk || {}
@@ -229,7 +244,7 @@ export async function getVendorRiskProfile(id: string, suppliedReport?: any, roo
       source: evidence.source,
       detail: evidence.detail,
       method: evidence.method,
-      source_url: evidence.source_url || evidence.artifact?.url,
+      source_url: safeEvidenceUrl(evidence.source_url || evidence.artifact?.url),
       retrieved_at: evidence.latest_retrieved_at || evidence.retrieved_at,
       confidence: evidence.confidence,
       status: evidence.status,
@@ -238,6 +253,26 @@ export async function getVendorRiskProfile(id: string, suppliedReport?: any, roo
     }
     for (const ref of [evidence.claim_id, evidence.artifact?.id, ...(evidence.artifacts || []).map((a: any) => a.id)]) {
       if (ref) evidenceByRef.set(ref, normalized)
+    }
+  }
+  for (const evidence of report.supply?.risk_evidence || []) {
+    for (const artifact of evidence.artifacts || []) {
+      const normalized: RiskEvidence = {
+        id: artifact.id,
+        claim_id: evidence.claim_id,
+        source: artifact.source || evidence.source,
+        detail: evidence.contract_ref ? `Award ${evidence.contract_ref}` : undefined,
+        method: artifact.method || evidence.method,
+        source_url: safeEvidenceUrl(artifact.url),
+        retrieved_at: artifact.latest_retrieved_at || artifact.retrieved_at || evidence.latest_retrieved_at || evidence.retrieved_at,
+        confidence: artifact.confidence ?? evidence.confidence,
+        status: evidence.claim_status,
+        truth_status: evidence.claim_status,
+        simulated: Boolean(evidence.simulated || evidence.claim_simulated || artifact.simulated || artifact.evidence_simulated),
+      }
+      for (const ref of [evidence.claim_id, evidence.evidence_id, artifact.id]) {
+        if (ref) evidenceByRef.set(ref, normalized)
+      }
     }
   }
   const categories: RiskCategory[] = (risk.categories || []).map((category: RiskCategory) => ({

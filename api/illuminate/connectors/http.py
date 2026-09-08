@@ -28,6 +28,7 @@ RetrievalMode = Literal["operational_live", "offline_fixture"]
 _retrieval_mode: ContextVar[RetrievalMode] = ContextVar("retrieval_mode", default="operational_live")
 _retrieval_trace: ContextVar[list[dict] | None] = ContextVar("retrieval_trace", default=None)
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 
 def set_cache_dir(p: Path | None, read_only: bool = False, *, fixture_store: bool = False) -> None:
@@ -51,6 +52,7 @@ def cache_dir() -> Path:
         _cache_dir = settings.data_dir / "http_cache"
         _cache_dir.mkdir(parents=True, exist_ok=True)
     return _cache_dir
+
 
 @contextmanager
 def retrieval_context(mode: RetrievalMode) -> Iterator[list[dict]]:

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from . import db
 
@@ -283,20 +284,43 @@ async def supply_position(entity_id: str, root_id: str | None) -> dict:
         WITH e, s, c, sc ORDER BY coalesce(s.id, elementId(s))
         RETURN collect({
           sole_source:s.sole_source, contract_ref:s.contract_ref,
-          source:s.source, source_id:s.source_id, source_identifier:s.source_identifier,
+          supplier_id:e.id, consumer_id:c.id,
+          source:sc.source, source_id:s.source_id, source_identifier:s.source_identifier,
           catalog_ids:s.catalog_ids, source_url:s.source_url,
           usage_note:s.usage_note, quality_note:s.quality_note,
           supports:s.supports, unknowns:s.unknowns, source_status:s.source_status,
           connector_error:s.connector_error, connector_error_type:s.connector_error_type,
           connector_error_status:s.connector_error_status,
           evidence_id:coalesce(s.id, elementId(s)), claim_id:s.claim_id,
-          status:s.status, retrieved_at:coalesce(s.latest_retrieved_at,s.retrieved_at),
-          first_retrieved_at:s.retrieved_at, latest_retrieved_at:s.latest_retrieved_at,
-          confidence:s.confidence,
-          method:coalesce(sc.method,s.method),
+          status:s.status, relationship_retrieved_at:coalesce(s.latest_retrieved_at,s.retrieved_at),
+          retrieved_at:coalesce(sc.latest_retrieved_at,sc.retrieved_at),
+          first_retrieved_at:sc.retrieved_at, latest_retrieved_at:sc.latest_retrieved_at,
+          confidence:sc.confidence, method:sc.method,
           simulated:coalesce(s.simulated,false),
           entity_simulated:coalesce(e.simulated,false) OR coalesce(c.simulated,false),
           claim_status:sc.status, claim_simulated:coalesce(sc.simulated,false),
+          claim_predicate:sc.predicate, claim_object_value:sc.object_value,
+          claim_source_url:sc.source_url,
+          claim_subject_id:head([(sc)-[:ASSERTS]->(claim_subject) | claim_subject.id]),
+          claim_target_id:head([(sc)-[:TARGETS]->(claim_target) | claim_target.id]),
+          claim_conflicting:CASE WHEN sc IS NULL THEN false ELSE EXISTS {
+            MATCH (other:Claim {predicate:'supply_sole_source'})-[:ASSERTS]->(e)
+            MATCH (other)-[:TARGETS]->(c)
+            WHERE other.id <> sc.id AND other.status='committed'
+              AND coalesce(other.simulated,false)=false
+              AND other.object_value <> sc.object_value
+          } END,
+          artifacts:CASE WHEN sc IS NULL THEN [] ELSE
+            [(sa:Artifact)-[se:EVIDENCES]->(sc) | {
+              id:sa.id, kind:sa.kind, title:sa.title, url:sa.url, award_id:sa.award_id,
+              source:sa.source,
+              retrieved_at:coalesce(sa.latest_retrieved_at,sa.retrieved_at),
+              first_retrieved_at:sa.retrieved_at, latest_retrieved_at:sa.latest_retrieved_at,
+              evidence_retrieved_at:coalesce(se.latest_retrieved_at,se.retrieved_at),
+              method:se.method, confidence:se.confidence,
+              simulated:coalesce(sa.simulated,false),
+              evidence_simulated:coalesce(se.simulated,false)
+            }] END,
           artifact_simulated:CASE WHEN sc IS NULL THEN false ELSE EXISTS {
             MATCH (sa:Artifact)-[:EVIDENCES]->(sc) WHERE coalesce(sa.simulated,false)
           } END,
@@ -524,6 +548,79 @@ def _eligible_graph_fact(fact: dict, *nodes: dict) -> bool:
         return False
     return True
 
+
+def _safe_https_url(value: object) -> bool:
+    try:
+        parsed = urlparse(str(value or ""))
+    except ValueError:
+        return False
+    return bool(
+        parsed.scheme == "https"
+        and parsed.hostname
+        and not parsed.username
+        and not parsed.password
+    )
+
+
+def _canonical_usaspending_award_url(value: object) -> bool:
+    if not _safe_https_url(value):
+        return False
+    parsed = urlparse(str(value))
+    path_parts = [part for part in parsed.path.split("/") if part]
+    return bool(
+        parsed.hostname == "www.usaspending.gov"
+        and len(path_parts) == 2
+        and path_parts[0] == "award"
+        and path_parts[1].startswith("CONT_AWD_")
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
+def _eligible_supply_artifacts(fact: dict, max_age_days: int, as_of: date) -> list[dict]:
+    source_url = fact.get("source_url")
+    if not _canonical_usaspending_award_url(source_url):
+        return []
+    return sorted([
+        artifact for artifact in fact.get("artifacts", [])
+        if artifact.get("id")
+        and artifact.get("kind") == "award"
+        and artifact.get("url") == source_url
+        and _canonical_usaspending_award_url(artifact.get("url"))
+        and artifact.get("award_id") == fact.get("contract_ref")
+        and artifact.get("source") == "USAspending"
+        and artifact.get("method")
+        and artifact.get("confidence") is not None
+        and not artifact.get("simulated")
+        and not artifact.get("evidence_simulated")
+        and _factor_freshness(artifact.get("retrieved_at"), max_age_days, as_of) == "current"
+        and _factor_freshness(artifact.get("evidence_retrieved_at"), max_age_days, as_of) == "current"
+    ], key=lambda artifact: str(artifact["id"]))
+
+
+def _eligible_supply_fact(fact: dict, entity: dict, max_age_days: int, as_of: date) -> bool:
+    return bool(
+        fact.get("evidence_id")
+        and fact.get("status") == "committed"
+        and fact.get("claim_id")
+        and fact.get("claim_status") == "committed"
+        and fact.get("claim_predicate") == "supply_sole_source"
+        and fact.get("claim_subject_id") == fact.get("supplier_id")
+        and fact.get("claim_target_id") == fact.get("consumer_id")
+        and isinstance(fact.get("sole_source"), bool)
+        and isinstance(fact.get("claim_object_value"), bool)
+        and fact["claim_object_value"] == fact["sole_source"]
+        and not fact.get("claim_conflicting")
+        and fact.get("source") == "USAspending"
+        and fact.get("method")
+        and fact.get("confidence") is not None
+        and fact.get("claim_source_url") == fact.get("source_url")
+        and _factor_freshness(_retrieval_time(fact), max_age_days, as_of) == "current"
+        and _eligible_supply_artifacts(fact, max_age_days, as_of)
+        and _eligible_graph_fact(fact, entity)
+    )
+
+
 def _screen_artifacts(item: dict) -> list[dict]:
     evidence = [a for a in item.get("artifacts", []) if a]
     legacy = item.get("artifact")
@@ -552,6 +649,7 @@ def evaluate_risk_contract(
 
     for category, spec in RISK_CATEGORIES.items():
         candidates = [s for s in screens_data if s.get("predicate") in spec["predicates"]]
+        eligible_supply: list[dict] = []
         approved = [
             s for s in candidates
             if s.get("status") == "committed"
@@ -585,16 +683,22 @@ def evaluate_risk_contract(
         elif category == "supply_criticality" and supply.get("risk_evidence"):
             eligible_supply = [
                 s for s in supply["risk_evidence"]
-                if s.get("evidence_id")
-                and isinstance(s.get("sole_source"), bool)
-                and _eligible_graph_fact(s, core.get("e", {}))
+                if _eligible_supply_fact(s, core.get("e", {}), spec["max_age_days"], as_of)
             ]
             for ref in eligible_supply:
                 severity = "medium" if ref["sole_source"] else "clear"
-                refs = [str(x) for x in (ref.get("claim_id"), ref.get("evidence_id")) if x]
+                eligible_artifacts = _eligible_supply_artifacts(ref, spec["max_age_days"], as_of)
+                artifact_refs = [str(a["id"]) for a in eligible_artifacts]
+                refs = [str(ref["claim_id"]), *artifact_refs, str(ref["evidence_id"])]
                 factors.append({"rule_id": "supply.sole-source.v1", "severity": severity,
                                 "evidence_refs": refs, "truth_status": "committed",
-                                 "claim_status": ref.get("claim_status") if ref.get("claim_id") else None,
+                                 "claim_status": ref.get("claim_status"),
+                                 "artifacts": eligible_artifacts,
+                                 "graph_path": {
+                                     "relationship_id": str(ref["evidence_id"]),
+                                     "supplier_id": ref.get("supplier_id"),
+                                     "consumer_id": ref.get("consumer_id"),
+                                 },
                                  "freshness": _factor_freshness(_retrieval_time(ref), spec["max_age_days"], as_of),
                                 "provenance": {"source": ref.get("source") or "graph",
                                                "retrieved_at": _retrieval_time(ref),
@@ -643,14 +747,29 @@ def evaluate_risk_contract(
                                   "message": f"{category} evidence freshness is {freshness}."})
         else:
             severity, contribution, freshness, category_confidence = None, 0.0, "missing", 0.0
-            excluded = sorted({str(s.get("status") or "unknown") for s in candidates if s not in approved})
+            excluded_items = [s for s in candidates if s not in approved]
+            if category == "supply_criticality":
+                excluded_items += [
+                    {
+                        **s,
+                        "status": (
+                            "stale" if _factor_freshness(_retrieval_time(s), spec["max_age_days"], as_of) == "stale"
+                            else s.get("claim_status") or ("claimless" if not s.get("claim_id") else "missing_artifact")
+                        ),
+                        "simulated": _graph_fact_simulated(s),
+                        "claim_id": s.get("claim_id"),
+                    }
+                    for s in supply.get("risk_evidence", [])
+                    if s not in eligible_supply
+                ]
+            excluded = sorted({str(s.get("status") or "unknown") for s in excluded_items})
             diligence.append({"category": category, "code": "missing_approved_evidence",
                               "excluded_truth_statuses": excluded,
                               "excluded_evidence": [{
-                                  "evidence_ref": s.get("claim_id") or f"claim:{s.get('predicate')}",
+                                  "evidence_ref": s.get("claim_id") or s.get("evidence_id") or f"claim:{s.get('predicate')}",
                                   "truth_status": s.get("status") or "unknown",
                                   "simulated": bool(_screen_simulated(s) or core.get("e", {}).get("simulated")),
-                              } for s in candidates if s not in approved],
+                              } for s in excluded_items],
                               "message": f"No approved, non-simulated evidence covers {category}."})
         total += contribution
         outputs.append({"id": category, "weight": spec["weight"], "severity": severity,
@@ -699,7 +818,14 @@ def evaluate_risk_contract(
                     "container": "risk_evidence",
                     "fields": ["evidence_id", "claim_id", "claim_status", "claim_simulated",
                                "artifact_simulated", "evidence_simulated", "sole_source", "entity_simulated",
-                               "source", "retrieved_at", "confidence", "status", "simulated"],
+                               "source", "retrieved_at", "method", "confidence", "status", "simulated",
+                               "supplier_id", "consumer_id", "claim_predicate", "claim_object_value",
+                               "claim_subject_id", "claim_target_id", "claim_conflicting",
+                               "source_url", "claim_source_url", "artifacts"],
+                    "artifact_fields": ["id", "kind", "award_id", "url", "source",
+                                        "retrieved_at", "evidence_retrieved_at", "method",
+                                        "confidence", "simulated", "evidence_simulated"],
+                    "claimless_trusted_fact_contract": "not supported; a committed claim and exact source artifact are required",
                 },
             },
             "eligible_truth_status": "committed",

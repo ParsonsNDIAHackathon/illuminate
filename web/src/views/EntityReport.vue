@@ -170,7 +170,8 @@
               <div v-if="!category.factors.length" class="missing-copy">No approved, non-simulated evidence. This gap is not treated as a clear result.</div>
               <div v-for="factor in category.factors" :key="factor.rule_id" class="factor">
                 <div class="d-flex align-center flex-wrap ga-1"><TruthBadge :value="factor.truth_status || 'derived'" /><TruthBadge v-if="factor.provenance?.simulated" value="simulated" /><b>{{ factor.explanation || labelize(factor.rule_id) }}</b></div>
-                <dl class="provenance-list"><dt>Claim</dt><dd><TruthBadge :value="factor.claim_status || 'unavailable'" /></dd><dt>Source</dt><dd>{{ factor.provenance?.source || factor.evidence?.[0]?.source || 'Unavailable' }}</dd><dt>Retrieved</dt><dd>{{ formatDate(factor.provenance?.retrieved_at || factor.evidence?.[0]?.retrieved_at) }}</dd><dt>Method</dt><dd>{{ factor.provenance?.method || factor.evidence?.[0]?.method || 'Unavailable' }}</dd><dt>Rule</dt><dd class="mono">{{ factor.rule_id }}</dd><dt>Confidence</dt><dd>{{ formatConfidence(factor.confidence) }}</dd><dt>Freshness</dt><dd><TruthBadge :value="factor.freshness || category.freshness" /></dd></dl>
+                <dl class="provenance-list"><dt>Claim</dt><dd><TruthBadge :value="factor.claim_status || 'unavailable'" /></dd><dt>Source</dt><dd>{{ factor.provenance?.source || factor.evidence?.[0]?.source || 'Unavailable' }}</dd><dt>Retrieved</dt><dd>{{ formatDate(factor.provenance?.retrieved_at || factor.evidence?.[0]?.retrieved_at) }}</dd><dt>Method</dt><dd>{{ factor.provenance?.method || factor.evidence?.[0]?.method || 'Unavailable' }}</dd><dt>Rule</dt><dd class="mono">{{ factor.rule_id }}</dd><dt>Confidence</dt><dd>{{ formatConfidence(factor.confidence) }}</dd><dt>Freshness</dt><dd><TruthBadge :value="factor.freshness || category.freshness" /></dd><template v-if="factor.graph_path?.relationship_id"><dt>Graph path</dt><dd class="mono">{{ factor.graph_path.supplier_id || 'supplier' }} → {{ factor.graph_path.relationship_id }} → {{ factor.graph_path.consumer_id || 'consumer' }}</dd></template></dl>
+                <div v-if="factor.evidence?.length" class="deep-links mt-1"><a v-for="evidence in uniqueEvidence(factor.evidence)" :key="evidence.id || evidence.source_url" :href="evidence.source_url" target="_blank" rel="noopener">Review {{ evidence.detail || evidence.id || 'source artifact' }}</a></div>
                 <div v-if="factor.provenance?.simulated || factor.evidence?.some((e:any) => e.simulated)" class="simulation-copy">Training scenario only — excluded from verified scoring and not a real allegation.</div>
               </div>
             </v-card-text>
@@ -282,6 +283,9 @@ function labelize(value: string) { return value.replaceAll('_', ' ').replaceAll(
 function formatDate(value?: string) { return value ? new Date(value).toLocaleString() : 'Unavailable' }
 function formatConfidence(value?: number | null) { return value == null ? 'Unavailable' : `${Math.round(value * 100)}%` }
 function formatPercent(value?: number | null) { return value == null ? 'Unavailable' : `${Math.round(value * 100)}%` }
+function uniqueEvidence(evidence: any[]) {
+  return [...new Map(evidence.filter(item => item?.source_url).map(item => [item.id || item.source_url, item])).values()]
+}
 function formatSoleSource(value: unknown) { return value === true ? 'yes' : value === false ? 'no' : 'Unavailable' }
 function ownershipLabel(value: string) { return ({ direct: 'Direct owner', ultimate_parent: 'Ultimate parent', beneficial_owner: 'Beneficial owner' } as Record<string, string>)[value] || labelize(value) }
 function formatOwnershipPercentage(value?: number | null) { return value == null ? 'Unavailable' : `${Number(value).toLocaleString()}%` }
