@@ -16,7 +16,7 @@ from typing import Any, Awaitable, Callable, Literal
 
 from pydantic import BaseModel, Field
 
-from .. import db
+from .. import db, events
 from ..config import PermissionMode, load_workspace, settings
 from ..cypher.validator import CypherRejected, Validated, is_pure_create, strip_strings_and_comments, validate
 
@@ -171,6 +171,9 @@ class PermissionGate:
             req.status = "executed"
             req.resolved_at = time.time()
             await self._emit("permission_resolved", req.model_dump())
+            # Every approved write is a graph change; tell the open canvases about it so a
+            # new entity lands on the canvas without a reload, whether it came from chat or MCP.
+            await events.announce(events.node_ids(req.params, res.get("rows")), reason=req.tool or "write", source=req.source)
             return Decision(status="executed", request_id=req.id, result=res, statement=req.statement)
         except Exception as e:
             req.status = "failed"

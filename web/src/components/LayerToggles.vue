@@ -19,4 +19,4 @@ function onChange(vals: string[]) {
   emit('change')
 }
 </script>
-<style scoped>.layers { position: absolute; top: 8px; left: 12px; }</style>
+<style scoped>.layers { flex: 0 0 auto; }</style>

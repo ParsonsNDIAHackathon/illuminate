@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, db
+from . import __version__, db, events
 from .config import settings
 from .enrichment.worker import worker
 from .routers import chat, claims, connectors, enrichment, graph, permissions, query
@@ -46,6 +46,7 @@ async def lifespan(app: FastAPI):
         print(f"[illuminate] schema init deferred: {e}")
     gate.add_listener(chat.manager.broadcast)
     worker.add_listener(chat.manager.broadcast)
+    events.add_listener(chat.manager.broadcast)
     worker.start()
     # MCP over streamable HTTP, same handlers (D1). Its session manager has its own lifespan; run it inside ours.
     server = build_server()

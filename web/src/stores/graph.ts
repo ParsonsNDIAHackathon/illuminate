@@ -6,6 +6,9 @@ import { deriveLegend } from '../styles/styleOps'
 export interface GNode { id: string; label: string; labels?: string[]; name: string; props: Record<string, any> }
 export interface GEdge { id: string; source: string; target: string; type: string; props: Record<string, any> }
 
+/** How long an arriving node stays marked as new on the canvas. */
+const FRESH_MS = 6000
+
 export const useGraph = defineStore('graph', {
   state: () => ({
     nodes: new Map<string, GNode>(),
@@ -20,6 +23,13 @@ export const useGraph = defineStore('graph', {
     styleVersion: 0,     // bumped when style ops change
     highlightIds: [] as string[],
     filter: '',          // search-bar text; canvas dims nodes that don't match
+    // The canvas shows the whole graph. focusId narrows it to one consumer's supply chain;
+    // null means everything, which is the default.
+    focusId: null as string | null,
+    focusLabel: null as string | null,
+    truncated: false,    // the whole graph did not fit under the node cap
+    fresh: [] as string[],   // ids that just arrived from a live change, for the canvas to reveal
+    freshVersion: 0,
   }),
   getters: {
     selected: (s) => (s.selectedId ? s.nodes.get(s.selectedId) || null : null),
@@ -35,7 +45,7 @@ export const useGraph = defineStore('graph', {
       this.version++
     },
     replace(sub: { nodes: GNode[]; edges: GEdge[] } | null | undefined) { this.nodes = new Map(); this.edges = new Map(); this.merge(sub) },
-    clear() { this.nodes = new Map(); this.edges = new Map(); this.selectedId = null; this.selectedEdgeId = null; this.version++ },
+    clear() { this.nodes = new Map(); this.edges = new Map(); this.selectedId = null; this.selectedEdgeId = null; this.fresh = []; this.version++ },
     select(id: string | null) { this.selectedId = id; if (id) this.selectedEdgeId = null },
     selectEdge(id: string | null) { this.selectedEdgeId = id; if (id) this.selectedId = null },
     setFilter(q: string) { this.filter = (q || '').trim() },
@@ -45,6 +55,55 @@ export const useGraph = defineStore('graph', {
       this.styleVersion++
     },
     clearStyleOps() { this.styleOps = [{ op: 'clear', scope: 'all' }]; this.legend = []; this.styleVersion++ },
+
+    /** A change committed on the server — a new entity, an enrichment fact, an approved claim.
+     *  Merge it and flag what is genuinely new so the canvas can place and reveal it. */
+    applyDelta(sub: { nodes: GNode[]; edges: GEdge[] } | null | undefined, focus?: string[]) {
+      if (!sub?.nodes?.length) return
+      // A delta carries one hop of context around what changed. Take it whole while the canvas
+      // shows everything; when focused on one consumer, take only what attaches to what is drawn,
+      // unless the change itself is a brand new node the user just asked for.
+      if (this.focusId && !(focus || []).some(id => !this.nodes.has(id))) {
+        const keep = new Set(sub.nodes.filter(n => this.nodes.has(n.id)).map(n => n.id))
+        for (const e of sub.edges || []) {
+          if (keep.has(e.source)) keep.add(e.target)
+          if (keep.has(e.target)) keep.add(e.source)
+        }
+        sub = { nodes: sub.nodes.filter(n => keep.has(n.id)), edges: sub.edges }
+      }
+      const newNodes = sub.nodes.filter(n => !this.nodes.has(n.id)).map(n => n.id)
+      const newEdges = (sub.edges || []).filter(e => !this.edges.has(e.id)).map(e => e.id)
+      this.merge(sub)
+      // What to draw attention to: whatever is new, plus the node the change was about.
+      const arrived = [...newNodes, ...newEdges, ...(focus || [])].filter(id => this.nodes.has(id) || this.edges.has(id))
+      if (!arrived.length) return
+      this.fresh = [...new Set([...this.fresh, ...arrived])]
+      this.freshVersion++
+      const stale = new Set(arrived)
+      setTimeout(() => { this.fresh = this.fresh.filter(id => !stale.has(id)); this.freshVersion++ }, FRESH_MS)
+    },
+
+    /** Everything in the graph, bounded by the active layers. The default view. */
+    async loadAll(layers: Record<string, boolean>) {
+      this.loading = true
+      try {
+        const r = await api.get(`/api/graph/all?${qs({ people: !!layers.people, countries: !!layers.countries, artifacts: !!layers.artifacts, categories: !!layers.categories })}`)
+        this.focusId = null
+        this.focusLabel = null
+        this.truncated = !!r.truncated
+        this.replace(r.subgraph)
+        this.lastCypher = null
+      } finally { this.loading = false }
+    },
+
+    /** Narrow the canvas to one consumer's supply chain. */
+    async focus(entityId: string, label: string | null, depth: number, layers: Record<string, boolean>) {
+      await this.loadNeighbourhood(entityId, depth, layers, true)
+      this.focusId = entityId
+      this.focusLabel = label
+      this.truncated = false
+    },
+
     async loadNeighbourhood(entityId: string, depth: number, layers: Record<string, boolean>, replace = false) {
       this.loading = true
       try {

@@ -75,6 +75,9 @@ function styleSheet(): any[] {
     { selector: '.op-dim', style: { opacity: 0.18 } },
     { selector: '.op-hide', style: { display: 'none' } },
     { selector: '.layer-hide', style: { display: 'none' } },
+    // a node or edge that arrived from a live change — held for a few seconds, then released
+    { selector: 'node.fresh', style: { 'border-width': 5, 'border-color': dark ? '#34d399' : '#059669', 'z-index': 30 } },
+    { selector: 'edge.fresh', style: { width: 3.4, 'line-color': dark ? '#34d399' : '#059669', 'target-arrow-color': dark ? '#34d399' : '#059669', 'z-index': 30 } },
     // search-bar filter: matches stay bright, everything else recedes
     { selector: '.q-dim', style: { opacity: 0.12, 'z-index': 0 } },
     { selector: 'node.q-match', style: { 'border-width': 3, 'border-color': dark ? '#fbbf24' : '#d97706', 'z-index': 20 } },
@@ -106,7 +109,7 @@ function sync() {
   }
   restyle()
 }
-function restyle() { if (!cy) return; clearStyleOps(cy); applyStyleOps(cy, graph.styleOps, ws.theme); applyFilter(); applyLayers() }
+function restyle() { if (!cy) return; clearStyleOps(cy); applyStyleOps(cy, graph.styleOps, ws.theme); applyFilter(); applyLayers(); markFresh() }
 
 // Layer toggles gate what the server sends, but nodes can arrive by other routes (chat results,
 // generated Cypher, an API that predates the flag). The canvas enforces the toggles too, so an
@@ -140,16 +143,45 @@ function startLive() {
 }
 // Nodes added to a running canvas would otherwise appear at the origin and fly across it; drop
 // each one next to a neighbour that already has a position and let the simulation settle it.
+// A node with no neighbour on the canvas — a program added from chat before anything supplies it —
+// has nothing to anchor to, so it goes where the user is looking rather than at the origin.
 function seedNearNeighbours(ids: string[]) {
   if (!cy) return
   const fresh = new Set(ids)
+  const ext = cy.extent()
+  const mid = { x: (ext.x1 + ext.x2) / 2, y: (ext.y1 + ext.y2) / 2 }
+  const spread = Math.min(ext.w, ext.h) / 4
   for (const id of ids) {
     const n = cy.getElementById(id)
     const anchor = n.neighborhood('node').filter(m => !fresh.has(m.id()))[0]
-    if (!anchor) continue
-    const p = anchor.position()
-    n.position({ x: p.x + (Math.random() - 0.5) * 80, y: p.y + (Math.random() - 0.5) * 80 })
+    const p = anchor ? anchor.position() : mid
+    const jitter = anchor ? 80 : spread
+    n.position({ x: p.x + (Math.random() - 0.5) * jitter, y: p.y + (Math.random() - 0.5) * jitter })
   }
+}
+
+// What a live change touched, marked on the canvas and — if it landed off-screen — brought into view.
+// Nothing here reloads: the delta already carried the elements.
+function freshElements() {
+  if (!cy) return null
+  const eles = cy.collection(graph.fresh.map(id => cy!.getElementById(id)).filter(e => e && e.nonempty()) as any)
+  return eles.nonempty() ? eles : null
+}
+function markFresh() {
+  if (!cy) return
+  cy.elements().removeClass('fresh')
+  freshElements()?.addClass('fresh')
+}
+function revealFresh() {
+  if (!cy) return
+  markFresh()
+  const eles = freshElements()
+  if (!eles) return
+  const visible = eles.nodes().filter(n => !n.hasClass('layer-hide'))
+  if (visible.empty()) return
+  const ext = cy.extent()
+  const offscreen = visible.filter(n => { const p = n.position(); return p.x < ext.x1 || p.x > ext.x2 || p.y < ext.y1 || p.y > ext.y2 })
+  if (offscreen.nonempty()) cy.animate({ center: { eles: visible }, duration: 350 })
 }
 
 /** Case-, accent- and punctuation-insensitive form: "Société L-3 Harris" → "societe l 3 harris". */
@@ -198,6 +230,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => { stopLive(); cy?.destroy() })
 watch(() => graph.version, sync)
+watch(() => graph.freshVersion, revealFresh)
 watch(() => graph.styleVersion, restyle)
 watch(() => graph.filter, applyFilter)
 watch(() => ws.ws.layers, applyLayers, { deep: true })
