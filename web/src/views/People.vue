@@ -1,7 +1,7 @@
 <template>
   <v-container fluid>
     <div class="d-flex align-center ga-2 mb-2"><h2 class="text-h6">People</h2><v-text-field v-model="q" placeholder="filter" hide-details style="max-width: 280px" clearable /><v-spacer /><span class="text-caption">{{ items.length }} people · one HELD_ROLE edge per tenure</span></div>
-    <v-data-table :items="items" :headers="headers" density="compact" :items-per-page="50" :loading="loading">
+    <v-data-table class="people-table" :items="items" :headers="headers" density="compact" :items-per-page="50" :loading="loading">
       <template #item.name="{ item }">{{ item.name }} <v-chip v-if="item.simulated" size="x-small" color="warning" variant="tonal" class="ml-1">SIM</v-chip><v-chip v-if="item.entities > 1" size="x-small" color="secondary" variant="tonal" class="ml-1">interlock</v-chip></template>
       <template #item.roles="{ item }">
         <div v-for="r in item.roles" :key="r.edge_id" class="text-body-2">
@@ -16,7 +16,12 @@
 import { onMounted, ref, watch } from 'vue'
 import { api, qs } from '../api/client'
 const q = ref(''); const items = ref<any[]>([]); const loading = ref(false)
-const headers = [{ title: 'Person', key: 'name' }, { title: 'Roles (tenured)', key: 'roles' }, { title: 'Entities', key: 'entities', width: 90 }, { title: 'Source', key: 'source', width: 120 }]
+const headers = [{ title: 'Person', key: 'name', width: 220 }, { title: 'Roles (tenured)', key: 'roles', width: 480 }, { title: 'Entities', key: 'entities', width: 90 }, { title: 'Source', key: 'source', width: 140 }]
 async function load() { loading.value = true; try { items.value = await api.get(`/api/people?${qs({ q: q.value, limit: 500 })}`) } finally { loading.value = false } }
 let t: any; watch(q, () => { clearTimeout(t); t = setTimeout(load, 250) }); onMounted(load)
 </script>
+<style scoped>
+.people-table :deep(table) { min-width: 930px; }
+.people-table :deep(th:first-child), .people-table :deep(td:first-child) { min-width: 220px; }
+.people-table :deep(th:nth-child(2)), .people-table :deep(td:nth-child(2)) { min-width: 480px; }
+</style>

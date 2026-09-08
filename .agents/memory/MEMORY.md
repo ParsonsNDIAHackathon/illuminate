@@ -1,10 +1,14 @@
 - [Neo4j on Replit](neo4j-on-replit.md) — Nix Neo4j needs a writable config and explicit APOC plugin wiring for this app.
 - [Concurrent merge verification](concurrent-merge-verification.md) — re-check shared entry points after parallel task merges, immediately before completion.
-- [Main Replit branch sync](main-replit-branch-sync.md) — task workspaces may auto-refresh main-repl/main even when direct SSH fetch cannot authenticate.
+- [Main branch synchronization](main-replit-branch-sync.md) — compare explicit fresh refs and publish only the immutable commit already evaluated.
 - [Graph evidence truth](graph-evidence-truth.md) — consumers must resolve current backing-claim and artifact status; edge metadata alone can become stale.
 - [Readiness truth rules](readiness-truth-rules.md) — primary readiness requires stamped seed completion plus live mission coverage; optional services never gate it.
 - [AI summary authority boundary](ai-summary-authority.md) — Models may prioritize approved findings, but deterministic code owns narrative, citations, scores, and fallback.
 - [NDIA catalog contract](ndia-catalog-contract.md) — event-3 read fields are public, but organizer-provided write routes must remain opt-in.
 - [Evidence lineage safety](evidence-lineage-safety.md) — connector diagnostics must be allowlisted, and shared artifact provenance must remain immutable.
 - [Locked Python subprojects on Replit](locked-python-subprojects.md) — override Replit’s shared uv environment with an absolute subproject path for isolated locked builds.
+- [Server-side URL fetch boundaries](server-side-url-fetch-boundaries.md) — every fetch, fallback, redirect, and cached final URL must enforce one public-network policy.
+- [Focused graph membership](focused-graph-membership.md) — SUPPLIES paths define a program’s members; shared metadata may decorate members but must never bridge programs.
 - [Seed evidence timestamps](seed-evidence-timestamps.md) — idempotent seed reruns must preserve retrieval time and track ingestion time separately.
+- [Headless phone viewport checks](headless-phone-viewports.md) — Chromium window sizing may crop rather than emulate sub-500px CSS viewports; use device metrics.
+- [Atomic claim decisions](atomic-claim-decisions.md) — terminal review state and its materialized graph effects must commit in one claim-locked transaction.

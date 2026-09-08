@@ -7,8 +7,15 @@
 # Env:    BACKUP  archive name inside backups/ (a leading "backups/" is tolerated), or "latest"
 #         HOST_UID/HOST_GID  owner for restored api/data files (make passes the caller's ids)
 set -eu
+
+prepare_api_data() {
+  mkdir -p /api-data
+  chown -R "${HOST_UID:-0}:${HOST_GID:-0}" /api-data
+}
+
+prepare_api_data
 if [ -z "${BACKUP:-}" ]; then
-  echo "restore: BACKUP not set, keeping existing data"; exit 0
+  echo "restore: BACKUP not set, repaired api/data ownership and kept existing data"; exit 0
 fi
 if [ "$BACKUP" = "latest" ]; then
   [ -f /backups/.latest ] || { echo "restore: no backups/.latest marker — run make backup first" >&2; exit 1; }
@@ -38,5 +45,5 @@ find /neo4j -mindepth 1 -delete
 mkdir -p /api-data && find /api-data -mindepth 1 -delete
 tar xzf "$f" -C /
 chown -R 7474:7474 /neo4j
-chown -R "${HOST_UID:-0}:${HOST_GID:-0}" /api-data
+prepare_api_data
 echo "restore: done — $(ls /api-data | wc -l) api/data files, neo4j store $(du -sh /neo4j | cut -f1)"

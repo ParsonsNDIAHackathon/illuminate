@@ -57,3 +57,21 @@ async function check(c: any) {
 }
 onMounted(load)
 </script>
+<style scoped>
+@media (max-width: 700px) {
+  :deep(.v-list-item) { padding-inline: 8px; }
+  :deep(.v-list-item-title), :deep(.v-list-item-subtitle) {
+    display: block;
+    overflow: visible;
+    white-space: normal;
+    -webkit-line-clamp: unset;
+  }
+  :deep(.v-list-item__append) { margin-inline-start: 8px; }
+  :deep(.v-list-item__append > div) { flex-wrap: wrap; justify-content: flex-end; }
+  :deep(.v-list-item__append .text-caption) { min-width: 0 !important; width: 100%; text-align: right; overflow-wrap: anywhere; }
+}
+@media (max-width: 460px) {
+  :deep(.v-list-item) { grid-template-areas: "prepend content" "append append"; }
+  :deep(.v-list-item__append) { grid-area: append; margin: 8px 0 4px; }
+}
+</style>

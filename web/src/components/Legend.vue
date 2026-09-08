@@ -25,7 +25,6 @@
           <i :style="{ width: `${t.size * TIER_KEY_SCALE}px`, height: `${t.size * TIER_KEY_SCALE}px`, background: organizationColor() }"></i>T{{ t.tier }}{{ t.tier === TIER_SIZES[TIER_SIZES.length - 1].tier ? '+' : '' }}
         </span>
       </div>
-      <div class="simulation-key" :style="{ '--simulation-color': simulationColor() }"><i></i><b>SIM</b><span>Simulated / scenario data</span></div>
       <div v-if="graph.focusIds.length" class="focus-legend">
         <span class="path-line"></span><strong>Critical path</strong>
         <span class="risk-ring"></span><span>{{ graph.focusIds.length }} report element{{ graph.focusIds.length === 1 ? '' : 's' }}</span>
@@ -62,7 +61,6 @@ const TIER_KEY_SCALE = 0.4   // canvas px → legend px, so a T1 disc fits a 12p
 const tiersDrawn = computed(() => supplierTiers(graph.edgeList, graph.nodeList).size > 0)
 function organizationColor() { return NODE_TYPES.Organization.fill[ws.theme] }
 function familyColor(family: RelationshipFamily) { return ws.theme === 'dark' ? family.darkColor : family.color }
-function simulationColor() { return ws.theme === 'dark' ? '#f6c453' : '#b77900' }
 </script>
 <style scoped>
 .legend { position: absolute; left: 12px; bottom: 12px; z-index: 4; width: min(430px, calc(100% - 72px)); display: grid; gap: 7px; padding: 10px 12px; border: 1px solid rgba(100,116,139,.32); border-radius: 6px; background: rgba(var(--v-theme-surface),.94); box-shadow: 0 3px 14px rgba(15,23,42,.13); font-size: 11px; backdrop-filter: blur(5px); }
@@ -90,14 +88,17 @@ function simulationColor() { return ws.theme === 'dark' ? '#f6c453' : '#b77900' 
 .tier-key strong { font-size: 10px; letter-spacing: .035em; text-transform: uppercase; opacity: .75; }
 .tier-key .tier { display: inline-flex; align-items: center; gap: 4px; }
 .tier-key .tier i { display: inline-block; border-radius: 50%; opacity: .85; }
-.simulation-key { display: flex; align-items: center; gap: 7px; color: var(--simulation-color); font-weight: 700; }
-.simulation-key i { width: 25px; border-top: 4px dotted var(--simulation-color); }
-.simulation-key b { padding: 0 3px; border: 1px dashed var(--simulation-color); font-size: 9px; line-height: 14px; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
 .focus-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding-top: 7px; border-top: 1px solid rgba(0,107,98,.25); color: rgb(var(--v-theme-on-surface)); font-size: 12px; }
 .path-line { width: 25px; height: 4px; background: #006b62; }
 .risk-ring { width: 13px; height: 13px; border: 3px solid #a93622; border-radius: 50%; }
 .focus-legend button { margin-left: auto; color: #087f72; font: inherit; font-weight: 700; border: 0; border-left: 1px solid rgba(0,107,98,.25); padding-left: 9px; background: none; cursor: pointer; }
 .style-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding-top: 6px; border-top: 1px solid rgba(100,116,139,.2); }
-@media (max-width: 520px) { .family-grid { grid-template-columns: 1fr; } }
+@media (max-width: 767px) {
+  .legend { left: 8px; bottom: 8px; width: min(430px, calc(100% - 16px)); max-height: 150px; overflow: auto; padding: 8px; }
+  .legend-heading { display: none; }
+  .family-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 4px 8px; }
+}
+@media (max-width: 340px) { .family-grid { grid-template-columns: 1fr; } }
+@media (max-width: 420px) { .family { min-width: 0; font-size: 10px; white-space: normal; } }
 </style>

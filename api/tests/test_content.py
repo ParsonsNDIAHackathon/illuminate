@@ -73,30 +73,28 @@ def test_edgar_submissions_read_as_fields():
     assert fields(out, "Filer")["Name"]
 
 
-def test_unmapped_payload_still_renders_as_fields():
-    """An unknown shape must not fall back to a blob — flattening keeps it readable."""
+def test_unmapped_payload_remains_server_side():
+    """Unknown connector shapes cannot become an arbitrary browser projection."""
     body = {"widget": {"name": "Acme", "count": 3, "nested": {"deep": "value"}}, "ok": True}
     out = summarize({"kind": "record"}, [{"url": "https://x.test/", "match": "cached", "body": body}])
     assert out["shape"] is None
-    flat = fields(out, "Source payload")
-    assert flat["Widget › Name"] == "Acme"
-    assert flat["Widget › Nested › Deep"] == "value"
-    assert flat["Ok"] == "yes"
+    assert all(section["title"] != "Source payload" for section in out["sections"])
 
 
-def test_node_properties_always_show_including_unknown_ones():
+def test_node_properties_only_show_allowlisted_fields():
     props = {"id": "art_1", "kind": "news", "source": "GDELT", "url": "https://ex.test/a",
              "domain": "ex.test", "sentiment": "negative", "some_new_prop": "kept"}
     rec = fields(summarize(props, []), "Record")
     assert rec["Kind"] == "news" and rec["Sentiment"] == "negative"
-    assert rec["Some new prop"] == "kept"      # unmapped properties are never hidden
+    assert "Some new prop" not in rec
     assert "Id" not in rec and "Url" not in rec  # shown in the dialog header instead
 
 
 def test_urls_become_links():
-    out = summarize({"kind": "record"}, [{"url": "https://x.test/", "match": "c",
-                                          "body": {"site": "https://example.test/page"}}])
-    field = next(f for f in out["sections"][-1]["fields"] if f["label"] == "Site")
+    out = summarize({"kind": "record"}, [{"url": "https://x.test/", "match": "c", "body": {
+        "data": {"attributes": {"primary_ext": "Org", "website": "https://example.test/page"}},
+    }}])
+    field = next(f for section in out["sections"] for f in section["fields"] if f["label"] == "Website")
     assert field["href"] == "https://example.test/page"
 
 

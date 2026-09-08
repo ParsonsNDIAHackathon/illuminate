@@ -150,7 +150,8 @@ unrelated event challenges:
 | **62 — GDELT 2.0 — Global Knowledge Graph and Events** | Adverse-media/event evidence, using a cached representative result for a deterministic demo |
 
 Ownership and screening are supplemented by challenge-named or public sources
-including OpenCorporates, GLEIF, SEC EDGAR, LittleSis, OFAC, and SAM exclusions.
+including OpenCorporates, GLEIF, SEC EDGAR, LittleSis, OFAC SDN, the UN Security
+Council Consolidated List, and SAM exclusions.
 Each source supports only the claims evidenced by its own records.
 
 The catalog contribution is a reusable, schema-valid Illuminate findings

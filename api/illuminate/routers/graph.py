@@ -17,6 +17,12 @@ from .deps import user_id
 
 router = APIRouter(prefix="/api", tags=["graph"])
 
+_PUBLIC_ARTIFACT_PROJECTION = (
+    "a{.id,.title,.url,.kind,.source,.source_id,.source_identifier,.catalog_ids,"
+    ".published_at,.retrieved_at,.usage_note,.quality_note,.supports,.unknowns,"
+    ".source_status,.connector_error,.simulated,.amount,.sentiment}"
+)
+
 
 @router.get("/graph/stats")
 async def stats():
@@ -62,7 +68,7 @@ _LAYER_LABELS = {"people": ["Person"], "countries": ["Location"], "categories": 
 
 @router.get("/graph/all")
 async def graph_all(people: bool = True, countries: bool = False, artifacts: bool = False, sources: bool = False, claims: bool = False,
-                    categories: bool = False, limit: int = Query(1500, le=5000)):
+                    categories: bool = False, limit: int = Query(1500, ge=1, le=5000)):
     """The whole graph, not one consumer's neighbourhood. A workspace holds several
     programs and the entities that supply them; the canvas shows all of it by default
     and narrows to a single consumer only when the user asks for that."""
@@ -92,7 +98,10 @@ async def graph_all(people: bool = True, countries: bool = False, artifacts: boo
 async def node(node_id: str):
     rows = await db.read(
         "MATCH (n {id:$id}) OPTIONAL MATCH (n)-[r]-(m) WITH n, type(r) AS t, count(m) AS c "
-        "RETURN n{.*} AS props, labels(n) AS labels, collect({type:t, count:c}) AS degree",
+        "RETURN n{.id,.name,.title,.kind,.uei,.cage,.lei,.code,.source,.source_url,"
+        ".retrieved_at,.published_at,.simulated,.flagged,.registration_status,"
+        ".source_status,.confidence} AS props, labels(n) AS labels, "
+        "collect({type:t, count:c}) AS degree",
         {"id": node_id},
     )
     if not rows:
@@ -119,9 +128,15 @@ async def entities(q: str | None = None, kind: str | None = None, flagged: bool 
         OPTIONAL MATCH (e)-[s:SUPPLIES]->(c:Entity)
         OPTIONAL MATCH (e)-[:INCORPORATED_IN]->(inc:Location)
         OPTIONAL MATCH (e)-[:PARENT_SEATED_IN]->(seat:Location)
-        OPTIONAL MATCH (up:Entity)-[:ULTIMATE_PARENT_OF]->(e)
         WITH e, min(s.tier) AS tier, count(DISTINCT c) AS consumers, head(collect(DISTINCT inc.code)) AS inc, head(collect(DISTINCT seat.code)) AS seat,
-             head(collect(DISTINCT up.name)) AS parent, any(x IN collect(s.sole_source) WHERE x = true) AS sole_source
+             any(x IN collect(s.sole_source) WHERE x = true) AS sole_source
+        // The ultimate parent is the root of the control chain, walked rather than looked up.
+        CALL {{
+          WITH e
+          OPTIONAL MATCH path=(up:Entity)-[:OWNS|ULTIMATE_PARENT_OF*1..6]->(e)
+          WHERE up.id <> e.id AND NOT EXISTS {{ (:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(up) }}
+          RETURN up.name AS parent ORDER BY length(path), up.name LIMIT 1
+        }}
         RETURN e.id AS id, e.name AS name, e.kind AS kind, e.uei AS uei, e.cage AS cage, e.lei AS lei, tier, consumers, inc AS incorporated, seat AS parent_seat, parent,
                sole_source, coalesce(e.flagged,false) AS flagged, coalesce(e.simulated,false) AS simulated, e.source AS source
         ORDER BY tier, name SKIP $offset LIMIT $limit
@@ -182,13 +197,17 @@ async def artifacts(kind: str | None = None, entity_id: str | None = None, limit
 
 @router.get("/artifacts/{artifact_id}")
 async def artifact_detail(artifact_id: str):
-    """One artifact with what it is attached to and, where the source response is cached, the raw payload."""
+    """One artifact with safe metadata and a derived summary.
+
+    Cached upstream payloads remain server-side because they can contain fields
+    outside the artifact's public classification.
+    """
     rows = await db.read(
         """
         MATCH (a:Artifact {id:$id})
         OPTIONAL MATCH (a)-[:ABOUT]->(e:Entity)
         OPTIONAL MATCH (a)-[:EVIDENCES]->(c:Claim)
-        RETURN a{.*} AS artifact, collect(DISTINCT e{.id,.name}) AS about,
+        RETURN """ + _PUBLIC_ARTIFACT_PROJECTION + """ AS artifact, collect(DISTINCT e{.id,.name}) AS about,
                collect(DISTINCT c{.id,.predicate,.status,.confidence}) AS claims
         """,
         {"id": artifact_id},
@@ -197,11 +216,14 @@ async def artifact_detail(artifact_id: str):
         raise HTTPException(404, "no such artifact")
     row = rows[0]
     raw = find_raw(artifact_id, row["artifact"] or {})
-    return {**row, "raw": raw, "summary": summarize(row["artifact"] or {}, raw)}
+    return {**row, "summary": summarize(row["artifact"] or {}, raw)}
 
 
 async def _artifact_props(artifact_id: str) -> dict:
-    rows = await db.read("MATCH (a:Artifact {id:$id}) RETURN a{.*} AS artifact", {"id": artifact_id})
+    rows = await db.read(
+        f"MATCH (a:Artifact {{id:$id}}) RETURN {_PUBLIC_ARTIFACT_PROJECTION} AS artifact",
+        {"id": artifact_id},
+    )
     if not rows or not rows[0].get("artifact"):
         raise HTTPException(404, "no such artifact")
     return rows[0]["artifact"]

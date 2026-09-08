@@ -62,27 +62,35 @@ def test_connector_api_exposes_coverage_and_limits():
 
 
 def test_rejected_claim_cannot_be_committed():
-    original_read = claims.db.read
-    original_write = claims.db.write
-    writes = []
+    original_transactional_write = claims.db.transactional_write
+    queries = []
 
-    async def fake_read(query, params=None):
-        if "ASSERTS" in query:
-            return [{"c": {"status": "rejected"}, "sid": "ent_1", "oid": None}]
-        return []
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
 
-    async def fake_write(query, params=None):
-        writes.append((query, params))
+        async def fetch(self, limit):
+            return [type("Record", (), {"data": lambda self, row=row: row})() for row in self.rows]
+
+        async def consume(self):
+            return None
+
+    class Tx:
+        async def run(self, query, params=None):
+            queries.append((query, params))
+            rows = [{"c": {"status": "rejected"}, "sid": "ent_1", "oid": None}] if "ASSERTS" in query else []
+            return Result(rows)
+
+    async def fake_transactional_write(work, timeout=None):
+        return await work(Tx())
 
     async def check():
-        claims.db.read = fake_read
-        claims.db.write = fake_write
+        claims.db.transactional_write = fake_transactional_write
         try:
             assert await claims.commit("clm_rejected") == "rejected"
-            assert writes == []
+            assert not any("status='committed'" in query for query, _params in queries)
         finally:
-            claims.db.read = original_read
-            claims.db.write = original_write
+            claims.db.transactional_write = original_transactional_write
 
     asyncio.run(check())
 
@@ -182,6 +190,7 @@ def test_worker_diagnostics_use_safe_error_metadata():
 def test_relationship_simulation_survives_stage_and_commit():
     original_read = claims.db.read
     original_write = claims.db.write
+    original_transactional_write = claims.db.transactional_write
     stage_writes = []
     commit_writes = []
 
@@ -208,24 +217,36 @@ def test_relationship_simulation_survives_stage_and_commit():
             assert staged["simulated"] is True
             assert json.loads(staged["rel_props_json"])["simulated"] is True
 
-            async def commit_read(query, params=None):
-                if "RETURN c{.*} AS c" in query:
-                    return [{
-                        "c": {
-                            "status": "staged", "predicate": "SUPPLIES", "source": "usaspending",
-                            "retrieved_at": "2026-09-08T00:00:00Z", "method": "connector",
-                            "confidence": 1.0, "simulated": False,
-                            "rel_props": json.dumps({"tier": 2, "simulated": True}),
-                        },
-                        "sid": "ent_real_1", "oid": "ent_real_2",
-                    }]
-                return []
+            class Result:
+                def __init__(self, rows):
+                    self.rows = rows
 
-            async def commit_write(query, params=None):
-                commit_writes.append((query, params))
+                async def fetch(self, limit):
+                    return [type("Record", (), {"data": lambda self, row=row: row})() for row in self.rows]
 
-            claims.db.read = commit_read
-            claims.db.write = commit_write
+                async def consume(self):
+                    return None
+
+            class Tx:
+                async def run(self, query, params=None):
+                    commit_writes.append((query, params))
+                    rows = []
+                    if "RETURN c{.*} AS c" in query:
+                        rows = [{
+                            "c": {
+                                "status": "staged", "predicate": "SUPPLIES", "source": "usaspending",
+                                "retrieved_at": "2026-09-08T00:00:00Z", "method": "connector",
+                                "confidence": 1.0, "simulated": False,
+                                "rel_props": json.dumps({"tier": 2, "simulated": True}),
+                            },
+                            "sid": "ent_real_1", "oid": "ent_real_2",
+                        }]
+                    return Result(rows)
+
+            async def commit_transaction(work, timeout=None):
+                return await work(Tx())
+
+            claims.db.transactional_write = commit_transaction
             assert await claims.commit("clm_sim") == "committed"
             relationship = next(params for query, params in commit_writes if "MERGE (s)-[r:SUPPLIES" in query)
             assert relationship["rp"]["simulated"] is True
@@ -233,6 +254,7 @@ def test_relationship_simulation_survives_stage_and_commit():
         finally:
             claims.db.read = original_read
             claims.db.write = original_write
+            claims.db.transactional_write = original_transactional_write
 
     asyncio.run(check())
 

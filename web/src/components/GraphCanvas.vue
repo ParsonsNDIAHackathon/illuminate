@@ -1,10 +1,6 @@
 <template>
   <div class="canvas-wrap">
     <div ref="el" class="cy"></div>
-    <div v-if="hasSimulation" class="simulation-notice">
-      <strong>SIMULATION DATA</strong>
-      <span>Scenario material for analysis — not an allegation or verified finding.</span>
-    </div>
     <div v-if="graph.loading" class="loading"><v-progress-circular indeterminate size="28" /></div>
     <div class="canvas-tools">
       <v-btn icon="mdi-fit-to-screen" variant="text" title="Fit" @click="fit" />
@@ -16,7 +12,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import cytoscape, { type Core } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import cola from 'cytoscape-cola'
@@ -24,15 +20,15 @@ import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 import { applyStyleOps, clearStyleOps } from '../styles/styleOps'
 import { nodeSize, supplierTiers } from '../styles/nodeSize'
-import { fillFor, glyphScaleFor, glyphYFor, iconFor, layerOf, shapeFor } from '../styles/nodeTypes'
+import { fillFor, glyphScaleFor, glyphYFor, iconFor, shapeFor } from '../styles/nodeTypes'
 import { relationshipFamily } from '../styles/relationshipFamilies'
+import { layerData, layerVisible } from '../stores/graphLayers'
 
 cytoscape.use(fcose)
 cytoscape.use(cola)
 const el = ref<HTMLElement>()
 const graph = useGraph()
 const ws = useWorkspace()
-const hasSimulation = computed(() => graph.nodeList.some(n => n.props?.simulated) || graph.edgeList.some(e => e.props?.simulated))
 let cy: Core | null = null
 let sameNameCollapsed: boolean | null = null
 const groupingLockedIds = new Set<string>()
@@ -43,7 +39,6 @@ const SAME_NAME_COLLAPSE_ZOOM = 1
 function badgeFor(n: any) {
   const p = n.props || {}
   const bits: string[] = []
-  if (p.simulated) bits.push('SIM')
   if (p.flagged) bits.push('REVIEW')
   return bits.join(' ')
 }
@@ -73,14 +68,12 @@ function styleSheet(): any[] {
   const dark = ws.theme === 'dark'
   const text = dark ? '#e5e7eb' : '#111827'
   const outline = dark ? '#0e1013' : '#ffffff'
-  const simulation = dark ? '#f6c453' : '#b77900'
   return [
-    // The glyph is sized as a share of the node, so it follows supplier tier and the simulated
-    // screen-space rescale on its own; `fit: none` is what makes the percentages authoritative.
+    // The glyph is sized as a share of the node, so it follows supplier tier on its own;
+    // `fit: none` is what makes the percentages authoritative.
     { selector: 'node', style: { 'background-color': 'data(baseColor)', shape: 'data(shape)', width: 'data(size)', height: 'data(size)', 'background-image': 'data(icon)', 'background-fit': 'none', 'background-width': 'data(glyphScale)', 'background-height': 'data(glyphScale)', 'background-position-y': 'data(glyphY)', 'background-image-opacity': 0.95, label: 'data(name)', color: text, 'font-size': 10, 'text-wrap': 'ellipsis', 'text-max-width': 120, 'text-valign': 'bottom', 'text-margin-y': 4, 'text-outline-color': outline, 'text-outline-width': 2, 'border-width': 1.5, 'border-color': dark ? '#374151' : '#cbd5e1', 'overlay-padding': 4 } },
     { selector: 'node[?isRoot]', style: { 'border-width': 3, 'border-color': dark ? '#60a5fa' : '#1d4ed8', 'font-weight': 'bold', 'font-size': 12 } },
     { selector: 'node[badge != ""]', style: { label: (e: any) => `${e.data('name')}\n${e.data('badge')}`, 'text-wrap': 'wrap' } },
-    { selector: 'node[?simulated]', style: { width: 'data(simSize)', height: 'data(simSize)', 'font-size': 'data(simFont)', 'border-style': 'dashed', 'border-color': simulation, 'border-width': 'data(simBorder)', 'background-opacity': .55 } },
     { selector: 'edge', style: { width: 1.8, 'line-color': 'data(color)', 'target-arrow-color': 'data(color)', 'target-arrow-shape': 'triangle', 'arrow-scale': 0.95, 'curve-style': 'bezier', label: 'data(label)', 'font-size': 9, color: dark ? '#d1d5db' : '#374151', 'text-rotation': 'autorotate', 'text-outline-color': outline, 'text-outline-width': 2, 'text-background-opacity': 0 } },
     { selector: 'edge[family = "supply"]', style: { width: 3.2, 'arrow-scale': 1.15 } },
     { selector: 'edge[family = "control"]', style: { width: 2.6, 'arrow-scale': 1.05 } },
@@ -89,7 +82,6 @@ function styleSheet(): any[] {
     { selector: 'edge[family = "location"]', style: { width: 2, 'line-style': 'dashed' } },
     { selector: 'edge[family = "evidence"]', style: { width: 2.2, 'line-style': 'dotted' } },
     { selector: 'edge[family = "classification"]', style: { 'line-style': 'dotted' } },
-    { selector: 'edge[?simulated]', style: { 'line-style': 'dotted', width: 'data(simWidth)', 'line-color': simulation, 'target-arrow-color': simulation } },
     { selector: 'node:selected', style: { 'border-width': 4, 'border-color': dark ? '#f472b6' : '#be185d' } },
     { selector: 'edge:selected', style: { width: 3.5, 'line-color': dark ? '#f472b6' : '#be185d', 'target-arrow-color': dark ? '#f472b6' : '#be185d', 'z-index': 20 } },
     // style ops
@@ -121,11 +113,6 @@ function styleSheet(): any[] {
     { selector: 'edge[?sameName]', style: { opacity: 0, width: 0, label: '', 'target-arrow-shape': 'none', events: 'no' } },
     // At low zoom, only one node is painted while every grouped record and its edges share its position.
     { selector: 'node.same-name-duplicate', style: { opacity: 0, label: '', events: 'no' } },
-    // Keep simulation identity in screen-space and above every focus/selection/style override.
-    { selector: 'node[?simulated]', style: { width: 'data(simSize)', height: 'data(simSize)', 'font-size': 'data(simFont)', 'border-style': 'dashed', 'border-color': simulation, 'border-width': 'data(simBorder)', label: (e: any) => `${e.data('name')}\nSIM${e.data('opBadge') ? ` · ${e.data('opBadge')}` : ''}`, 'text-wrap': 'wrap' } },
-    { selector: 'edge[?simulated]', style: { width: 'data(simWidth)', 'line-style': 'dotted', 'line-color': simulation, 'target-arrow-color': simulation, label: 'data(simLabel)', 'font-size': 'data(simEdgeFont)', 'font-weight': 'bold', color: simulation, 'text-outline-color': outline, 'text-outline-width': 'data(simEdgeOutline)', 'text-background-color': outline, 'text-background-opacity': .9 } },
-    { selector: 'edge.focus-path[?simulated]', style: { 'underlay-color': dark ? '#7dd3c7' : '#006b62', 'underlay-opacity': 1, 'underlay-padding': 'data(simEdgeHalo)' } },
-    { selector: 'edge:selected[?simulated]', style: { 'underlay-color': dark ? '#f472b6' : '#be185d', 'underlay-opacity': 1, 'underlay-padding': 'data(simEdgeHalo)' } },
   ]
 }
 
@@ -138,12 +125,12 @@ function toElements() {
   const nodes = graph.nodeList.map(n => {
     const tier = tiers.get(n.id)
     const size = nodeSize(n, tier)
-    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, layer: layerOf(n), baseColor: fillFor(n, ws.theme), shape: shapeFor(n), icon: iconFor(n), glyphScale: glyphScaleFor(n), glyphY: glyphYFor(n), size, tier, simSize: size / zoom, simFont: 11 / zoom, simBorder: 3 / zoom, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
+    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, ...layerData(n), baseColor: fillFor(n, ws.theme), shape: shapeFor(n), icon: iconFor(n), glyphScale: glyphScaleFor(n), glyphY: glyphYFor(n), size, tier, isRoot: n.id === root, badge: badgeFor(n) } }
   })
   const edges = graph.edgeList.map(e => {
     const family = relationshipFamily(e.type)
     const label = e.type === 'SUPPLIES' && e.props?.tier ? `T${e.props.tier}${e.props.sole_source ? ' · sole' : ''}` : e.type === 'HELD_ROLE' ? (e.props?.title || '').slice(0, 18) : e.type === 'OWNS' && e.props?.pct ? `${e.props.pct}%` : ''
-    return { group: 'edges', data: { id: e.id, source: e.source, target: e.target, type: e.type, family: family.key, color: ws.theme === 'dark' ? family.darkColor : family.color, simWidth: 3.5 / zoom, simEdgeFont: 10 / zoom, simEdgeOutline: 2 / zoom, simEdgeHalo: 2.5 / zoom, simulated: !!e.props?.simulated, label, simLabel: label ? `${label} · SIM` : 'SIM' } }
+    return { group: 'edges', data: { id: e.id, source: e.source, target: e.target, type: e.type, family: family.key, color: ws.theme === 'dark' ? family.darkColor : family.color, label } }
   })
   const sameNameEdges: any[] = []
   sameNameCollapsedGroups().forEach(ids => {
@@ -225,7 +212,7 @@ function applyFindingFocus() {
   graph.setFocusUnavailable(graph.focusIds.filter(id => !graph.nodes.has(id) && !graph.edges.has(id)))
   const vendor = graph.focusVendorId
   if (!vendor || !graph.nodes.has(vendor)) return
-  const rootId = ws.ws.root_id
+  const rootId = graph.focusId
   const pathIds = new Set<string>([vendor])
   if (rootId && graph.nodes.has(rootId)) {
     stablePath(rootId, vendor, new Set(['SUPPLIES']), true).forEach(id => pathIds.add(id))
@@ -249,33 +236,19 @@ function applyFindingFocus() {
   window.setTimeout(() => { if (cy && path.length) cy.animate({ fit: { eles: path, padding: 90 }, duration: 450 }) }, 0)
 }
 function clearVisualFocus() { graph.clearFocus(); graph.clearStyleOps() }
-function keepSimulationVisible() {
-  if (!cy) return
-  const zoom = cy.zoom()
-  cy.nodes('[?simulated]').forEach(n => {
-    n.data('simSize', Number(n.data('size')) / zoom)
-    n.data('simFont', 11 / zoom)
-    n.data('simBorder', 3 / zoom)
-  })
-  cy.edges('[?simulated]').forEach(e => {
-    e.data('simWidth', 3.5 / zoom)
-    e.data('simEdgeFont', 10 / zoom)
-    e.data('simEdgeOutline', 2 / zoom)
-    e.data('simEdgeHalo', 2.5 / zoom)
-  })
-}
 
 // Layer toggles gate what the server sends, but nodes can arrive by other routes (chat results,
 // generated Cypher, an API that predates the flag). The canvas enforces the toggles too, so an
 // unchecked layer is never drawn. Edges to hidden nodes are hidden by Cytoscape automatically.
-const LAYER_DEFAULT: Record<string, boolean> = { people: true, countries: false, categories: false, artifacts: false, sources: false, claims: false }
+// The server names each node's layer (graphio.layer_of); the fallback mirrors it for nodes from
+// a route that predates the field. Artifacts split by kind: registry entries and source records
+// are "sources", documents (filings, news, awards, web pages) are "artifacts".
 function applyLayers() {
   if (!cy) return
   const L = ws.ws.layers || {}
   cy.nodes().forEach(n => {
     const layer = n.data('layer')
-    const on = !layer || (L[layer] ?? LAYER_DEFAULT[layer])
-    n.toggleClass('layer-hide', !on)
+    n.toggleClass('layer-hide', !layerVisible(layer, L))
   })
 }
 
@@ -335,7 +308,7 @@ function applyZoomGrouping(force = false) {
     if (collapse) {
       const position = members[0].position()
       const visible = members.filter(node =>
-        node.hasClass('focus-path') || node.hasClass('focus-risk') || node.selected() || Boolean(node.data('simulated')),
+        node.hasClass('focus-path') || node.hasClass('focus-risk') || node.selected(),
       )
       if (!visible.some(node => node.id() === members[0].id())) visible.unshift(members[0])
       const visibleIds = new Set(visible.map(node => node.id()))
@@ -427,7 +400,7 @@ onMounted(() => {
   cy.on('tap', 'edge', (ev) => graph.selectEdge(ev.target.id()))
   cy.on('tap', (ev) => { if (ev.target === cy) { graph.select(null); graph.selectEdge(null) } })
   cy.on('dbltap', 'node', (ev) => { const n = graph.nodes.get(ev.target.id()); if (n && (n.label === 'Entity' || n.label === 'Person')) emit('expand', ev.target.id()) })
-  cy.on('zoom', () => { applyZoomGrouping(); keepSimulationVisible() })
+  cy.on('zoom', () => applyZoomGrouping())
   sync()
 })
 onBeforeUnmount(() => { stopLive(); cy?.destroy() })
@@ -451,7 +424,7 @@ defineExpose({ fit, layout })
 .cy { position: absolute; inset: 0; }
 .loading { position: absolute; top: 12px; left: 12px; }
 .canvas-tools { position: absolute; right: 8px; top: 8px; display: flex; flex-direction: column; gap: 2px; opacity: .85; }
-.simulation-notice { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 10px; padding: 8px 14px; border: 2px solid #9a6700; border-radius: 4px; background: #fff4cf; color: #563b00; box-shadow: 0 3px 12px rgba(60,45,0,.16); font-size: 12px; letter-spacing: .01em; }
-.simulation-notice strong { font-size: 11px; letter-spacing: .12em; white-space: nowrap; }
-@media (max-width: 760px) { .simulation-notice { left: 10px; right: 54px; transform: none; align-items: flex-start; flex-direction: column; gap: 2px; } }
+@media (max-width: 520px) {
+  .canvas-tools { right: 4px; top: 4px; }
+}
 </style>

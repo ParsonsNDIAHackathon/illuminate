@@ -81,5 +81,6 @@ onMounted(() => leftId.value && rightId.value ? loadLive() : loadPreset())
 .grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 28px; }
 .summary-row { margin-bottom: 12px; }
 .category-pair { align-items: stretch; }
-@media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+@media (max-width: 800px) { .comparison { padding: 14px !important; } .grid { grid-template-columns: 1fr; gap: 14px; } }
+@media (max-width: 520px) { .comparison :deep(.v-card-text) { align-items: stretch !important; flex-direction: column; } }
 </style>

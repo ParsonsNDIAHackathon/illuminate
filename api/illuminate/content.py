@@ -4,11 +4,9 @@ An Artifact node is a pointer — url, title, kind, source — and never the doc
 (schema.py: "Never a raw blob"). So "open the artifact" means one of two things, and this
 module provides both:
 
-1. `summarize()` reads the cached source payload that raw.py finds and presents it as
-   fields rather than JSON. Each payload shape has a field map: an award record shows
-   recipient, competition and period of performance; an LEI record shows legal name,
-   jurisdiction and registration status. A shape with no map falls back to flattening its
-   scalars, so every artifact renders as a table of fields rather than a blob.
+1. `summarize()` reads recognized cached source payloads through an explicit field
+   allowlist. Unknown shapes remain server-side rather than falling back to arbitrary
+   field disclosure.
 
 2. `document()` fetches the source document itself and dispatches on its content type:
    HTML is sanitised for a sandboxed frame and also reduced to plain text, PDFs and images
@@ -28,7 +26,6 @@ from html.parser import HTMLParser
 
 import httpx
 
-from .config import settings
 from .connectors.http import HttpError, fetch_document
 from .connectors.usaspending import is_sole_source
 
@@ -59,16 +56,14 @@ async def frameable(url: str) -> bool:
         return seen[0]
     ok = False
     try:
-        hdrs = {"User-Agent": settings.illuminate_user_agent, "Accept": "text/html,*/*"}
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            # Streamed so only the headers cross the wire; some hosts refuse HEAD outright.
-            async with client.stream("GET", url, headers=hdrs) as r:
-                xfo = (r.headers.get("x-frame-options") or "").lower()
-                csp = (r.headers.get("content-security-policy") or "").lower()
-                anc = re.search(r"frame-ancestors([^;]*)", csp)
-                ok = (r.status_code < 400
-                      and "deny" not in xfo and "sameorigin" not in xfo
-                      and (anc is None or "*" in anc.group(1)))
+        # Use the same bounded, redirect-by-redirect public-network policy as
+        # document retrieval. One byte is enough because only headers matter.
+        probe = await fetch_document(url, ttl=0, timeout=10.0, max_bytes=1)
+        xfo = (probe.get("x_frame_options") or "").lower()
+        csp = (probe.get("content_security_policy") or "").lower()
+        anc = re.search(r"frame-ancestors([^;]*)", csp)
+        ok = ("deny" not in xfo and "sameorigin" not in xfo
+              and (anc is None or "*" in anc.group(1)))
     except Exception:  # unreachable, TLS, DNS — nothing to frame either way
         ok = False
     _frame_seen[url] = (ok, time.time())
@@ -365,8 +360,7 @@ def detect(body) -> str | None:
 
 
 # --- node properties --------------------------------------------------------------
-# The Artifact node's own fields, named. Anything not listed still shows, under Other, so
-# a property a connector adds later is never silently dropped.
+# Only this explicit public projection may reach the browser.
 
 PROP_LABELS: list[tuple[str, str, str | None]] = [
     ("Kind", "kind", None), ("Source", "source", None), ("Published", "published_at", "date"),
@@ -376,9 +370,6 @@ PROP_LABELS: list[tuple[str, str, str | None]] = [
     ("Sentiment", "sentiment", None), ("Registration status", "registration_status", None),
     ("Expires", "expires", "date"), ("Quote", "quote", None),
 ]
-PROP_SKIP = {"id", "title", "url"} | {k for _, k, _ in PROP_LABELS}
-
-
 def _humanize(key: str) -> str:
     return key.replace("_", " ").strip().capitalize()
 
@@ -442,13 +433,11 @@ def _flatten(body, prefix: str = "", depth: int = 0) -> list[dict]:
 
 
 def summarize(props: dict, raw: list[dict]) -> dict:
-    """Node properties plus the best cached payload, as titled sections of fields."""
+    """Allowlisted node properties plus an allowlisted recognized payload."""
     sections: list[dict] = []
     named = [_field(label, FORMAT[fmt](props.get(key)) if fmt and props.get(key) is not None else props.get(key))
              for label, key, fmt in PROP_LABELS]
-    other = [_field(_humanize(k), v) for k, v in sorted(props.items())
-             if k not in PROP_SKIP and not isinstance(v, (dict, list))]
-    if s := _section("Record", named + other):
+    if s := _section("Record", named):
         sections.append(s)
 
     body = raw[0]["body"] if raw else None
@@ -466,7 +455,7 @@ def summarize(props: dict, raw: list[dict]) -> dict:
                         if why:
                             sec["note"] = why
         else:
-            payload = [s for s in [_section(label, _flatten(body))] if s]
+            payload = []
         if payload:
             payload[0]["source_note"] = f"{label} · {raw[0].get('match', '')}".strip(" ·")
             sections.extend(payload)
@@ -642,11 +631,13 @@ async def document(props: dict) -> dict:
     try:
         doc = await fetch_document(url)
     except HttpError as e:
+        # Do not retry the same destination via a different fetch path. In
+        # particular, status 0 includes destinations rejected by network policy.
         return {"status": "error", "url": url, "note": f"The source would not serve the document: {e}",
-                "frameable": await frameable(url)}
+                "frameable": False}
     except Exception as e:  # network down, DNS, TLS
         return {"status": "error", "url": url, "note": f"Could not fetch the source document: {e}",
-                "frameable": await frameable(url)}
+                "frameable": False}
 
     ctype = doc["content_type"]
     mime = ctype.split(";")[0].strip()
