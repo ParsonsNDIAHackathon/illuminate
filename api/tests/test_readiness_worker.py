@@ -412,15 +412,41 @@ async def test_health_route_reports_seeded_mission_readiness(monkeypatch):
     assert payload["required"]["seed"]["status"] == "ready"
     assert payload["status"] == "ready"
 
+async def test_stale_sources_degrade_status_without_disabling_primary_workflow(monkeypatch):
+    stale = {
+        "status": "ready", "reachable": True, "counts": {"nodes": 20, "relationships": 10},
+        "seed_version": "v1", "seed_status": "complete", "seed_root_id": "root",
+        "seed_primes": 2, "seed_subs": 3,
+        "seed_completed_at": datetime.now(timezone.utc).isoformat(),
+    }
 
-async def _health_response(monkeypatch, probe: dict, seeded: bool = False) -> dict:
+    async def stale_coverage(*args, **kwargs):
+        return [{"source": "fixture", "nodes": 20, "relationships": 10,
+                 "latest": "2020-01-01T00:00:00Z"}]
+
+    from illuminate import readiness
+    monkeypatch.setattr(readiness, "REGISTRY", [])
+    monkeypatch.setattr(readiness.db, "probe", lambda *args: _result(stale))
+    monkeypatch.setattr(readiness.db, "seed_coverage", lambda *args: _result({
+        "status": "validated", "root_exists": True, "primes": 2, "subs": 3,
+    }))
+    monkeypatch.setattr(readiness.db, "read", stale_coverage)
+    readiness._cache.clear()
+
+    payload = await readiness.build_readiness(refresh=True)
+    assert payload["primary_workflow_ready"] is True
+    assert payload["status"] == "degraded"
+    assert payload["freshness"]["status"] == "stale"
+    assert payload["freshness"]["action"]
+async def _health_response(monkeypatch, probe: dict, seeded: bool = False,
+                           coverage: dict | None = None) -> dict:
     from illuminate import readiness
     from illuminate.main import app
 
     monkeypatch.setattr(readiness, "REGISTRY", [])
     monkeypatch.setattr(readiness.db, "probe", lambda *args: _result(probe))
     monkeypatch.setattr(readiness.db, "read", _coverage if seeded else _empty_coverage)
-    monkeypatch.setattr(readiness.db, "seed_coverage", lambda *args: _result({
+    monkeypatch.setattr(readiness.db, "seed_coverage", lambda *args: _result(coverage or {
         "status": "validated", "root_exists": True, "primes": 2, "subs": 3,
     }))
     readiness._cache.clear()
@@ -433,3 +459,19 @@ async def _health_response(monkeypatch, probe: dict, seeded: bool = False) -> di
 
 async def _empty_coverage(*args, **kwargs):
     return []
+
+async def test_seed_verification_failure_is_explicit_even_with_populated_graph(monkeypatch):
+    incomplete = {
+        "status": "ready", "reachable": True, "counts": {"nodes": 20, "relationships": 10},
+        "seed_version": "v1", "seed_status": "complete", "seed_root_id": "root",
+        "seed_completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    payload = await _health_response(monkeypatch, incomplete, seeded=True, coverage={
+        "status": "unavailable", "root_exists": False, "primes": 0, "subs": 0,
+    })
+    assert payload["ok"] is True
+    assert payload["primary_workflow_ready"] is False
+    assert payload["status"] == "degraded"
+    assert payload["required"]["seed"]["status"] == "incomplete"
+    assert payload["required"]["seed"]["coverage"]["status"] == "unavailable"
+    assert payload["required"]["seed"]["action"]

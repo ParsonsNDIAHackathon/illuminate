@@ -139,6 +139,55 @@ async def test_public_http_contract_is_registered(fake_db):
         assert next(csv.DictReader(io.StringIO(csv_download.text)))["finding_id"]
 
 
+@pytest.mark.parametrize(
+    ("params", "status"),
+    [
+        ({"limit": 0}, 422),
+        ({"limit": exports.MAX_LIMIT + 1}, 422),
+        ({"format": "xml"}, 422),
+        ({"cursor": "not-a-token"}, 400),
+    ],
+)
+async def test_public_http_contract_rejects_invalid_page_requests(fake_db, params, status):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/exports/v1/findings", params=params)
+    assert response.status_code == status
+
+
+async def test_rejected_findings_are_filterable_and_cursor_preserves_policy(monkeypatch):
+    rows = [dict(ROWS[0]), {**ROWS[1], "status": "rejected"}]
+    events = [
+        {"finding_id": exports._stable_finding_id(row), "revision": i + 1,
+         "payload": exports._finding(row).model_dump_json()}
+        for i, row in enumerate(rows)
+    ]
+
+    async def sync():
+        return len(events)
+
+    async def read(query, params):
+        selected = [
+            event for event in events
+            if event["finding_id"] > params["after_id"]
+            and (params["include_rejected"]
+                 or exports.Finding.model_validate_json(event["payload"]).truth_status != "rejected")
+        ]
+        return sorted(selected, key=lambda event: event["finding_id"])[:params["fetch"]]
+
+    monkeypatch.setattr(exports, "_sync_export_ledger", sync)
+    monkeypatch.setattr(exports.db, "read", read)
+
+    excluded = await exports._page(1, None, None, False)
+    included = await exports._page(1, None, None, True)
+    assert [finding.truth_status for finding in excluded.findings] == ["committed"]
+    assert included.meta.next_cursor
+
+    continued = await exports._page(10, included.meta.next_cursor, None, False)
+    assert {finding.truth_status for finding in included.findings + continued.findings} == {
+        "committed", "rejected",
+    }
+
+
 async def test_formats_are_lossless(fake_db):
     page = await exports._page(10, None, None, False)
     ndjson = exports._render(page, "ndjson")
