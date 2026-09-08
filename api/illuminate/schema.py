@@ -23,10 +23,10 @@ LABELS: dict[str, str] = {
 # --- Relationship types ----------------------------------------------------------
 RELS: dict[str, str] = {
     "SUPPLIES": "(supplier:Entity)-[:SUPPLIES {tier, sole_source, contract_ref, amount, psc, naics}]->(consumer:Entity)",
-    "OWNS": "(parent:Entity)-[:OWNS {pct}]->(child:Entity) — direct ownership",
-    "ULTIMATE_PARENT_OF": "(ultimate:Entity)-[:ULTIMATE_PARENT_OF]->(child:Entity)",
+    "OWNS": "(parent:Entity)-[:OWNS {pct, effective_date, as_of_date}]->(child:Entity) — direct ownership",
+    "ULTIMATE_PARENT_OF": "(ultimate:Entity)-[:ULTIMATE_PARENT_OF {effective_date, as_of_date}]->(child:Entity)",
     "HELD_ROLE": "(p:Person)-[:HELD_ROLE {title, role_type ∈ {executive, board, both}, from, to, current}]->(e:Entity) — one edge per tenure",
-    "BENEFICIAL_OWNER_OF": "(p:Person)-[:BENEFICIAL_OWNER_OF {pct}]->(e:Entity)",
+    "BENEFICIAL_OWNER_OF": "(p:Person)-[:BENEFICIAL_OWNER_OF {pct, effective_date, as_of_date}]->(e:Entity)",
     "PROVIDES": "(e:Entity)-[:PROVIDES]->(c:Category)",
     "SUBCATEGORY_OF": "(c:Category)-[:SUBCATEGORY_OF]->(parent:Category)",
     "INCORPORATED_IN": "(e:Entity)-[:INCORPORATED_IN]->(l:Location)",

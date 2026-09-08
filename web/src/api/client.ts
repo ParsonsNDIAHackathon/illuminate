@@ -6,6 +6,19 @@ export interface EntitySummary {
   tier: number | string | null
   simulated: boolean
 }
+
+export interface OwnershipArtifact {
+  id: string
+  title?: string
+  url?: string
+  kind?: string
+  source?: string
+  retrieved_at?: string
+  source_status?: string
+  simulated?: boolean
+  evidence_id?: string
+  evidence_simulated?: boolean
+}
 async function request<T = any>(method: string, path: string, body?: any, headers?: Record<string, string>): Promise<T> {
   const r = await fetch(path, {
     method,
@@ -248,6 +261,11 @@ export async function getVendorRiskProfile(id: string, suppliedReport?: any): Pr
 
 export interface EntityReportContract {
   identity: EntitySummary & Record<string, unknown>
+  control?: {
+    direct_parents?: Record<string, unknown>[]
+    ultimate_parents?: Record<string, unknown>[]
+    ownership?: OwnershipRecord[]
+  }
   risk_contract?: EntityRiskContract
   risk?: (Partial<EntityRiskContract> & Record<string, unknown>)
   [key: string]: unknown
@@ -349,4 +367,29 @@ export interface CatalogContributionResult {
   idempotent: boolean
   submitted_at: string | null
   metadata: CatalogDatasetMetadata
+}
+
+export interface OwnershipRecord {
+  owner: { id?: string; name: string; kind: string }
+  relationship_type: 'direct' | 'ultimate_parent' | 'beneficial_owner' | 'unknown'
+  predicate: string
+  percentage: number | null
+  effective_date: string | null
+  as_of_date: string | null
+  relationship: { id?: string; present: boolean }
+  claim: {
+    id: string
+    status: string
+    source?: string
+    retrieved_at?: string
+    method?: string
+    confidence?: number
+  } | null
+  artifacts: OwnershipArtifact[]
+  truth_status: string
+  freshness: 'current' | 'stale' | 'unavailable'
+  conflicting: boolean
+  current: boolean
+  evidence_present: boolean
+  simulated: boolean
 }

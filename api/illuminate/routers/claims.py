@@ -41,10 +41,11 @@ class AnalystDecision(BaseModel):
 async def list_claims(
     status: ClaimStatus | None = None,
     entity_id: str | None = None,
+    claim_id: str | None = None,
     limit: int = Query(200, ge=1, le=MAX_PAGE_LIMIT),
     user: str = Depends(user_id),
 ):
-    return await claims.list_claims(status, entity_id, limit)
+    return await claims.list_claims(status, entity_id, limit, claim_id)
 
 
 @router.get("/source-records")

@@ -34,6 +34,37 @@
               <div v-if="!rep.news.length" class="text-body-2" style="opacity:.6">No news artifacts. Run enrichment with GDELT to fetch recent coverage.</div>
               <div v-for="n in rep.news" :key="n.id" class="text-body-2 my-1"><a :href="n.url" target="_blank" rel="noopener">{{ n.title }}</a> <span class="text-caption" style="opacity:.7">{{ n.domain }} · {{ n.published_at }}<span v-if="n.sentiment"> · sentiment {{ n.sentiment }}</span></span></div>
             </v-card-text></v-card>
+            <v-card variant="outlined" class="mb-3"><v-card-text>
+              <div class="d-flex align-center ga-2 mb-2"><span class="section">Ownership</span><v-spacer /><span class="text-caption">{{ rep.control.ownership?.length || 0 }} records</span></div>
+              <div v-if="!rep.control.ownership?.length" class="missing-copy">Ownership unavailable. No ownership relationships or claims are on record.</div>
+              <div class="ownership-grid">
+                <article v-for="o in rep.control.ownership || []" :key="o.claim?.id || o.relationship.id" class="ownership-record" :class="{ 'finding-simulated': o.simulated }">
+                  <div class="d-flex align-center flex-wrap ga-2">
+                    <strong><router-link v-if="o.owner.id && o.owner.kind !== 'Person'" :to="`/entities/${o.owner.id}`">{{ o.owner.name }}</router-link><span v-else>{{ o.owner.name }}</span></strong>
+                    <v-chip size="x-small" variant="outlined">{{ ownershipLabel(o.relationship_type) }}</v-chip>
+                    <TruthBadge :value="o.simulated ? 'simulated' : o.truth_status" />
+                    <TruthBadge :value="o.freshness" />
+                  </div>
+                  <dl class="ownership-details">
+                    <dt>Percentage</dt><dd>{{ formatOwnershipPercentage(o.percentage) }}</dd>
+                    <dt>Effective</dt><dd>{{ o.effective_date || 'Unavailable' }}</dd>
+                    <dt>As of</dt><dd>{{ o.as_of_date || 'Unavailable' }}</dd>
+                    <dt>Claim</dt><dd><TruthBadge :value="o.claim?.status || 'unavailable'" /></dd>
+                    <dt>Source</dt><dd>{{ o.claim?.source || 'Unavailable' }}</dd>
+                    <dt>Retrieved</dt><dd>{{ formatDate(o.claim?.retrieved_at) }}</dd>
+                    <dt>Method</dt><dd>{{ o.claim?.method || 'Unavailable' }}</dd>
+                    <dt>Confidence</dt><dd>{{ formatConfidence(o.claim?.confidence) }}</dd>
+                  </dl>
+                  <div v-if="o.simulated" class="simulation-copy">Training scenario only — not verified ownership.</div>
+                  <div class="deep-links">
+                    <v-btn v-if="o.claim?.id" size="x-small" variant="text" prepend-icon="mdi-check-decagram" :to="{ path: '/claims', query: { entity_id: props.id, status: o.claim.status, claim_id: o.claim.id } }">Inspect claim</v-btn>
+                    <span v-else class="evidence-unavailable">No backing claim — unsupported</span>
+                    <v-btn v-for="a in o.artifacts" :key="a.id" size="x-small" variant="text" prepend-icon="mdi-file-document-outline" @click="rawId = a.id">{{ a.title || 'Inspect artifact' }}</v-btn>
+                    <span v-if="o.claim && !o.artifacts.length" class="evidence-unavailable">No backing artifact available</span>
+                  </div>
+                </article>
+              </div>
+            </v-card-text></v-card>
             <v-card variant="outlined"><v-card-text>
               <span class="section">Supply relationships</span>
               <v-table density="compact"><thead><tr><th>Supplies</th><th>Tier</th><th>PSC</th><th>Sole source</th><th>Amount</th><th>Contract</th><th>Source</th></tr></thead>
@@ -167,7 +198,6 @@
       <v-window-item value="artifacts">
         <v-table density="compact"><thead><tr><th>Kind</th><th>Title</th><th>Source</th><th>Date</th><th>View</th></tr></thead>
           <tbody><tr v-for="a in rep.artifacts" :key="a.id" :class="{ 'finding-simulated': a.simulated }"><td>{{ a.kind }} <TruthBadge v-if="a.simulated" value="simulated" /></td><td><SourceLink :href="a.url" :artifact-id="a.id">{{ a.title }}</SourceLink><div v-if="a.simulated" class="simulation-copy">Training scenario only — not a real allegation.</div></td><td>{{ a.source }}</td><td>{{ a.published_at || (a.retrieved_at || '').slice(0, 10) }}</td><td><v-btn icon="mdi-text-box-search-outline" size="x-small" variant="text" title="View contents" @click="rawId = a.id" /></td></tr></tbody></v-table>
-        <ArtifactViewer :artifact-id="rawId" @close="rawId = null" />
         <p v-if="!rep.artifacts.length" class="text-body-2 mt-2" style="opacity:.6">No artifacts attached yet.</p>
       </v-window-item>
       <v-window-item value="graph">
@@ -192,6 +222,7 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+    <ArtifactViewer :artifact-id="rawId" @close="rawId = null" />
   </v-container>
   <v-container v-else><v-progress-linear indeterminate /></v-container>
 </template>
@@ -251,6 +282,8 @@ function formatDate(value?: string) { return value ? new Date(value).toLocaleStr
 function formatConfidence(value?: number | null) { return value == null ? 'Unavailable' : `${Math.round(value * 100)}%` }
 function formatPercent(value?: number | null) { return value == null ? 'Unavailable' : `${Math.round(value * 100)}%` }
 function formatSoleSource(value: unknown) { return value === true ? 'yes' : value === false ? 'no' : 'Unavailable' }
+function ownershipLabel(value: string) { return ({ direct: 'Direct owner', ultimate_parent: 'Ultimate parent', beneficial_owner: 'Beneficial owner' } as Record<string, string>)[value] || labelize(value) }
+function formatOwnershipPercentage(value?: number | null) { return value == null ? 'Unavailable' : `${Number(value).toLocaleString()}%` }
 function supplyEvidence(s: any) {
   if (!s.edge_id) return undefined
   return rep.value?.supply?.risk_evidence?.find((e: any) => e.evidence_id === s.edge_id)
@@ -335,6 +368,9 @@ dt { opacity: .6; } dd { margin: 0; }
 .gap-row { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 6px; font-size: 12px; }
 .gap-row .v-chip { margin-left: 3px; }
 .deep-links { display: flex; flex-wrap: wrap; }
+.ownership-grid { display: grid; gap: 10px; }
+.ownership-record { min-width: 0; padding: 10px; border: thin solid rgba(0,0,0,.12); border-radius: 5px; }
+.ownership-details { grid-template-columns: 90px minmax(0, 1fr); }
 .mono { font-family: ui-monospace, monospace; }
 .decision-boundary { margin-top: 8px; opacity: .72; font-size: 12px; }
 .decision-details { grid-template-columns: 80px 1fr; }

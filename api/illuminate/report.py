@@ -117,7 +117,136 @@ async def entity_core(entity_id: str) -> dict | None:
     r["parent_seat_evidence"] = [
         x for x in (ownership[0].get("evidence") if ownership else []) if x.get("id")
     ]
+    r["ownership"] = await ownership_records(entity_id)
     return r
+
+
+OWNERSHIP_TYPES = {
+    "OWNS": "direct",
+    "ULTIMATE_PARENT_OF": "ultimate_parent",
+    "BENEFICIAL_OWNER_OF": "beneficial_owner",
+}
+
+
+def _ownership_freshness(retrieved_at: str | None) -> str:
+    if not retrieved_at:
+        return "unavailable"
+    try:
+        observed = datetime.fromisoformat(retrieved_at.replace("Z", "+00:00"))
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return "unavailable"
+    return "stale" if (datetime.now(timezone.utc) - observed).days > 365 else "current"
+
+
+def _ownership_record(row: dict, *, relationship_present: bool) -> dict:
+    artifacts = [a for a in (row.get("artifacts") or []) if a and a.get("id")]
+    claim_status = row.get("claim_status")
+    evidence_present = bool(row.get("claim_id") and artifacts)
+    freshness = _ownership_freshness(row.get("claim_retrieved_at"))
+    conflicting = bool(relationship_present and claim_status and claim_status != "committed")
+    simulated = any((
+        row.get("owner_simulated"),
+        row.get("relationship_simulated"),
+        row.get("claim_simulated"),
+        any(a.get("simulated") or a.get("evidence_simulated") for a in artifacts),
+    ))
+    return {
+        "owner": {
+            "id": row.get("owner_id"),
+            "name": row.get("owner_name") or "Unavailable",
+            "kind": row.get("owner_kind") or "Unavailable",
+        },
+        "relationship_type": OWNERSHIP_TYPES.get(row.get("predicate"), "unknown"),
+        "predicate": row.get("predicate"),
+        "percentage": row.get("percentage"),
+        "effective_date": row.get("effective_date"),
+        "as_of_date": row.get("as_of_date"),
+        "relationship": {
+            "id": row.get("relationship_id"),
+            "present": relationship_present,
+        },
+        "claim": {
+            "id": row.get("claim_id"),
+            "status": claim_status or "unavailable",
+            "source": row.get("claim_source"),
+            "retrieved_at": row.get("claim_retrieved_at"),
+            "method": row.get("claim_method"),
+            "confidence": row.get("claim_confidence"),
+        } if row.get("claim_id") else None,
+        "artifacts": artifacts,
+        "truth_status": (
+            "conflicting" if conflicting
+            else "superseded" if claim_status == "committed" and not relationship_present
+            else "stale" if claim_status == "committed" and evidence_present and freshness == "stale"
+            else "unsupported" if claim_status == "committed" and not evidence_present
+            else claim_status or "unsupported"
+        ),
+        "freshness": freshness,
+        "conflicting": conflicting,
+        "current": bool(relationship_present and claim_status == "committed"),
+        "evidence_present": evidence_present,
+        "simulated": bool(simulated),
+    }
+
+
+async def ownership_records(entity_id: str) -> list[dict]:
+    """Return claim-current ownership facts without treating copied edge metadata as evidence."""
+    claim_rows = await db.read(
+        """
+        MATCH (c:Claim)-[:ASSERTS]->(owner)
+        MATCH (c)-[:TARGETS]->(target)
+        WHERE target.id=$id AND c.predicate IN ['OWNS','ULTIMATE_PARENT_OF','BENEFICIAL_OWNER_OF']
+        OPTIONAL MATCH (owner)-[r]->(target)
+          WHERE type(r)=c.predicate AND r.claim_id=c.id
+        OPTIONAL MATCH (a:Artifact)-[ev:EVIDENCES]->(c)
+        WITH c, owner, r, collect(DISTINCT a{
+          .id,.title,.url,.kind,.source,.retrieved_at,.source_status,.simulated,
+          evidence_id:coalesce(ev.id, elementId(ev)),
+          evidence_simulated:coalesce(ev.simulated,false)
+        }) AS artifacts
+        RETURN owner.id AS owner_id, owner.name AS owner_name,
+               coalesce(owner.kind, head(labels(owner))) AS owner_kind,
+               coalesce(owner.simulated,false) AS owner_simulated,
+               c.predicate AS predicate, c.id AS claim_id, c.status AS claim_status,
+               c.source AS claim_source, c.retrieved_at AS claim_retrieved_at,
+               c.method AS claim_method, c.confidence AS claim_confidence,
+               coalesce(c.simulated,false) AS claim_simulated,
+               coalesce(r.id, elementId(r)) AS relationship_id,
+               coalesce(r.simulated,false) AS relationship_simulated,
+               coalesce(r.pct, apoc.convert.fromJsonMap(coalesce(c.rel_props,'{}')).pct) AS percentage,
+               coalesce(r.effective_date, r.from, apoc.convert.fromJsonMap(coalesce(c.rel_props,'{}')).effective_date,
+                        apoc.convert.fromJsonMap(coalesce(c.rel_props,'{}')).from) AS effective_date,
+               coalesce(r.as_of_date, r.to, apoc.convert.fromJsonMap(coalesce(c.rel_props,'{}')).as_of_date,
+                        apoc.convert.fromJsonMap(coalesce(c.rel_props,'{}')).to) AS as_of_date,
+               artifacts
+        ORDER BY c.retrieved_at DESC, owner.name
+        """,
+        {"id": entity_id},
+    )
+    edge_rows = await db.read(
+        """
+        MATCH (owner)-[r:OWNS|ULTIMATE_PARENT_OF|BENEFICIAL_OWNER_OF]->(target:Entity {id:$id})
+        WHERE r.claim_id IS NULL
+        RETURN owner.id AS owner_id, owner.name AS owner_name,
+               coalesce(owner.kind, head(labels(owner))) AS owner_kind,
+               coalesce(owner.simulated,false) AS owner_simulated,
+               type(r) AS predicate, null AS claim_id, null AS claim_status,
+               null AS claim_source, null AS claim_retrieved_at,
+               null AS claim_method, null AS claim_confidence, false AS claim_simulated,
+               coalesce(r.id, elementId(r)) AS relationship_id,
+               coalesce(r.simulated,false) AS relationship_simulated,
+               r.pct AS percentage, coalesce(r.effective_date,r.from) AS effective_date,
+               coalesce(r.as_of_date,r.to) AS as_of_date, [] AS artifacts
+        ORDER BY owner.name
+        """,
+        {"id": entity_id},
+    )
+    return (
+        [_ownership_record(row, relationship_present=bool(row.get("relationship_id"))) for row in claim_rows]
+        + [_ownership_record(row, relationship_present=True) for row in edge_rows]
+    )
 
 
 async def supply_position(entity_id: str, root_id: str | None) -> dict:
@@ -858,7 +987,11 @@ async def build_report(entity_id: str, root_id: str | None = None) -> dict | Non
             "incorporated": core.get("incorporated"), "parent_seat": core.get("parent_seat"),
             "manufactures": core.get("manufactures"), "operates": core.get("operates"),
         },
-        "control": {"direct_parents": core.get("direct_parents"), "ultimate_parents": core.get("ultimate_parents")},
+        "control": {
+            "direct_parents": core.get("direct_parents"),
+            "ultimate_parents": core.get("ultimate_parents"),
+            "ownership": core.get("ownership") or [],
+        },
         "categories": core.get("categories"),
         "supply": supply,
         "people": ppl,

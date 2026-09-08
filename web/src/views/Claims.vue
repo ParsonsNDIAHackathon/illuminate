@@ -59,13 +59,15 @@ const requestedStatus = String(route.query.status || '')
 const status = ref(['staged', 'committed', 'rejected'].includes(requestedStatus) ? requestedStatus : 'staged'); const items = ref<any[]>([]); const loading = ref(false); const rawId = ref<string | null>(null)
 const entityId = String(route.query.entity_id || '')
 const programId = String(route.query.program_id || '')
+const claimId = String(route.query.claim_id || '')
 const history = ref<DecisionHistory['events']>([])
 const reviewDialog = ref(false); const reviewAction = ref<'commit' | 'reject'>('commit'); const reviewClaimId = ref(''); const reviewRationale = ref(''); const reviewSaving = ref(false); const reviewError = ref('')
 const headers = [{ title: 'Assertion', key: 'assertion', width: 360 }, { title: 'Truth status', key: 'status', width: 120 }, { title: 'Source lineage', key: 'source', width: 220 }, { title: 'Evidence', key: 'artifacts', width: 140 }, { title: 'Retrieved', key: 'when', width: 140 }, { title: '', key: 'actions', width: 170 }]
 async function load() {
   loading.value = true
   try {
-    items.value = await api.get(`/api/claims?status=${status.value}${entityId ? `&entity_id=${encodeURIComponent(entityId)}` : ''}&limit=500`)
+    const loaded = await api.get<any[]>(`/api/claims?status=${status.value}${entityId ? `&entity_id=${encodeURIComponent(entityId)}` : ''}${claimId ? `&claim_id=${encodeURIComponent(claimId)}` : ''}&limit=500`)
+    items.value = claimId ? loaded.filter(item => item.claim.id === claimId) : loaded
     history.value = entityId ? (await api.get<DecisionHistory>(`/api/claims/entities/${encodeURIComponent(entityId)}/history${programId ? `?program_id=${encodeURIComponent(programId)}` : ''}`)).events : []
   } finally { loading.value = false }
 }

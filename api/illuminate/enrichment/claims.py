@@ -333,7 +333,12 @@ def connector_error_metadata(error: Exception) -> dict:
     return {"connector_error": summary, "connector_error_type": error_type, "connector_error_status": status}
 
 
-async def list_claims(status: str | None = None, entity_id: str | None = None, limit: int = 200) -> list[dict]:
+async def list_claims(
+    status: str | None = None,
+    entity_id: str | None = None,
+    limit: int = 200,
+    claim_id: str | None = None,
+) -> list[dict]:
     limit = max(1, min(int(limit), 500))
     where = ["1=1"]
     params: dict = {"limit": limit}
@@ -343,6 +348,10 @@ async def list_claims(status: str | None = None, entity_id: str | None = None, l
     if entity_id:
         where.append("(c.subject_id = $eid OR c.object_id = $eid)")
         params["eid"] = entity_id
+    if claim_id:
+        where.append("c.id = $claim_id")
+        params["claim_id"] = claim_id
+        params["limit"] = 1
     return await db.read(
         f"""
         MATCH (c:Claim) WHERE {' AND '.join(where)}
