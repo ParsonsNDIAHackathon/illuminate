@@ -32,6 +32,43 @@ async def test_worker_failure_is_truthful_and_sanitized(monkeypatch):
     assert job.results["test"]["attempts"] == 2
 
 
+async def test_live_worker_rejects_simulated_connector_output_before_writing(monkeypatch):
+    class SimulatedConnector:
+        name = "simulated"
+        trust = "authoritative"
+
+        async def status(self, user):
+            return {"connected": True}
+
+        async def enrich(self, entity, user):
+            return [
+                Fact(
+                    subject=NodeRef("Entity", "e", {"simulated": True}),
+                    predicate="attr:uei",
+                    value="not-production-evidence",
+                )
+            ]
+
+    staged = False
+
+    async def stage(*args, **kwargs):
+        nonlocal staged
+        staged = True
+
+    monkeypatch.setattr("illuminate.enrichment.worker.get_connector", lambda name: SimulatedConnector())
+    monkeypatch.setattr("illuminate.enrichment.worker.db.read", _entity)
+    monkeypatch.setattr("illuminate.enrichment.worker.db.write", lambda *args, **kwargs: _result({}))
+    monkeypatch.setattr("illuminate.enrichment.worker.claims.stage", stage)
+    monkeypatch.setattr(Worker, "_refresh_summary", _no_summary)
+
+    job = Job("j-simulated", "e", "Entity", ["simulated"], retrieval_mode="operational_live")
+    await Worker().run(job)
+
+    assert job.status == "failed"
+    assert staged is False
+    assert "simulated" not in job.results["simulated"]["error"]
+
+
 async def _entity(*args, **kwargs):
     return [{"name": "Entity", "e": {"id": "e", "name": "Entity"}}]
 

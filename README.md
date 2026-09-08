@@ -35,6 +35,40 @@ secret in commands, remote URLs, files, or Git configuration.
 Requires Docker and `make`. For the host-side dev loop (hot reload) you also need
 Python ≥ 3.12 and Node ≥ 20.
 
+
+### Validate data sources
+
+The connector contract suite is deterministic and does not require network
+access, Neo4j, or connector credentials:
+
+```bash
+cd api
+uv run pytest tests/test_connector_output_contracts.py \
+  tests/test_live_source_validation.py tests/test_connector_diagnostics.py \
+  tests/test_source_coverage_contract.py tests/test_source_lineage.py
+```
+
+Live source checks are separate, bounded, read-only diagnostics. They do not run
+enrichment or write to the graph. Explicitly enable them after configuring any
+credential-gated connectors through the application:
+
+```bash
+cd api
+ILLUMINATE_LIVE_SOURCE_TESTS=1 uv run pytest -m live_sources -vv
+```
+
+To print the same checks as a JSON summary:
+
+```bash
+cd api
+uv run illuminate-validate-sources
+```
+
+Each source reports `passed`, `skipped`, `authentication_failed`, `unavailable`,
+or `contract_failed`. A skip names the missing credential; authentication and
+provider failures are normalized so credentials and raw upstream responses are
+never printed.
+
 ## Start
 
 ```bash

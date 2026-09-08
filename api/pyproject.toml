@@ -24,6 +24,7 @@ dev = ["pytest", "pytest-asyncio"]
 illuminate-api = "illuminate.main:run"
 illuminate-mcp = "illuminate.mcp_server:run"
 illuminate-seed = "illuminate.seed.seed:main"
+illuminate-validate-sources = "illuminate.connectors.validation:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -35,3 +36,6 @@ include = ["illuminate*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+  "live_sources: opt-in bounded read-only checks against configured upstream services",
+]

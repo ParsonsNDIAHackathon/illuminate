@@ -12,6 +12,7 @@ from .. import db, events
 from ..config import settings
 from ..connectors import REGISTRY, get_connector
 from ..connectors.http import RetrievalMode, retrieval_context
+from ..connectors.validation import validate_facts
 from . import claims
 from . import checkpoints
 from .sources import select_connectors
@@ -226,6 +227,8 @@ class Worker:
                 try:
                     with retrieval_context(job.retrieval_mode) as retrievals:
                         facts = await asyncio.wait_for(conn.enrich(entity, job.user), timeout=settings.connector_timeout_s)
+                    if job.retrieval_mode == "operational_live":
+                        validate_facts(name, facts)
                     res["status"] = "running"
                     res["error"] = None
                     res.pop("action", None)
@@ -233,9 +236,13 @@ class Worker:
                         res["recovered_after_attempts"] = attempt
                     break
                 except (asyncio.TimeoutError, TimeoutError) as error:
+                    facts = None
                     connector_error = error
                     res.update(status="timed_out", error="connector timed out", action="retry later; no fallback evidence was retrieved")
                 except Exception as error:
+                    # Validation happens after enrich returns. Never retain and
+                    # process the assigned list when that validation rejects it.
+                    facts = None
                     connector_error = error
                     safe_error = claims.connector_error_metadata(error)["connector_error"]
                     res.update(status="failed", error=f"{safe_error}: connector failed", action="check service availability and retry")
