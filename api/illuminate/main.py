@@ -18,8 +18,7 @@ from .routers import settings as settings_router
 from .schema import ensure_schema
 from .tools.permissions import gate
 from .routers import catalog, chat, claims, connectors, enrichment, exports, graph, permissions, query
-
-from .mcp_server import build_server
+from .mcp_server import AuthenticatedMCP, build_server
 
 
 class _MCPMount:
@@ -52,7 +51,8 @@ async def lifespan(app: FastAPI):
     worker.start()
     # MCP over streamable HTTP, same handlers (D1). Its session manager has its own lifespan; run it inside ours.
     server = build_server()
-    _mcp_mount.app = server.streamable_http_app(streamable_http_path="/", stateless_http=True, json_response=True, host="0.0.0.0")
+    transport = server.streamable_http_app(streamable_http_path="/", stateless_http=True, json_response=True, host="0.0.0.0")
+    _mcp_mount.app = AuthenticatedMCP(transport)
     async with server.session_manager.run():
         yield
     _mcp_mount.app = None

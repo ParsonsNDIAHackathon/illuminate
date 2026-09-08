@@ -14,6 +14,7 @@ import hashlib
 from .. import db
 from ..connectors.base import Fact, NodeRef, now_iso
 from ..connectors.http import HttpError
+from ..connectors.http import scrub
 from ..ids import artifact_id, claim_id, edge_id
 from ..schema import RELS
 from ..connectors.registry import source_metadata
@@ -95,7 +96,8 @@ async def stage(fact: Fact, *, source: str, trust: str, model: str | None = None
         parts.append("MERGE (c)-[rt:TARGETS]->(o) ON CREATE SET rt.id=$rid2")
     if fact.artifact:
         a = fact.artifact
-        params.update({"aid": artifact_id(a.url), "aurl": a.url, "atitle": a.title[:300], "akind": a.kind, "asource": a.source or source, "apub": a.published_at,
+        safe_url = scrub(a.url)
+        params.update({"aid": artifact_id(safe_url), "aurl": safe_url, "atitle": a.title[:300], "akind": a.kind, "asource": a.source or source, "apub": a.published_at,
                        "aprops": {k: v for k, v in a.props.items() if v is not None}})
         parts += [
             "MERGE (a:Artifact {id:$aid}) ON CREATE SET a.url=$aurl, a.title=$atitle, a.kind=$akind, a.source=$asource, "
@@ -316,6 +318,7 @@ def connector_error_metadata(error: Exception) -> dict:
 
 
 async def list_claims(status: str | None = None, entity_id: str | None = None, limit: int = 200) -> list[dict]:
+    limit = max(1, min(int(limit), 500))
     where = ["1=1"]
     params: dict = {"limit": limit}
     if status:
@@ -338,6 +341,7 @@ async def list_claims(status: str | None = None, entity_id: str | None = None, l
 
 async def list_source_records(entity_id: str | None = None, limit: int = 200) -> list[dict]:
     """Expose successful cached retrievals and failures without promoting either to findings."""
+    limit = max(1, min(int(limit), 500))
     where = "WHERE r.entity_id = $entity_id" if entity_id else ""
     return await db.read(
         f"MATCH (r:SourceRecord) {where} RETURN r{{.*}} AS source_record "

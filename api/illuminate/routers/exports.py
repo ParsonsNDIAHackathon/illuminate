@@ -636,7 +636,7 @@ async def sample():
 
 @router.get("/findings", response_model=None)
 async def findings(limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT), cursor: str | None = None,
-                   format: Literal["json", "ndjson", "csv"] = "json", include_rejected: bool = True):
+                   format: Literal["json", "ndjson", "csv"] = "json", include_rejected: bool = False):
     return _render(await _page(limit, cursor, None, include_rejected), format)
 
 

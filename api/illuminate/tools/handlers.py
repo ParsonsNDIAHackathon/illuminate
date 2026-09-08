@@ -13,6 +13,7 @@ from typing import Any
 
 from .. import db
 from ..config import load_workspace
+from ..connectors.http import scrub
 from ..cypher.templates import TEMPLATES
 from ..cypher.validator import CypherRejected, validate
 from ..graphio import merge_subgraphs, rows_clean, subgraph_from_graph
@@ -32,12 +33,13 @@ _TOOL_DATA_FIELDS = {
     # leave the application through model/MCP projections.
     "run_cypher": {"classification", "row_count", "counters", "error"},
     "propose_entity": {"entity_id", "resolved_existing", "possible_duplicates", "counters", "note", "error"},
-    "attach_evidence": {"claim_id", "artifact_id", "counters", "error"},
+    "attach_evidence": {"claim_id", "artifact_id", "status", "note", "counters", "error"},
     "set_styles": {"applied", "legend", "error"},
     "get_entity_report": {
         "identity", "risk", "summary", "error",
     },
     "enrich_entity": {"job_id", "entity", "connectors", "status", "note", "error"},
+    "discover_suppliers": {"job_id", "program", "search", "status", "note", "hint", "error"},
 }
 
 
@@ -394,27 +396,35 @@ async def propose_entity(ctx: ToolContext, name: str, kind: str = "organization"
 
 async def attach_evidence(ctx: ToolContext, subject_id: str, predicate: str, source_url: str, object_id: str | None = None, object_value: str | None = None,
                           title: str | None = None, source: str = "user", confidence: float = 0.7, note: str | None = None) -> ToolResult:
+    parsed_source = urlsplit(source_url)
+    if parsed_source.scheme not in ("http", "https") or not parsed_source.hostname or parsed_source.username or parsed_source.password:
+        return ToolResult(ok=False, data={"error": "source_url must be an HTTP(S) URL without credentials"})
+    source_url = scrub(source_url)
+    confidence = max(0.0, min(float(confidence), 1.0))
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     params = {"sid": subject_id, "pred": predicate, "oid": object_id, "oval": object_value, "url": source_url, "title": title or source_url,
-              "source": source, "conf": float(confidence), "note": note, "now": now, "cid": claim_id(), "aid": artifact_id(source_url), "rid1": edge_id(), "rid2": edge_id(), "rid3": edge_id()}
+              "source": source[:100], "conf": confidence, "note": note, "now": now, "cid": claim_id(), "aid": artifact_id(source_url),
+              "rid1": edge_id(), "rid2": edge_id(), "rid3": edge_id(), "rid4": edge_id()}
     stmt = [
         "MATCH (s) WHERE s.id = $sid",
         "MERGE (c:Claim {id:$cid}) ON CREATE SET c.predicate=$pred, c.subject_id=$sid, c.object_id=$oid, c.object_value=$oval, c.source=$source, c.source_url=$url,",
-        "  c.method='human', c.confidence=$conf, c.status='committed', c.retrieved_at=$now, c.detail=$note",
+        "  c.method='human', c.confidence=$conf, c.status='staged', c.source_status='staged', c.retrieved_at=$now, c.detail=$note",
         "MERGE (c)-[ra:ASSERTS]->(s) ON CREATE SET ra.id=$rid1",
         "MERGE (a:Artifact {id:$aid}) ON CREATE SET a.url=$url, a.title=$title, a.kind='document', a.source=$source, a.retrieved_at=$now",
         "MERGE (a)-[re:EVIDENCES]->(c) ON CREATE SET re.id=$rid2",
         "MERGE (a)-[rb:ABOUT]->(s) ON CREATE SET rb.id=$rid3",
     ]
     if object_id:
-        stmt += ["WITH c, s, a MATCH (o) WHERE o.id = $oid MERGE (c)-[rt:TARGETS]->(o) ON CREATE SET rt.id=$rid3"]
+        stmt += ["WITH c, s, a MATCH (o) WHERE o.id = $oid MERGE (c)-[rt:TARGETS]->(o) ON CREATE SET rt.id=$rid4"]
     stmt.append("RETURN c.id AS claim_id, a.id AS artifact_id")
     statement = "\n".join(stmt)
     v = validate(statement, params=params)
     decision = await gate.request(v, params, source=ctx.source, conversation_id=ctx.conversation_id, tool="attach_evidence", rationale=f"Attach evidence: {predicate} on {subject_id}")
     perm = {"status": decision.status, "request_id": decision.request_id, "reason": decision.reason}
     if decision.status == "executed":
-        return ToolResult(ok=True, data={"claim_id": params["cid"], "artifact_id": params["aid"], "counters": decision.result["counters"]}, cypher=v.statement, params=params, permission=perm)
+        return ToolResult(ok=True, data={"claim_id": params["cid"], "artifact_id": params["aid"], "status": "staged",
+                                         "note": "Evidence is staged until a workspace reviewer commits or rejects the claim.",
+                                         "counters": decision.result["counters"]}, cypher=v.statement, params=params, permission=perm)
     return ToolResult(ok=False, data={"error": f"write {decision.status}: {decision.reason or ''}".strip()}, cypher=v.statement, params=params, permission=perm)
 
 async def discover_suppliers(ctx: ToolContext, entity_id: str, keywords: list[str], agency: str | None = None, since: str | None = None,

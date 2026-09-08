@@ -154,16 +154,25 @@ if [ "$(curl --max-time "$probe_timeout" -sS -o /dev/null -w '%{http_code}' \
   echo "Production MCP redirect failed its startup probe." >&2
   exit 1
 fi
-mcp_json="$(curl --max-time "$probe_timeout" -fsS -X POST "http://127.0.0.1:$PORT/mcp/" \
-  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
-  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"startup-probe","version":"1"}}}')"
-if ! "$PYTHON" -c \
-  'import json,sys; r=json.load(sys.stdin); raise SystemExit(0 if r.get("result") else 1)' \
-  <<<"$mcp_json"; then
-  echo "Production MCP transport failed its startup probe." >&2
-  exit 1
+if [ -n "${ILLUMINATE_MCP_HTTP_TOKEN:-}" ]; then
+  mcp_json="$(curl --max-time "$probe_timeout" -fsS -X POST "http://127.0.0.1:$PORT/mcp/" \
+    -H "authorization: Bearer $ILLUMINATE_MCP_HTTP_TOKEN" \
+    -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+    --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"startup-probe","version":"1"}}}')"
+  if ! "$PYTHON" -c \
+    'import json,sys; r=json.load(sys.stdin); raise SystemExit(0 if r.get("result") else 1)' \
+    <<<"$mcp_json"; then
+    echo "Authenticated production MCP transport failed its startup probe." >&2
+    exit 1
+  fi
+else
+  if [ "$(curl --max-time "$probe_timeout" -sS -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:$PORT/mcp/")" != "503" ]; then
+    echo "Disabled production MCP transport did not fail closed." >&2
+    exit 1
+  fi
 fi
-echo "Illuminate production runtime is ready (API, SPA, and MCP)."
+echo "Illuminate production runtime is ready (API, SPA, and protected MCP boundary)."
 
 wait -n "$NEO4J_PID" "$API_PID"
 echo "A required production process exited; shutting down." >&2

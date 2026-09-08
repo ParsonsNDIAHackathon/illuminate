@@ -18,7 +18,7 @@
       <v-tabs v-model="tab" density="compact">
         <v-tab value="details">Details</v-tab>
         <v-tab value="document">Document</v-tab>
-        <v-tab value="raw">Raw JSON</v-tab>
+        <v-tab value="metadata">Metadata</v-tab>
       </v-tabs>
 
       <v-card-text>
@@ -51,21 +51,12 @@
             </SourceDocument>
           </v-window-item>
 
-          <v-window-item value="raw">
-            <section v-for="(r, i) in data.raw" :key="i">
-              <h4 class="d-flex align-center ga-2">
-                Cached payload <span class="text-caption" style="text-transform:none;letter-spacing:0">· {{ r.match }}</span>
-                <v-spacer />
-                <v-btn size="x-small" variant="text" prepend-icon="mdi-content-copy" @click="copy(r.body)">copy</v-btn>
-              </h4>
-              <div class="text-caption mono mb-1"><a :href="r.url" target="_blank" rel="noopener">{{ r.url }}</a><span v-if="r.retrieved_at"> · cached {{ String(r.retrieved_at).slice(0, 10) }}</span></div>
-              <pre class="json">{{ pretty(r.body) }}</pre>
-            </section>
+          <v-window-item value="metadata">
             <section>
-              <h4>Node properties</h4>
+              <h4>Artifact metadata</h4>
               <pre class="json">{{ pretty(art) }}</pre>
             </section>
-            <p v-if="!data.raw?.length" class="text-body-2 mt-3" style="opacity:.7">No cached source payload for this artifact. It was recorded from a source that is not cached locally (a bulk list, a web page) or its cache entry has expired; the source page link above is still the record of origin.</p>
+            <p class="text-body-2 mt-3" style="opacity:.7">Cached connector payloads remain server-side. Use the safe details and source document views for review.</p>
           </v-window-item>
 
         </v-window>

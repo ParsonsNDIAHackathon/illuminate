@@ -39,7 +39,8 @@ Seeding runs inside the api container when the stack is up, so it needs no host 
 under `make dev` it uses the host venv instead.
 
 Other addresses: API and docs at http://localhost:8000/docs, Neo4j browser at
-http://localhost:7474 (`neo4j` / `illuminate-dev`). `make down` stops everything and keeps
+http://localhost:7474. Set unique `NEO4J_PASSWORD` and `SESSION_SECRET` environment
+values before `make up`; the username is `neo4j`. `make down` stops everything and keeps
 the data. `make dev` runs Neo4j in Docker with the API and web on the host with hot reload
 (web on http://localhost:5173).
 

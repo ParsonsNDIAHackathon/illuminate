@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from pathlib import Path
 from typing import Literal
 
@@ -18,12 +19,12 @@ class Settings(BaseSettings):
 
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
-    neo4j_password: str = "illuminate-dev"
+    neo4j_password: str = ""
     neo4j_database: str = "neo4j"
 
     illuminate_data_dir: Path = Path("./data")
     illuminate_cors_origins: str = "http://localhost:5173,http://localhost:8080"
-    illuminate_user_agent: str = "Illuminate/0.1 (berge472@gmail.com)"
+    illuminate_user_agent: str = "Illuminate/0.1 (operator contact not configured)"
 
     # Query guard rails (D3)
     cypher_default_limit: int = 500
@@ -45,7 +46,10 @@ class Settings(BaseSettings):
     model_strong: str = "gpt-5"
     model_fast: str = "gpt-5-mini"
     openai_base_url: str | None = None
-    session_secret: SecretStr = SecretStr("illuminate-dev-confirmation")
+    session_secret: SecretStr = SecretStr(secrets.token_urlsafe(32))
+    # Streamable HTTP MCP is disabled unless an operator supplies a dedicated
+    # bearer token. Stdio MCP remains available for local, process-bound use.
+    illuminate_mcp_http_token: SecretStr | None = None
 
     # NDIA catalog publishing. Credentials remain process-only and are never
     # included in API responses or workspace settings.

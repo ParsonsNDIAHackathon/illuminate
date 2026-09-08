@@ -17,6 +17,12 @@ from .deps import user_id
 
 router = APIRouter(prefix="/api", tags=["graph"])
 
+_PUBLIC_ARTIFACT_PROJECTION = (
+    "a{.id,.title,.url,.kind,.source,.source_id,.source_identifier,.catalog_ids,"
+    ".published_at,.retrieved_at,.usage_note,.quality_note,.supports,.unknowns,"
+    ".source_status,.connector_error,.simulated,.amount,.sentiment}"
+)
+
 
 @router.get("/graph/stats")
 async def stats():
@@ -92,7 +98,10 @@ async def graph_all(people: bool = True, countries: bool = False, artifacts: boo
 async def node(node_id: str):
     rows = await db.read(
         "MATCH (n {id:$id}) OPTIONAL MATCH (n)-[r]-(m) WITH n, type(r) AS t, count(m) AS c "
-        "RETURN n{.*} AS props, labels(n) AS labels, collect({type:t, count:c}) AS degree",
+        "RETURN n{.id,.name,.title,.kind,.uei,.cage,.lei,.code,.source,.source_url,"
+        ".retrieved_at,.published_at,.simulated,.flagged,.registration_status,"
+        ".source_status,.confidence} AS props, labels(n) AS labels, "
+        "collect({type:t, count:c}) AS degree",
         {"id": node_id},
     )
     if not rows:
@@ -182,13 +191,17 @@ async def artifacts(kind: str | None = None, entity_id: str | None = None, limit
 
 @router.get("/artifacts/{artifact_id}")
 async def artifact_detail(artifact_id: str):
-    """One artifact with what it is attached to and, where the source response is cached, the raw payload."""
+    """One artifact with safe metadata and a derived summary.
+
+    Cached upstream payloads remain server-side because they can contain fields
+    outside the artifact's public classification.
+    """
     rows = await db.read(
         """
         MATCH (a:Artifact {id:$id})
         OPTIONAL MATCH (a)-[:ABOUT]->(e:Entity)
         OPTIONAL MATCH (a)-[:EVIDENCES]->(c:Claim)
-        RETURN a{.*} AS artifact, collect(DISTINCT e{.id,.name}) AS about,
+        RETURN """ + _PUBLIC_ARTIFACT_PROJECTION + """ AS artifact, collect(DISTINCT e{.id,.name}) AS about,
                collect(DISTINCT c{.id,.predicate,.status,.confidence}) AS claims
         """,
         {"id": artifact_id},
@@ -197,11 +210,14 @@ async def artifact_detail(artifact_id: str):
         raise HTTPException(404, "no such artifact")
     row = rows[0]
     raw = find_raw(artifact_id, row["artifact"] or {})
-    return {**row, "raw": raw, "summary": summarize(row["artifact"] or {}, raw)}
+    return {**row, "summary": summarize(row["artifact"] or {}, raw)}
 
 
 async def _artifact_props(artifact_id: str) -> dict:
-    rows = await db.read("MATCH (a:Artifact {id:$id}) RETURN a{.*} AS artifact", {"id": artifact_id})
+    rows = await db.read(
+        f"MATCH (a:Artifact {{id:$id}}) RETURN {_PUBLIC_ARTIFACT_PROJECTION} AS artifact",
+        {"id": artifact_id},
+    )
     if not rows or not rows[0].get("artifact"):
         raise HTTPException(404, "no such artifact")
     return rows[0]["artifact"]

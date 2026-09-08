@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ipaddress
 import json
+import socket
 import time
 from pathlib import Path
 from typing import Any
@@ -36,15 +38,22 @@ def cache_dir() -> Path:
     return _cache_dir
 
 
-_SECRET_PARAMS = {"api_key", "api_token", "token", "apikey", "key"}
+_SECRET_PARAMS = {
+    "access_key", "access_token", "api_key", "api_token", "apikey",
+    "authorization", "client_secret", "credential", "key", "key_id",
+    "password", "secret", "signature", "token",
+}
 
 
 def scrub(url: str) -> str:
     """Remove credential query parameters so neither the cache key nor the stored
     URL ever carries a key (fixtures are committed)."""
-    u = httpx.URL(url)
-    params = [(k, v) for k, v in u.params.multi_items() if k.lower() not in _SECRET_PARAMS]
-    return str(u.copy_with(query=None).copy_merge_params(params)) if params else str(u.copy_with(query=None))
+    try:
+        u = httpx.URL(url).copy_with(userinfo=None)
+        params = [(k, v) for k, v in u.params.multi_items() if k.lower() not in _SECRET_PARAMS]
+        return str(u.copy_with(query=None).copy_merge_params(params)) if params else str(u.copy_with(query=None))
+    except (TypeError, ValueError):
+        return "[invalid-url]"
 
 
 def _key(method: str, url: str, body: Any) -> str:
@@ -65,8 +74,51 @@ async def _throttle(host: str) -> None:
 
 class HttpError(Exception):
     def __init__(self, status: int, url: str, text: str = ""):
-        super().__init__(f"HTTP {status} for {url}: {text[:200]}")
+        # Upstream bodies and credential query parameters are never safe error
+        # material. Callers receive only a scrubbed destination and status.
+        super().__init__(f"HTTP {status} for {scrub(url)}")
         self.status = status
+
+
+def _public_ip(address: str) -> bool:
+    ip = ipaddress.ip_address(address)
+    return not (
+        ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+        or ip.is_reserved or ip.is_unspecified
+    )
+
+
+async def ensure_public_http_url(url: str) -> httpx.URL:
+    """Reject local/private destinations before server-side document fetches."""
+    try:
+        parsed = httpx.URL(url)
+        if parsed.scheme not in ("http", "https") or not parsed.host or parsed.userinfo:
+            raise ValueError
+        if parsed.host.lower() == "localhost" or parsed.host.lower().endswith((".local", ".internal")):
+            raise ValueError
+        try:
+            if not _public_ip(parsed.host):
+                raise ValueError
+        except ValueError as exc:
+            # It was an IP literal and was not public.
+            try:
+                ipaddress.ip_address(parsed.host)
+            except ValueError:
+                pass
+            else:
+                raise HttpError(0, url) from exc
+        loop = asyncio.get_running_loop()
+        infos = await loop.run_in_executor(
+            None, lambda: socket.getaddrinfo(parsed.host, parsed.port or (443 if parsed.scheme == "https" else 80),
+                                            type=socket.SOCK_STREAM)
+        )
+        if not infos or any(not _public_ip(info[4][0]) for info in infos):
+            raise ValueError
+        return parsed
+    except HttpError:
+        raise
+    except (OSError, TypeError, ValueError):
+        raise HttpError(0, url) from None
 
 
 async def probe_source(url: str, *, params: dict | None = None, headers: dict | None = None,
@@ -152,13 +204,17 @@ DOC_TTL = 30 * 86400
 MAX_DOC_BYTES = 8 * 1024 * 1024
 
 
-async def fetch_document(url: str, *, ttl: float = DOC_TTL, timeout: float = 60.0) -> dict:
+async def fetch_document(url: str, *, ttl: float = DOC_TTL, timeout: float = 60.0,
+                         max_bytes: int = MAX_DOC_BYTES) -> dict:
     """GET any document. Returns {url, content_type, body: bytes, retrieved_at, truncated}.
 
     Unlike fetch_json/fetch_text this makes no assumption about the payload: the caller
     dispatches on content_type. The download stops at MAX_DOC_BYTES so a stray link to a
-    large binary cannot exhaust memory.
+    large binary cannot exhaust memory. Every cache read, request, and redirect
+    first passes the public-network destination policy.
     """
+    parsed = await ensure_public_http_url(url)
+    max_bytes = max(1, min(int(max_bytes), MAX_DOC_BYTES))
     key = _key("GET", url, None)
     blob = cache_dir() / f"{key}.doc"
     meta = cache_dir() / f"{key}.doc.json"
@@ -166,33 +222,49 @@ async def fetch_document(url: str, *, ttl: float = DOC_TTL, timeout: float = 60.
         try:
             m = json.loads(meta.read_text())
             if _read_only_cache or time.time() - m.get("_ts", 0) < ttl:
-                return {"url": m.get("url") or url, "content_type": m.get("content_type", ""), "body": blob.read_bytes(),
+                cached_url = m.get("url") or url
+                await ensure_public_http_url(cached_url)
+                return {"url": cached_url, "content_type": m.get("content_type", ""), "body": blob.read_bytes(),
                         "retrieved_at": m.get("_ts"), "truncated": m.get("truncated", False)}
-        except Exception:
-            pass
+        except HttpError:
+            if not _read_only_cache:
+                blob.unlink(missing_ok=True)
+                meta.unlink(missing_ok=True)
+            raise
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            if not _read_only_cache:
+                blob.unlink(missing_ok=True)
+                meta.unlink(missing_ok=True)
+            raise HttpError(0, url) from None
     if _read_only_cache:
         raise HttpError(0, url, "not in fixture cache (offline mode)")
-    parsed = httpx.URL(url)
-    if parsed.scheme not in ("http", "https"):
-        raise HttpError(0, url, f"unsupported scheme {parsed.scheme!r}")
     await _throttle(parsed.host or "")
     hdrs = {"User-Agent": settings.illuminate_user_agent, "Accept": "*/*"}
     chunks: list[bytes] = []
     size = 0
     truncated = False
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        async with client.stream("GET", url, headers=hdrs) as r:
-            if r.status_code >= 400:
-                raise HttpError(r.status_code, url, "")
-            ctype = (r.headers.get("content-type") or "application/octet-stream").strip().lower()
-            final = str(r.url)
-            async for chunk in r.aiter_bytes():
-                chunks.append(chunk)
-                size += len(chunk)
-                if size >= MAX_DOC_BYTES:
-                    truncated = True
-                    break
-    body = b"".join(chunks)[:MAX_DOC_BYTES]
+    current = str(parsed)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        for redirects in range(4):
+            await ensure_public_http_url(current)
+            async with client.stream("GET", current, headers=hdrs) as r:
+                if r.is_redirect:
+                    if redirects == 3 or not r.headers.get("location"):
+                        raise HttpError(r.status_code, current)
+                    current = str(r.url.join(r.headers["location"]))
+                    continue
+                if r.status_code >= 400:
+                    raise HttpError(r.status_code, current)
+                ctype = (r.headers.get("content-type") or "application/octet-stream").strip().lower()
+                final = str(r.url)
+                async for chunk in r.aiter_bytes():
+                    chunks.append(chunk)
+                    size += len(chunk)
+                    if size >= max_bytes:
+                        truncated = True
+                        break
+                break
+    body = b"".join(chunks)[:max_bytes]
     now = time.time()
     if ttl > 0:
         try:
@@ -200,4 +272,12 @@ async def fetch_document(url: str, *, ttl: float = DOC_TTL, timeout: float = 60.
             meta.write_text(json.dumps({"_ts": now, "url": scrub(final), "content_type": ctype, "truncated": truncated}))
         except Exception:
             pass
-    return {"url": scrub(final), "content_type": ctype, "body": body, "retrieved_at": now, "truncated": truncated}
+    return {
+        "url": scrub(final),
+        "content_type": ctype,
+        "body": body,
+        "retrieved_at": now,
+        "truncated": truncated,
+        "x_frame_options": r.headers.get("x-frame-options"),
+        "content_security_policy": r.headers.get("content-security-policy"),
+    }

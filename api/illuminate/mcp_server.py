@@ -3,6 +3,7 @@ applies identically, so an outside agent gets no privilege the chat lacks."""
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 
 import mcp.types as types
@@ -10,6 +11,7 @@ from mcp.server.lowlevel import Server
 
 from .tools.contract import TOOLS
 from .tools.handlers import ToolContext, dispatch, safe_tool_data, safe_tool_result
+from .config import settings
 
 INSTRUCTIONS = (
     "Illuminate supplier-network graph. Reads run immediately; writes are previewed and held for the workspace user's approval "
@@ -47,6 +49,30 @@ def build_server() -> Server:
 def http_app(path: str = "/"):
     """Starlette app for mounting inside FastAPI at /mcp (streamable HTTP)."""
     return build_server().streamable_http_app(streamable_http_path=path, stateless_http=True, json_response=True, host="0.0.0.0")
+
+
+class AuthenticatedMCP:
+    """Fail-closed bearer-token boundary for the network MCP transport."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        token = settings.illuminate_mcp_http_token
+        expected = token.get_secret_value() if token else ""
+        headers = {k.lower(): v for k, v in scope.get("headers", [])}
+        supplied = headers.get(b"authorization", b"").decode("latin-1")
+        valid = bool(expected) and supplied.startswith("Bearer ") and hmac.compare_digest(supplied[7:], expected)
+        if not valid:
+            status = 401 if expected else 503
+            await send({"type": "http.response.start", "status": status, "headers": [
+                (b"content-type", b"application/json"),
+                (b"cache-control", b"no-store"),
+            ]})
+            body = b'{"detail":"MCP HTTP transport is not configured"}' if not expected else b'{"detail":"unauthorized"}'
+            await send({"type": "http.response.body", "body": body})
+            return
+        await self.app(scope, receive, send)
 
 
 async def serve_stdio() -> None:

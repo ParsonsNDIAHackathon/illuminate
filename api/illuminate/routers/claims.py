@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from .. import events
 from ..enrichment import claims
+from .deps import user_id
 
 router = APIRouter(prefix="/api/claims", tags=["claims"])
 ClaimStatus = Literal["staged", "committed", "rejected"]
@@ -22,6 +23,7 @@ async def list_claims(
     status: ClaimStatus | None = None,
     entity_id: str | None = None,
     limit: int = Query(200, ge=1, le=MAX_PAGE_LIMIT),
+    user: str = Depends(user_id),
 ):
     return await claims.list_claims(status, entity_id, limit)
 
@@ -30,15 +32,16 @@ async def list_claims(
 async def list_source_records(
     entity_id: str | None = None,
     limit: int = Query(200, ge=1, le=MAX_PAGE_LIMIT),
+    user: str = Depends(user_id),
 ):
     return await claims.list_source_records(entity_id, limit)
 
 
 @router.post("/{claim_id}/commit")
-async def commit(claim_id: str, body: Note):
+async def commit(claim_id: str, body: Note, user: str = Depends(user_id)):
     try:
         touched = await claims.endpoints(claim_id)
-        status = await claims.commit(claim_id, body.note or "approved by user")
+        status = await claims.commit(claim_id, body.note or f"approved by workspace user {user}")
     except KeyError:
         raise HTTPException(404, "no such claim")
     except ValueError as exc:
@@ -48,9 +51,9 @@ async def commit(claim_id: str, body: Note):
 
 
 @router.post("/{claim_id}/reject")
-async def reject(claim_id: str, body: Note):
+async def reject(claim_id: str, body: Note, user: str = Depends(user_id)):
     try:
-        return {"status": await claims.reject(claim_id, body.note or "rejected by user")}
+        return {"status": await claims.reject(claim_id, body.note or f"rejected by workspace user {user}")}
     except KeyError:
         raise HTTPException(404, "no such claim")
     except ValueError as exc:

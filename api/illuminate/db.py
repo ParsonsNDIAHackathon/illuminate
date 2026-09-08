@@ -16,6 +16,8 @@ _driver_loop: asyncio.AbstractEventLoop | None = None
 async def get_driver() -> AsyncDriver:
     """One driver per event loop (tests and the MCP stdio entrypoint use their own)."""
     global _driver, _driver_loop
+    if not settings.neo4j_password:
+        raise RuntimeError("NEO4J_PASSWORD is not configured")
     loop = asyncio.get_running_loop()
     if _driver is None or _driver_loop is not loop:
         if _driver is not None:
@@ -193,10 +195,10 @@ async def dry_run(cypher: str, params: dict[str, Any] | None = None) -> dict[str
     """Execute inside an explicit transaction and roll it back. The counters are
     from a real execution, not an estimate (D4)."""
     async with session(default_access_mode="WRITE") as s:
-        tx = await s.begin_transaction()
+        tx = await s.begin_transaction(timeout=settings.cypher_write_timeout_s)
         try:
             res = await tx.run(cypher, params or {})
-            rows = [r.data() for r in await res.fetch(50)]
+            rows = [r.data() for r in await res.fetch(min(50, settings.cypher_max_limit))]
             summary = await res.consume()
             return {"rows": rows, "counters": counters_dict(summary.counters)}
         finally:
