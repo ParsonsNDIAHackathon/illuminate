@@ -86,7 +86,7 @@ function styleSheet(): any[] {
 }
 
 function toElements() {
-  const root = ws.ws.root_id
+  const root = graph.focusId
   const nodes = graph.nodeList.map(n => ({ group: 'nodes', data: { id: n.id, name: n.name, label: n.label, baseColor: baseColor(n), shape: shapeFor(n), size: n.props?.kind === 'program' ? 56 : n.label === 'Entity' ? 34 : n.label === 'Person' ? 26 : 22, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }))
   const edges = graph.edgeList.map(e => ({ group: 'edges', data: { id: e.id, source: e.source, target: e.target, type: e.type, color: EDGE_COLORS[e.type] || '#9ca3af', simulated: !!e.props?.simulated, label: e.type === 'SUPPLIES' && e.props?.tier ? `T${e.props.tier}${e.props.sole_source ? ' · sole' : ''}` : e.type === 'HELD_ROLE' ? (e.props?.title || '').slice(0, 18) : e.type === 'OWNS' && e.props?.pct ? `${e.props.pct}%` : '' } }))
   return [...nodes, ...edges]

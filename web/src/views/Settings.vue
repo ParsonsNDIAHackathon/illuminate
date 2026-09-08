@@ -2,13 +2,6 @@
   <v-container style="max-width: 860px">
     <h2 class="text-h6 mb-3">Settings</h2>
     <v-card class="mb-4" variant="outlined">
-      <v-card-title class="text-subtitle-1">Consumer (root)</v-card-title>
-      <v-card-text>
-        <p class="text-body-2 mb-2" style="opacity:.75">Point the graph at a program and it is supply-chain illumination; point it at the buying organisation and it is vendor risk. Same graph, different root.</p>
-        <v-autocomplete v-model="rootPick" :items="hits" item-title="name" item-value="id" v-model:search="q" no-filter hide-details :placeholder="ws.ws.root_label || 'search an entity'" @update:model-value="setRoot" clearable />
-      </v-card-text>
-    </v-card>
-    <v-card class="mb-4" variant="outlined">
       <v-card-title class="text-subtitle-1">Writes</v-card-title>
       <v-card-text>
         <v-radio-group :model-value="ws.ws.permission_mode" @update:model-value="(v: any) => ws.save({ permission_mode: v })" hide-details>
@@ -39,16 +32,12 @@
   </v-container>
 </template>
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
-import { api, qs } from '../api/client'
+import { onMounted, ref } from 'vue'
+import { api } from '../api/client'
 import { useWorkspace } from '../stores/workspace'
 const ws = useWorkspace()
-const q = ref(''); const hits = ref<any[]>([]); const rootPick = ref<string | null>(null)
 const strong = ref(''); const fast = ref(''); const baseUrl = ref('')
 const origin = location.origin
-let t: any
-watch(q, (v) => { clearTimeout(t); if (!v || v.length < 2) return; t = setTimeout(async () => { hits.value = (await api.get(`/api/graph/search?${qs({ q: v, kind: 'entity', limit: 10 })}`)).results }, 250) })
-async function setRoot(id: string | null) { if (!id) return; const h = hits.value.find(x => x.id === id); await ws.save({ root_id: id, root_label: h?.name || null }) }
 async function saveModels() { await ws.save({ model_strong: strong.value || null, model_fast: fast.value || null, openai_base_url: baseUrl.value || null }) }
 onMounted(async () => { if (!ws.loaded) await ws.load(); strong.value = ws.ws.model_strong || ''; fast.value = ws.ws.model_fast || ''; baseUrl.value = ws.ws.openai_base_url || '' })
 </script>

@@ -71,7 +71,7 @@
       <v-btn prepend-icon="mdi-arrow-expand-all" @click="$emit('expand', node.id)">Expand</v-btn>
       <v-btn v-if="isProgram" prepend-icon="mdi-sitemap-outline" @click="openDiscover" :loading="discovering">Find suppliers</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-auto-fix" @click="enrich" :loading="enriching">Enrich</v-btn>
-      <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-target" variant="text" @click="setRoot" title="Make this the consumer (root)">Set as root</v-btn>
+      <v-btn v-if="isProgram && node.id !== graph.focusId" prepend-icon="mdi-target" variant="text" @click="focusHere" :loading="focusing" title="Show only this program and its supply chain">Focus</v-btn>
     </div>
     <v-dialog v-model="discoverDlg" max-width="520">
       <v-card>
@@ -103,7 +103,7 @@
 </template>
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { api } from '../api/client'
+import { api, qs } from '../api/client'
 import { useGraph } from '../stores/graph'
 import { useJobs } from '../stores/jobs'
 import { useWorkspace } from '../stores/workspace'
@@ -113,7 +113,7 @@ const rawId = ref<string | null>(null)
 defineEmits<{ (e: 'expand', id: string): void }>()
 const node = computed(() => graph.selected)
 const p = computed(() => node.value?.props || {})
-const detail = ref<any>(null); const supplies = ref<any[]>([]); const personRoles = ref<any[]>([]); const enriching = ref(false)
+const detail = ref<any>(null); const supplies = ref<any[]>([]); const personRoles = ref<any[]>([]); const enriching = ref(false); const focusing = ref(false)
 const isProgram = computed(() => node.value?.label === 'Entity' && p.value.kind === 'program')
 const discoverDlg = ref(false); const discovering = ref(false); const discoverError = ref('')
 const kw = ref<string[]>([]); const agency = ref(''); const maxSubs = ref<number | null>(null)
@@ -122,7 +122,8 @@ watch(node, async (n) => {
   if (!n) return
   if (n.label === 'Entity') {
     try {
-      const rep = await api.get(`/api/entities/${n.id}/report`)
+      // tier is counted towards the focused program; with nothing focused there is no tier
+      const rep = await api.get(`/api/entities/${n.id}/report?${qs({ root_id: graph.focusId })}`)
       detail.value = { ...rep.geography, ...rep.control, categories: rep.categories, tier: rep.supply.tier_from_root, suppliers_count: rep.supply.suppliers_count }
       supplies.value = rep.supply.supplies
     } catch {}
@@ -152,7 +153,11 @@ async function runDiscover() {
     discoverError.value = e?.message || 'the award search was refused'
   } finally { discovering.value = false }
 }
-async function setRoot() { await ws.save({ root_id: node.value!.id, root_label: node.value!.name }) }
+async function focusHere() {
+  focusing.value = true
+  const id = node.value!.id
+  try { await graph.focus(id, node.value!.name, ws.depth, ws.ws.layers); graph.select(id) } finally { focusing.value = false }
+}
 </script>
 <style scoped>
 .inspector { padding: 12px; font-size: 13px; overflow-y: auto; height: 100%; }

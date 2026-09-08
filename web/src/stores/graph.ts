@@ -9,6 +9,8 @@ export interface GEdge { id: string; source: string; target: string; type: strin
 /** How long an arriving node stays marked as new on the canvas. */
 const FRESH_MS = 6000
 
+const isProgram = (n: GNode) => n.label === 'Entity' && n.props?.kind === 'program'
+
 export const useGraph = defineStore('graph', {
   state: () => ({
     nodes: new Map<string, GNode>(),
@@ -23,10 +25,14 @@ export const useGraph = defineStore('graph', {
     styleVersion: 0,     // bumped when style ops change
     highlightIds: [] as string[],
     filter: '',          // search-bar text; canvas dims nodes that don't match
-    // The canvas shows the whole graph. focusId narrows it to one consumer's supply chain;
-    // null means everything, which is the default.
+    // The canvas shows the whole graph. focusId narrows it to one program's supply chain;
+    // null means everything, which is the default. This is the only notion of a current
+    // program anywhere — the workspace has no root.
     focusId: null as string | null,
     focusLabel: null as string | null,
+    // The programs the focus picker offers, kept current from live deltas so one added
+    // while the canvas is open is selectable without a reload.
+    programs: [] as { id: string; name: string }[],
     truncated: false,    // the whole graph did not fit under the node cap
     fresh: [] as string[],   // ids that just arrived from a live change, for the canvas to reveal
     freshVersion: 0,
@@ -60,6 +66,14 @@ export const useGraph = defineStore('graph', {
      *  Merge it and flag what is genuinely new so the canvas can place and reveal it. */
     applyDelta(sub: { nodes: GNode[]; edges: GEdge[] } | null | undefined, focus?: string[]) {
       if (!sub?.nodes?.length) return
+      // A program in the delta belongs in the picker whether or not it is drawn here.
+      this.notePrograms(sub.nodes)
+      // A focused canvas is one program's supply chain: another program arriving live
+      // must not sneak in through a supplier the two share.
+      if (this.focusId) {
+        const foreign = new Set(sub.nodes.filter(n => isProgram(n) && n.id !== this.focusId).map(n => n.id))
+        if (foreign.size) sub = { nodes: sub.nodes.filter(n => !foreign.has(n.id)), edges: (sub.edges || []).filter(e => !foreign.has(e.source) && !foreign.has(e.target)) }
+      }
       // A delta carries one hop of context around what changed. Take it whole while the canvas
       // shows everything; when focused on one consumer, take only what attaches to what is drawn,
       // unless the change itself is a brand new node the user just asked for.
@@ -83,6 +97,25 @@ export const useGraph = defineStore('graph', {
       setTimeout(() => { this.fresh = this.fresh.filter(id => !stale.has(id)); this.freshVersion++ }, FRESH_MS)
     },
 
+    /** The programs the canvas can be narrowed to. */
+    async loadPrograms() {
+      try { this.programs = (await api.get('/api/graph/programs')).items } catch { /* keep whatever the deltas have given us */ }
+    },
+
+    /** Fold programs seen in graph data into the picker, in place, by name order. A
+     *  program created while the canvas is open is selectable immediately. */
+    notePrograms(nodes: GNode[]) {
+      let touched = false
+      for (const n of nodes) {
+        if (!isProgram(n)) continue
+        const at = this.programs.findIndex(p => p.id === n.id)
+        if (at < 0) { this.programs.push({ id: n.id, name: n.name }); touched = true }
+        else if (this.programs[at].name !== n.name) { this.programs[at] = { id: n.id, name: n.name }; touched = true }
+        if (n.id === this.focusId && this.focusLabel !== n.name) this.focusLabel = n.name
+      }
+      if (touched) this.programs = [...this.programs].sort((a, b) => a.name.localeCompare(b.name))
+    },
+
     /** Everything in the graph, bounded by the active layers. The default view. */
     async loadAll(layers: Record<string, boolean>) {
       this.loading = true
@@ -92,28 +125,40 @@ export const useGraph = defineStore('graph', {
         this.focusLabel = null
         this.truncated = !!r.truncated
         this.replace(r.subgraph)
+        this.notePrograms(this.nodeList)
         this.lastCypher = null
       } finally { this.loading = false }
     },
 
-    /** Narrow the canvas to one consumer's supply chain. */
+    /** Narrow the canvas to one program's supply chain — that program and what reaches it,
+     *  with the other programs (and anything hanging off only them) left out. */
     async focus(entityId: string, label: string | null, depth: number, layers: Record<string, boolean>) {
-      await this.loadNeighbourhood(entityId, depth, layers, true)
+      const was = { id: this.focusId, label: this.focusLabel }
+      // Set before loading: the load is what confines the walk to this program, and it
+      // reads the focus to do it.
       this.focusId = entityId
-      this.focusLabel = label
+      this.focusLabel = label || this.programs.find(p => p.id === entityId)?.name || null
+      try {
+        await this.loadNeighbourhood(entityId, depth, layers, true)
+      } catch (e) {
+        this.focusId = was.id; this.focusLabel = was.label
+        throw e
+      }
       this.truncated = false
     },
 
     async loadNeighbourhood(entityId: string, depth: number, layers: Record<string, boolean>, replace = false) {
       this.loading = true
       try {
-        const r = await api.get(`/api/graph/subgraph?${qs({ entity_id: entityId, depth, people: !!layers.people, countries: !!layers.countries, artifacts: !!layers.artifacts, categories: !!layers.categories })}`)
+        const r = await api.get(`/api/graph/subgraph?${qs({ entity_id: entityId, depth, people: !!layers.people, countries: !!layers.countries, artifacts: !!layers.artifacts, categories: !!layers.categories, program_id: this.focusId })}`)
         replace ? this.replace(r.subgraph) : this.merge(r.subgraph)
+        this.notePrograms(r.subgraph?.nodes || [])
         this.lastCypher = { statement: r.cypher, params: r.params }
       } finally { this.loading = false }
     },
     async runTemplate(name: string, params: any, applyStyles = true) {
-      const r = await api.post('/api/query/template', { name, params, apply_styles: applyStyles })
+      // A template's root is whatever the canvas is focused on unless the caller says otherwise.
+      const r = await api.post('/api/query/template', { name, params: { root_id: this.focusId, ...params }, apply_styles: applyStyles })
       if (r.subgraph) this.merge(r.subgraph)
       if (r.style_ops?.length) this.applyStyleOps(r.style_ops)
       if (r.cypher) this.lastCypher = { statement: r.cypher, params: r.params }

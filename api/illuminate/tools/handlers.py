@@ -28,12 +28,15 @@ class ToolContext:
     conversation_id: str | None = None
     user: str = "local"
     layers: dict | None = None
-    root_id: str | None = None
+    # The program the canvas is currently narrowed to, sent per request by whoever is
+    # looking at it. Nothing is focused by default: a workspace holds every program.
+    focus_id: str | None = None
+    focus_label: str | None = None
 
     @classmethod
     def from_workspace(cls, **kw) -> "ToolContext":
         ws = load_workspace()
-        return cls(layers=kw.pop("layers", None) or ws.layers, root_id=kw.pop("root_id", None) or ws.root_id, **kw)
+        return cls(layers=kw.pop("layers", None) or ws.layers, **kw)
 
 
 @dataclass
@@ -141,9 +144,10 @@ async def search_entities(ctx: ToolContext, query: str, kind: str = "any", limit
     return ToolResult(ok=True, data={"query": q, "results": rows[:limit]})
 
 
-async def expand_subgraph(ctx: ToolContext, entity_id: str, depth: int = 2, layers: dict | None = None) -> ToolResult:
+async def expand_subgraph(ctx: ToolContext, entity_id: str, depth: int = 2, layers: dict | None = None, program_id: str | None = None) -> ToolResult:
     t = TEMPLATES["neighbourhood"]
-    params = {"entity_id": entity_id, "depth": depth, "layers": {**(ctx.layers or {}), **(layers or {})}}
+    params = {"entity_id": entity_id, "depth": depth, "layers": {**(ctx.layers or {}), **(layers or {})},
+              "program_id": program_id or ctx.focus_id}
     cy, bound = t.build(params)
     v = validate(cy, params=bound)
     records, graph, _ = await db.read_graph(v.statement, bound)
@@ -164,10 +168,12 @@ async def run_template(ctx: ToolContext, name: str, params: dict | None = None, 
     if not t:
         return ToolResult(ok=False, data={"error": f"unknown template {name}", "templates": list(TEMPLATES)})
     p = dict(params or {})
+    # A template's "root" is whatever the canvas is focused on; with nothing focused the
+    # caller has to name the entity, and the missing-params error below says so.
     if "root_id" in t.required and not p.get("root_id"):
-        p["root_id"] = ctx.root_id
-    if "entity_id" in t.required and not p.get("entity_id") and ctx.root_id:
-        p["entity_id"] = ctx.root_id
+        p["root_id"] = ctx.focus_id
+    if "entity_id" in t.required and not p.get("entity_id") and ctx.focus_id:
+        p["entity_id"] = ctx.focus_id
     missing = [r for r in t.required if not p.get(r)]
     if missing:
         return ToolResult(ok=False, data={"error": f"missing params: {missing}", "schema": t.schema()})
@@ -225,7 +231,7 @@ async def set_styles(ctx: ToolContext, ops: list[dict]) -> ToolResult:
 
 
 async def get_entity_report(ctx: ToolContext, entity_id: str) -> ToolResult:
-    rep = await build_report(entity_id, ctx.root_id)
+    rep = await build_report(entity_id, ctx.focus_id)
     if not rep:
         return ToolResult(ok=False, data={"error": f"no entity {entity_id}"})
     compact = {

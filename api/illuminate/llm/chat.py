@@ -9,7 +9,6 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-from ..config import load_workspace
 from ..cypher.templates import match_intent
 from ..graphio import merge_subgraphs
 from ..styles import derive_legend, validate_ops
@@ -87,11 +86,10 @@ async def run_turn(conv: Conversation, text: str, ctx: ToolContext, emit: Emit, 
     if client is None:
         return await _template_only_turn(conv, text, ctx, emit, acc)
 
-    ws = load_workspace()
     strong, _fast = models(ctx.user)
     system = [
         {"role": "system", "content": constant_prefix()},
-        {"role": "system", "content": turn_context(ws.root_id, ws.root_label, ctx.layers, canvas_ids)},
+        {"role": "system", "content": turn_context(ctx.focus_id, ctx.focus_label, ctx.layers, canvas_ids)},
     ]
     tools = openai_tools()
 
