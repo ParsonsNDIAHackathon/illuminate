@@ -24,7 +24,7 @@ import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 import { applyStyleOps, clearStyleOps } from '../styles/styleOps'
 import { nodeSize, supplierTiers } from '../styles/nodeSize'
-import { fillFor, layerOf, shapeFor } from '../styles/nodeTypes'
+import { fillFor, glyphScaleFor, glyphYFor, iconFor, layerOf, shapeFor } from '../styles/nodeTypes'
 import { relationshipFamily } from '../styles/relationshipFamilies'
 
 cytoscape.use(fcose)
@@ -75,7 +75,9 @@ function styleSheet(): any[] {
   const outline = dark ? '#0e1013' : '#ffffff'
   const simulation = dark ? '#f6c453' : '#b77900'
   return [
-    { selector: 'node', style: { 'background-color': 'data(baseColor)', shape: 'data(shape)', width: 'data(size)', height: 'data(size)', label: 'data(name)', color: text, 'font-size': 10, 'text-wrap': 'ellipsis', 'text-max-width': 120, 'text-valign': 'bottom', 'text-margin-y': 4, 'text-outline-color': outline, 'text-outline-width': 2, 'border-width': 1.5, 'border-color': dark ? '#374151' : '#cbd5e1', 'overlay-padding': 4 } },
+    // The glyph is sized as a share of the node, so it follows supplier tier and the simulated
+    // screen-space rescale on its own; `fit: none` is what makes the percentages authoritative.
+    { selector: 'node', style: { 'background-color': 'data(baseColor)', shape: 'data(shape)', width: 'data(size)', height: 'data(size)', 'background-image': 'data(icon)', 'background-fit': 'none', 'background-width': 'data(glyphScale)', 'background-height': 'data(glyphScale)', 'background-position-y': 'data(glyphY)', 'background-image-opacity': 0.95, label: 'data(name)', color: text, 'font-size': 10, 'text-wrap': 'ellipsis', 'text-max-width': 120, 'text-valign': 'bottom', 'text-margin-y': 4, 'text-outline-color': outline, 'text-outline-width': 2, 'border-width': 1.5, 'border-color': dark ? '#374151' : '#cbd5e1', 'overlay-padding': 4 } },
     { selector: 'node[?isRoot]', style: { 'border-width': 3, 'border-color': dark ? '#60a5fa' : '#1d4ed8', 'font-weight': 'bold', 'font-size': 12 } },
     { selector: 'node[badge != ""]', style: { label: (e: any) => `${e.data('name')}\n${e.data('badge')}`, 'text-wrap': 'wrap' } },
     { selector: 'node[?simulated]', style: { width: 'data(simSize)', height: 'data(simSize)', 'font-size': 'data(simFont)', 'border-style': 'dashed', 'border-color': simulation, 'border-width': 'data(simBorder)', 'background-opacity': .55 } },
@@ -136,7 +138,7 @@ function toElements() {
   const nodes = graph.nodeList.map(n => {
     const tier = tiers.get(n.id)
     const size = nodeSize(n, tier)
-    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, layer: layerOf(n), baseColor: fillFor(n, ws.theme), shape: shapeFor(n), size, tier, simSize: size / zoom, simFont: 11 / zoom, simBorder: 3 / zoom, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
+    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, layer: layerOf(n), baseColor: fillFor(n, ws.theme), shape: shapeFor(n), icon: iconFor(n), glyphScale: glyphScaleFor(n), glyphY: glyphYFor(n), size, tier, simSize: size / zoom, simFont: 11 / zoom, simBorder: 3 / zoom, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
   })
   const edges = graph.edgeList.map(e => {
     const family = relationshipFamily(e.type)

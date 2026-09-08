@@ -2,12 +2,12 @@
   <div class="legend" :class="{ minimized }">
     <div class="legend-heading">
       <strong>{{ minimized ? 'Legend' : 'Node types' }}</strong>
-      <span v-if="!minimized">Shape and tint; highlights sit on top</span>
+      <span v-if="!minimized">Icon, shape and tint; highlights sit on top</span>
       <v-btn class="toggle" :icon="minimized ? 'mdi-chevron-up' : 'mdi-minus'" variant="text" size="x-small" :title="minimized ? 'Show legend' : 'Minimize legend'" @click="minimized = !minimized" />
     </div>
     <template v-if="!minimized">
       <div class="type-row">
-        <span v-for="t in types" :key="t.key" class="type" :title="t.label"><i :class="t.shape" :style="{ background: t.fill }"></i>{{ t.label }}</span>
+        <span v-for="t in types" :key="t.key" class="type" :title="t.label"><i :class="t.shape" :style="{ backgroundColor: t.fill, backgroundImage: `url('${t.icon}')`, backgroundSize: `${t.glyphScale}%`, backgroundPosition: `center ${t.glyphY}%` }"></i>{{ t.label }}</span>
       </div>
       <div class="legend-heading">
         <strong>Relationship paths</strong>
@@ -47,7 +47,7 @@ import { useWorkspace } from '../stores/workspace'
 import { resolveSwatch } from '../styles/palette'
 import { RELATIONSHIP_FAMILIES, type RelationshipFamily } from '../styles/relationshipFamilies'
 import { TIER_SIZES, supplierTiers } from '../styles/nodeSize'
-import { NODE_TYPES, nodeType, type NodeType } from '../styles/nodeTypes'
+import { NODE_TYPES, iconForType, nodeType, type NodeType } from '../styles/nodeTypes'
 const graph = useGraph(); const ws = useWorkspace()
 const STORAGE_KEY = 'illuminate.legend.minimized'
 const minimized = ref(localStorage.getItem(STORAGE_KEY) === '1')
@@ -55,7 +55,7 @@ watch(minimized, v => localStorage.setItem(STORAGE_KEY, v ? '1' : '0'))
 /** Only the types currently drawn, in NODE_TYPES order. */
 const types = computed(() => {
   const present = new Set(graph.nodeList.map(nodeType))
-  return (Object.keys(NODE_TYPES) as NodeType[]).filter(k => present.has(k)).map(k => ({ key: k, label: NODE_TYPES[k].label, shape: NODE_TYPES[k].shape, fill: NODE_TYPES[k].fill[ws.theme] }))
+  return (Object.keys(NODE_TYPES) as NodeType[]).filter(k => present.has(k)).map(k => ({ key: k, label: NODE_TYPES[k].label, shape: NODE_TYPES[k].shape, fill: NODE_TYPES[k].fill[ws.theme], icon: iconForType(k), glyphScale: NODE_TYPES[k].glyphScale, glyphY: NODE_TYPES[k].glyphY }))
 })
 const TIER_KEY_SCALE = 0.4   // canvas px → legend px, so a T1 disc fits a 12px line
 /** The tier key is only worth its line when something on the canvas is actually tiered. */
@@ -74,9 +74,10 @@ function simulationColor() { return ws.theme === 'dark' ? '#f6c453' : '#b77900' 
 .legend-heading span { opacity: .6; }
 .type-row { display: flex; flex-wrap: wrap; gap: 5px 12px; padding-bottom: 7px; border-bottom: 1px solid rgba(100,116,139,.2); }
 .type { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.type i { display: inline-block; width: 10px; height: 10px; flex: none; border-radius: 50%; }
+.type i { display: inline-block; width: 16px; height: 16px; flex: none; border-radius: 50%; background-repeat: no-repeat; }
 .type i.round-rectangle, .type i.rectangle, .type i.barrel { border-radius: 2px; }
-.type i.diamond { transform: rotate(45deg) scale(.85); border-radius: 1px; }
+/* clip-path, not a 45deg transform: the swatch now carries a glyph, which must stay upright. */
+.type i.diamond { clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
 .type i.hexagon { clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0 50%); }
 .type i.round-triangle { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 .type i.tag { clip-path: polygon(0 0, 70% 0, 100% 50%, 70% 100%, 0 100%); }
