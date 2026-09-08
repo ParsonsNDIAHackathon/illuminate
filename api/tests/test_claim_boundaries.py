@@ -248,7 +248,7 @@ async def test_committed_observation_refreshes_materialized_fact_without_new_dec
 
     monkeypatch.setattr(claims.db, "transactional_write", _transaction_runner(handle))
 
-    assert await claims.commit("stable-observation") == "committed"
+    assert await claims.commit("stable-observation", refresh_materialization=True) == "committed"
     assert materialized[0]["rp"]["amount"] == 2500000
     assert materialized[0]["rp"]["award_count"] == 4
     assert materialized[0]["rp"]["sole_source"] is True
@@ -257,3 +257,46 @@ async def test_committed_observation_refreshes_materialized_fact_without_new_dec
     assert len(claim_updates) == 1
     assert "decision_version" not in claim_updates[0][0]
     assert "decision_note" not in claim_updates[0][0]
+
+
+async def test_retrying_old_attribute_claim_cannot_undo_newer_commit(monkeypatch):
+    records = {
+        "claim-a": {
+            "status": "staged", "predicate": "attr:legal_name",
+            "object_value": "Old name", "source": "test",
+        },
+        "claim-b": {
+            "status": "staged", "predicate": "attr:legal_name",
+            "object_value": "New name", "source": "test",
+        },
+    }
+    entity = {"legal_name": None, "legal_name_claim_id": None}
+    reviews = []
+
+    async def handle(query, params):
+        if "RETURN c{.*} AS c" in query:
+            claim = records[params["id"]]
+            return [{"c": dict(claim), "sid": "ent-1", "oid": None}]
+        if "RETURN a.url AS url" in query:
+            return []
+        if "SET s.legal_name" in query:
+            guarded = (
+                "WHERE s.legal_name_claim_id IS NULL "
+                "OR s.legal_name_claim_id=$cid"
+            ) in query
+            if not guarded or entity["legal_name_claim_id"] in {None, params["cid"]}:
+                entity["legal_name"] = params["v"]
+                entity["legal_name_claim_id"] = params["cid"]
+        if "SET c.status='committed'" in query:
+            records[params["id"]]["status"] = "committed"
+            reviews.append(params["id"])
+        return []
+
+    monkeypatch.setattr(claims.db, "transactional_write", _transaction_runner(handle))
+
+    assert await claims.commit("claim-a") == "committed"
+    assert await claims.commit("claim-b") == "committed"
+    assert await claims.commit("claim-a") == "committed"
+    assert await claims.commit("claim-a", refresh_materialization=True) == "committed"
+    assert entity == {"legal_name": "New name", "legal_name_claim_id": "claim-b"}
+    assert reviews == ["claim-a", "claim-b"]

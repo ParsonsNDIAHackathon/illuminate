@@ -228,7 +228,7 @@
   <v-container v-else><v-progress-linear indeterminate /></v-container>
 </template>
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, getVendorRiskProfile, qs, supportedDecisionEvidenceRefs, type AnalystDecisionInput, type DecisionHistory, type VendorRiskProfile } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
@@ -239,6 +239,7 @@ import { useGraph } from '../stores/graph'
 const rawId = ref<string | null>(null)
 import { useJobs } from '../stores/jobs'
 import { useWorkspace } from '../stores/workspace'
+import { LatestRequest } from '../lib/latestRequest'
 const props = defineProps<{ id: string }>()
 const router = useRouter(); const route = useRoute(); const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace()
 const reportRoot = computed(() => String(route.query.root_id || graph.focusId || ''))
@@ -248,6 +249,7 @@ const rep = ref<any>(null); const enriching = ref(false); const regen_busy = ref
 const riskProfile = ref<VendorRiskProfile | null>(null)
 const decisionHistory = ref<DecisionHistory>({ current: null, events: [] })
 const decisionDialog = ref(false); const decisionSaving = ref(false); const decisionError = ref('')
+const reportRequest = new LatestRequest()
 const decisionOptions = [
   { title: 'Investigate', value: 'investigate' },
   { title: 'Monitor', value: 'monitor' },
@@ -272,10 +274,19 @@ const decisionForm = ref<AnalystDecisionInput>({ disposition: 'investigate', rat
 const selectedFinding = ref<string | null>(null)
 const activeFinding = computed(() => rep.value?.risk?.indicators?.find((i: any) => i.family === selectedFinding.value) || null)
 async function load() {
-  const report = await api.get(`/api/entities/${props.id}/report?${qs({ root_id: reportRoot.value })}`)
+  const generation = reportRequest.begin()
+  const entityId = props.id
+  const rootId = reportRoot.value
+  rep.value = null
+  riskProfile.value = null
+  decisionHistory.value = { current: null, events: [] }
+  decisionDialog.value = false
+  const report = await api.get(`/api/entities/${entityId}/report?${qs({ root_id: rootId })}`)
+  const profile = await getVendorRiskProfile(entityId, report)
+  if (!reportRequest.isCurrent(generation)) return
   rep.value = report
   decisionHistory.value = report.analyst_decisions || { current: null, events: [] }
-  riskProfile.value = await getVendorRiskProfile(props.id, report)
+  riskProfile.value = profile
 }
 const coveredCategories = computed(() => riskProfile.value?.categories.filter(category => category.factors.length > 0).length || 0)
 const recommendationLabel = computed(() => labelize(riskProfile.value?.disposition || 'Complete diligence'))
@@ -357,7 +368,7 @@ async function saveDecision() {
 }
 watch(tab, async (t) => { if (t === 'graph') await loadReportGraph() })
 watch(() => jobs.jobs.filter(j => j.entity_id === props.id && ['succeeded', 'empty', 'partial', 'failed', 'timed_out'].includes(j.status)).length, load)
-onMounted(load); watch(() => props.id, load)
+watch([() => props.id, reportRoot], load, { immediate: true })
 </script>
 <style scoped>
 .section { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; }

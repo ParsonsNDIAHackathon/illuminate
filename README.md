@@ -6,6 +6,8 @@ Hackathon, Washington DC, 8–10 Sep 2026 (UC-7 supply chain illumination, UC-11
 **What it is, what is in the graph, and how it is built: open [`details.html`](details.html).**
 For a concise judge-facing source-to-decision view, trust boundaries, deployment paths, and
 presenter answers, see the [architecture and lineage brief](docs/architecture-lineage-brief.md).
+For the timed six-minute script, failure drills, clean-session harness, recording plan, and
+release gates, use the [judge demo rehearsal packet](docs/DEMO_REHEARSAL.md).
 For role-specific goals, safety expectations, and executable review scenarios, see the
 [NDIA user personas](docs/NDIA_USER_PERSONAS.md).
 

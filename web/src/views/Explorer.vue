@@ -41,6 +41,12 @@
         <v-progress-circular indeterminate size="18" width="2" />
         Running {{ route.query.mission || 'guided' }} analysis…
       </div>
+      <div v-else-if="presetCompletion" class="mission-complete" role="status"
+           :data-rehearsal-template="presetCompletion.template"
+           :data-rehearsal-root="presetCompletion.root"
+           :data-rehearsal-elements="presetCompletion.elements">
+        {{ route.query.mission || 'Guided' }} analysis complete · {{ presetCompletion.elements }} graph elements
+      </div>
       <div class="notes">
         <span v-if="graph.truncated" class="warn">graph capped — narrow to one program or turn layers off</span>
         <details v-if="graph.lastCypher"><summary>last query</summary><CypherBlock :statement="graph.lastCypher.statement" :params="graph.lastCypher.params" /></details>
@@ -77,6 +83,7 @@ const q = ref(''); const hits = ref<any[]>([]); const searching = ref(false); co
 const focusItems = computed(() => [{ id: null, name: 'Everything' }, ...graph.programs])
 const hasSimulation = computed(() => graph.nodeList.some(n => n.props?.simulated) || graph.edgeList.some(e => e.props?.simulated))
 const presetRunning = ref(false)
+const presetCompletion = ref<{ template: string; root: string; elements: number } | null>(null)
 let t: any
 let lastMissionPreset = ''
 const missionTemplates: Record<string, () => Record<string, string | number>> = {
@@ -123,7 +130,18 @@ async function applyRouteFocus() {
   const vendor = String(route.query.vendor || '')
   const missionRoot = String(route.query.root_id || '')
   if (vendor) {
-    if (graph.focusId && !graph.nodes.has(graph.focusId)) await graph.loadNeighbourhood(graph.focusId, ws.depth, ws.ws.layers)
+    // A report can be scoped to a mission other than the workspace's retained focus.
+    // Establish the incoming mission before loading the vendor trace so evidence is
+    // never resolved against the previous program (or an unscoped fresh session).
+    if (missionRoot && (graph.focusId !== missionRoot || !graph.nodes.size)) {
+      try { await graph.focus(missionRoot, graph.programs.find(program => program.id === missionRoot)?.name || null, ws.depth, ws.ws.layers) }
+      catch (cause) {
+        graphError.value = cause instanceof Error ? cause.message : 'The mission program graph could not be loaded.'
+        return
+      }
+    } else if (graph.focusId && !graph.nodes.has(graph.focusId)) {
+      await graph.loadNeighbourhood(graph.focusId, ws.depth, ws.ws.layers)
+    }
     // A report trace may reference people, locations, or evidence hidden by the normal workspace
     // layers. Merge those elements for the trace without changing the user's layer preferences.
     try {
@@ -151,6 +169,7 @@ async function applyRouteFocus() {
   const missionKey = `${route.query.mission || ''}:${template}:${JSON.stringify(route.query)}`
   if (missionTemplates[template] && lastMissionPreset !== missionKey) {
     lastMissionPreset = missionKey
+    presetCompletion.value = null
     if (!missionRootId()) {
       graphError.value = 'Select a mission program before running this analysis.'
       return
@@ -159,7 +178,10 @@ async function applyRouteFocus() {
     await nextTick()
     try {
       const result = await graph.runTemplate(template, missionTemplates[template]())
+      const elements = (result.subgraph?.nodes?.length || 0) + (result.subgraph?.edges?.length || 0)
       if (!result.ok) graphError.value = result.data?.error || `${route.query.mission || 'Guided'} analysis could not be completed.`
+      else if (!elements) graphError.value = `${route.query.mission || 'Guided'} analysis returned no usable graph results.`
+      else presetCompletion.value = { template, root: missionRootId(), elements }
     } catch (cause) {
       graphError.value = cause instanceof Error ? cause.message : `${route.query.mission || 'Guided'} analysis could not be completed.`
     } finally {
@@ -200,6 +222,7 @@ watch(() => ws.depth, () => { if (graph.focusId) reload() })
 .graph-error div,.graph-error strong,.graph-error span { display:block; }
 .graph-error span { margin-top:2px;opacity:.8; }
 .mission-progress { position:absolute;left:12px;top:104px;z-index:7;display:flex;align-items:center;gap:9px;padding:9px 12px;border-left:4px solid #006b62;background:rgba(225,239,234,.96);color:#173b37;box-shadow:0 2px 10px rgba(25,45,40,.12);font-size:12px;font-weight:700; }
+.mission-complete { position:absolute;left:12px;top:104px;z-index:7;padding:9px 12px;border-left:4px solid #006b62;background:rgba(215,237,229,.96);color:#173b37;box-shadow:0 2px 10px rgba(25,45,40,.12);font-size:12px;font-weight:700; }
 @media (max-width: 900px) {
   .explorer { display: grid; grid-template-columns: 1fr; grid-template-rows: minmax(420px, 58dvh) minmax(480px, 72dvh); height: auto; min-height: calc(100dvh - 48px); }
   .side { grid-template-rows: minmax(160px, 40%) minmax(280px, 1fr); border-left: 0; border-top: 1px solid rgba(128,128,128,.25); }

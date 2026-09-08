@@ -107,12 +107,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, ref } from 'vue'
+import { computed, defineComponent, h, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, qs, type EntityListResponse, type EntityReportContract, type EntityRiskContract, type EntitySummary } from '../api/client'
 import { compareTrustworthy } from '../lib/portfolioTriage'
 import { identityLine } from '../lib/vendorIdentity'
 import { useGraph } from '../stores/graph'
+import { ScopedRowRequests } from '../lib/latestRequest'
 
 type Row = { entity: EntitySummary; contract: EntityRiskContract | null; pending?: boolean; retrying?: boolean; error?: string }
 const REPORT_BATCH_SIZE = 8
@@ -120,6 +121,7 @@ const route = useRoute()
 const graph = useGraph()
 const rows = ref<Row[]>([]); const portfolioTotal = ref(0); const loading = ref(true); const reportsLoading = ref(false); const fatalError = ref('')
 const advancedOpen = ref(false); const retrying = ref(false)
+const portfolioRequests = new ScopedRowRequests<string>()
 const search = ref(''); const tier = ref<string | number | null>(null); const category = ref<string | null>(null); const severity = ref<string | null>(null)
 const simulation = ref(String(route.query.simulation || 'all')); const sort = ref(String(route.query.sort || 'risk')); const confidenceFloor = ref(Number(route.query.confidence || 0)); const completenessFloor = ref(Number(route.query.completeness || 0)); const freshness = ref(String(route.query.freshness || 'all'))
 const simulationOptions = [{ title: 'All data', value: 'all' }, { title: 'Observed only', value: 'observed' }, { title: 'Simulated only', value: 'simulated' }]
@@ -162,45 +164,58 @@ function contractOf(report: EntityReportContract): EntityRiskContract | null {
   return { contract_version: raw.contract_version || '', score: raw.score ?? null, band: raw.band ?? null, disposition: raw.disposition ?? null, confidence: raw.confidence ?? null, completeness: raw.completeness ?? null, freshness: raw.freshness ?? null, categories: raw.categories || [], diligence_flags: raw.diligence_flags || [] }
 }
 async function load() {
+  const generation = portfolioRequests.beginScope()
+  const rootId = missionRoot.value
   loading.value = true; reportsLoading.value = false; fatalError.value = ''; rows.value = []; portfolioTotal.value = 0
   try {
-    const list = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: missionRoot.value, limit: 1000 })}`)
+    const list = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: rootId, limit: 1000 })}`)
     while (list.items.length < list.total) {
-      const page = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: missionRoot.value, limit: 1000, offset: list.items.length })}`)
+      const page = await api.get<EntityListResponse>(`/api/entities?${qs({ kind: 'organization', root_id: rootId, limit: 1000, offset: list.items.length })}`)
       if (!page.items.length) throw new Error(`The organization index stopped after ${list.items.length} of ${list.total} vendors.`)
       list.items.push(...page.items)
     }
+    if (portfolioRequests.currentScope() !== generation) return
     portfolioTotal.value = list.total
     rows.value = list.items.map(entity => ({ entity, contract: null, pending: true }))
     loading.value = false; reportsLoading.value = Boolean(rows.value.length)
     for (let offset = 0; offset < rows.value.length; offset += REPORT_BATCH_SIZE) {
-      await Promise.all(rows.value.slice(offset, offset + REPORT_BATCH_SIZE).map(loadReport))
+      await Promise.all(rows.value.slice(offset, offset + REPORT_BATCH_SIZE).map(row => loadReport(row, generation, rootId)))
+      if (portfolioRequests.currentScope() !== generation) return
     }
   } catch (e) {
-    fatalError.value = e instanceof Error ? e.message : 'Unknown retrieval failure.'
+    if (portfolioRequests.currentScope() === generation) fatalError.value = e instanceof Error ? e.message : 'Unknown retrieval failure.'
   } finally {
-    loading.value = false; reportsLoading.value = false
+    if (portfolioRequests.currentScope() === generation) {
+      loading.value = false; reportsLoading.value = false
+    }
   }
 }
-async function loadReport(row: Row) {
+async function loadReport(row: Row, generation = portfolioRequests.currentScope(), rootId = missionRoot.value) {
+  const request = portfolioRequests.beginRow(row.entity.id, generation)
   row.pending = true; row.retrying = Boolean(row.error); row.error = undefined
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 15000)
   try {
-    row.contract = contractOf(await api.get<EntityReportContract>(`/api/entities/${encodeURIComponent(row.entity.id)}/report?${qs({ root_id: missionRoot.value })}`, { signal: controller.signal }))
+    const contract = contractOf(await api.get<EntityReportContract>(`/api/entities/${encodeURIComponent(row.entity.id)}/report?${qs({ root_id: rootId })}`, { signal: controller.signal }))
+    if (!portfolioRequests.isCurrent(row.entity.id, request)) return
+    row.contract = contract
     if (!row.contract) row.error = 'The report did not include the supported uc11.vendor-risk.v1 contract.'
   } catch (e) {
-    row.error = e instanceof DOMException && e.name === 'AbortError' ? 'The report timed out after 15 seconds.' : e instanceof Error ? e.message : 'Unknown report failure.'
+    if (portfolioRequests.isCurrent(row.entity.id, request)) row.error = e instanceof DOMException && e.name === 'AbortError' ? 'The report timed out after 15 seconds.' : e instanceof Error ? e.message : 'Unknown report failure.'
   } finally {
     window.clearTimeout(timeout)
-    row.pending = false; row.retrying = false
+    if (portfolioRequests.isCurrent(row.entity.id, request)) {
+      row.pending = false; row.retrying = false
+    }
   }
 }
 async function retryFailed() {
+  const generation = portfolioRequests.currentScope()
+  const rootId = missionRoot.value
   retrying.value = true
   try {
     const failed = rows.value.filter(row => !row.contract && !row.pending)
-    for (let offset = 0; offset < failed.length; offset += REPORT_BATCH_SIZE) await Promise.all(failed.slice(offset, offset + REPORT_BATCH_SIZE).map(loadReport))
+    for (let offset = 0; offset < failed.length; offset += REPORT_BATCH_SIZE) await Promise.all(failed.slice(offset, offset + REPORT_BATCH_SIZE).map(row => loadReport(row, generation, rootId)))
   } finally { retrying.value = false }
 }
 function vendorDestination(id: string, tab?: 'risk' | 'artifacts') { return { path: `/entities/${id}`, query: { tab, root_id: missionRoot.value || undefined } } }
@@ -244,7 +259,7 @@ const filtered = computed(() => rows.value.filter(r => {
     && matchesFreshness(r)
 }).sort((a, b) => sort.value === 'name' ? a.entity.name.localeCompare(b.entity.name) : sort.value === 'trustworthy' ? compareTrustworthy(a.contract || {}, b.contract || {}) : sort.value === 'confidence' ? (percent(a.contract?.confidence) ?? -1) - (percent(b.contract?.confidence) ?? -1) : sort.value === 'completeness' ? (percent(a.contract?.completeness) ?? -1) - (percent(b.contract?.completeness) ?? -1) : sort.value === 'freshness' ? Number(hasStaleEvidence(b)) - Number(hasStaleEvidence(a)) || Number(hasMissingEvidence(b)) - Number(hasMissingEvidence(a)) : (b.contract?.score ?? -1) - (a.contract?.score ?? -1)))
 function resetFilters() { search.value = ''; tier.value = null; category.value = null; severity.value = null; simulation.value = 'all'; confidenceFloor.value = 0; completenessFloor.value = 0; freshness.value = 'all' }
-onMounted(load)
+watch(missionRoot, load, { immediate: true })
 </script>
 
 <style scoped>

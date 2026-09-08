@@ -156,4 +156,4 @@ async def test_replayed_committed_observation_uses_idempotent_refresh(monkeypatc
     monkeypatch.setattr(claims, "commit", commit)
 
     assert await claims.decide("clm_seed_1", trust="authoritative") == "committed"
-    commit.assert_awaited_once_with("clm_seed_1")
+    commit.assert_awaited_once_with("clm_seed_1", refresh_materialization=True)

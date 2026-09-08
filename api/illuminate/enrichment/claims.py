@@ -179,9 +179,9 @@ async def decide(cid: str, *, trust: str) -> str:
         return "rejected"
     if row["predicate"] in OBSERVATION_PREDICATES:
         # A screen/mention records what a source said on a date; it is an observation of the connector itself.
-        return await commit(cid)
+        return await commit(cid, refresh_materialization=True)
     if trust == "authoritative" and float(row.get("confidence") or 0) >= 0.8:
-        return await commit(cid)
+        return await commit(cid, refresh_materialization=True)
     # Open source: corroboration by independent sources commits; otherwise wait for a human.
     others = await db.read(
         "MATCH (c:Claim) WHERE c.subject_id=$s AND c.predicate=$p AND coalesce(c.object_id,'')=coalesce($o,'') AND coalesce(c.object_value,'')=coalesce($v,'') "
@@ -189,11 +189,17 @@ async def decide(cid: str, *, trust: str) -> str:
         {"s": row["subject_id"], "p": row["predicate"], "o": row.get("object_id"), "v": row.get("object_value")},
     )
     if others and others[0]["n"] >= CORROBORATION_SOURCES:
-        return await commit(cid, note="corroborated by independent sources")
+        return await commit(cid, note="corroborated by independent sources", refresh_materialization=True)
     return "staged"
 
 
-async def commit(cid: str, note: str | None = None, actor: str = "system") -> str:
+async def commit(
+    cid: str,
+    note: str | None = None,
+    actor: str = "system",
+    *,
+    refresh_materialization: bool = False,
+) -> str:
     review_id = "cre_" + uuid.uuid4().hex
     async def work(tx) -> str:
         rows = await _tx_rows(
@@ -215,6 +221,8 @@ async def commit(cid: str, note: str | None = None, actor: str = "system") -> st
         if status not in {"staged", "committed"}:
             raise ValueError(f"claim {cid} cannot be committed from status {status!r}")
         first_commit = status == "staged"
+        if not first_commit and not refresh_materialization:
+            return "committed"
         pred = c["predicate"]
         rel_props = _json.loads(c.get("rel_props") or "{}") if c.get("rel_props") else {}
         simulated = bool(rel_props.get("simulated") or c.get("simulated"))
@@ -255,14 +263,19 @@ async def commit(cid: str, note: str | None = None, actor: str = "system") -> st
                 " {" + ", ".join(f"{key}: $rp.{key}" for key in keys) + "}"
                 if keys else ""
             )
+            ownership_guard = (
+                "WITH r WHERE r.claim_id IS NULL OR r.claim_id=$cid "
+                if not first_commit else ""
+            )
             await _tx_rows(
                 tx,
                 f"MATCH (s {{id:$sid}}), (o {{id:$oid}}) "
                 f"MERGE (s)-[r:{pred}{key_clause}]->(o) "
-                "ON CREATE SET r.id=$rid SET r += $rp, r += $prov",
+                f"ON CREATE SET r.id=$rid {ownership_guard}"
+                "SET r += $rp, r += $prov",
                 {
                     "sid": r["sid"], "oid": r["oid"], "rp": rel_props,
-                    "prov": prov, "rid": edge_id(),
+                    "prov": prov, "rid": edge_id(), "cid": cid,
                 },
             )
         elif pred.startswith("attr:"):
@@ -271,9 +284,14 @@ async def commit(cid: str, note: str | None = None, actor: str = "system") -> st
                 val = c.get("object_value")
                 if val in ("true", "false"):
                     val = val == "true"
+                ownership_guard = (
+                    f"WHERE s.{name}_claim_id IS NULL OR s.{name}_claim_id=$cid "
+                    if not first_commit else ""
+                )
                 await _tx_rows(
                     tx,
                     f"MATCH (s {{id:$sid}}) "
+                    f"{ownership_guard}"
                     f"SET s.{name} = $v, s.{name}_claim_id = $cid",
                     {"sid": r["sid"], "v": val, "cid": cid},
                 )

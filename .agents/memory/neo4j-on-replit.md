@@ -15,6 +15,16 @@ Keep the generated development credential and the existing graph store on the sa
 
 **How to apply:** If the local credential state is missing, preserve the graph data and reset the development admin credential in place through a bounded auth-recovery flow before restarting. Verify authenticated Bolt access before persisting the credential hint, bound shutdown with escalation, and do not delete or reseed the store to work around authentication.
 
+Never externally forward Neo4j HTTP or Bolt listeners, including in development.
+Credential recovery temporarily disables authentication, so loopback binding is
+safe only when the platform is not forwarding those listeners.
+
+**Why:** An external port mapping can make a loopback-only recovery instance
+reachable while authentication is disabled, exposing unrestricted graph access.
+
+**How to apply:** Expose only application ports. Keep Neo4j on unforwarded
+loopback listeners throughout normal startup and credential recovery.
+
 Run any destructive reset-based QA against isolated temporary Neo4j directories, never the persisted workspace store.
 
 **Why:** Deterministic seed tests replace graph contents; using the normal workspace directories can erase analyst data while investigating an unrelated startup or journey defect.

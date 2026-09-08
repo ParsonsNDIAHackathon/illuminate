@@ -175,7 +175,10 @@ async def test_seed_entry_completes_without_mutating_workspace_consumer(monkeypa
 
     await seed.main_async(args)
 
-    metadata = next(params for query, params in writes if "SeedMetadata" in query)
+    metadata = next(
+        params for query, params in writes
+        if "SeedMetadata" in query and "m.root_id=$root_id" in query
+    )
     assert metadata["root_id"] == "program-a"
     assert metadata["status"] == "complete"
 
