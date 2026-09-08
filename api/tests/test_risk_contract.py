@@ -161,7 +161,14 @@ def test_simulated_graph_facts_are_excluded():
     assert result["score"] is None
     assert result["completeness"] == 0
 
-
+def test_simulated_graph_evidence_relationships_are_excluded():
+    simulated_core = core(foreign=True)
+    simulated_core["parent_seat_evidence"][0]["evidence_simulated"] = True
+    simulated_supply = supply(sole=True)
+    simulated_supply["risk_evidence"][0]["evidence_simulated"] = True
+    result = evaluate_risk_contract(simulated_core, simulated_supply, [], as_of=AS_OF)
+    assert result["score"] is None
+    assert result["completeness"] == 0
 def test_rejected_backing_claim_and_unknown_supply_value_are_excluded():
     rejected_core = core(foreign=True)
     rejected_core["parent_seat_evidence"][0].update({

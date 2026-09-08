@@ -46,19 +46,38 @@ async def entity_core(entity_id: str) -> dict | None:
         """
         MATCH (e:Entity {id:$id})
         OPTIONAL MATCH (e)-[:INCORPORATED_IN]->(inc:Location)
-        OPTIONAL MATCH (e)-[:PARENT_SEATED_IN]->(seat:Location)
+        OPTIONAL MATCH (e)-[ps:PARENT_SEATED_IN]->(seat:Location)
         OPTIONAL MATCH (e)-[:MANUFACTURES_IN]->(mfg:Location)
         OPTIONAL MATCH (e)-[:OPERATES_IN]->(ops:Location)
-        OPTIONAL MATCH (up:Entity)-[:ULTIMATE_PARENT_OF]->(e)
+        OPTIONAL MATCH (up:Entity)-[uo:ULTIMATE_PARENT_OF]->(e)
+        OPTIONAL MATCH (uc:Claim {id:uo.claim_id})
         OPTIONAL MATCH (dp:Entity)-[o:OWNS]->(e)
         OPTIONAL MATCH (e)-[:PROVIDES]->(c:Category)
         RETURN e{.*} AS e,
                inc{.code,.name} AS incorporated,
-               seat{.code,.name,.simulated} AS parent_seat,
+               seat{.id,.code,.name, simulated:coalesce(seat.simulated,false),
+                   relationship_id:coalesce(ps.id, elementId(ps)),
+                   relationship_simulated:coalesce(ps.simulated,false),
+                   source:ps.source, source_url:ps.source_url} AS parent_seat,
                collect(DISTINCT mfg{.code,.name}) AS manufactures,
                collect(DISTINCT ops{.code,.name}) AS operates,
-               collect(DISTINCT up{.id,.name,.simulated}) AS ultimate_parents,
-               collect(DISTINCT {id: dp.id, name: dp.name, pct: o.pct}) AS direct_parents,
+               collect(DISTINCT up{.id,.name, simulated:coalesce(up.simulated,false),
+                   relationship_id:coalesce(uo.id, elementId(uo)),
+                   relationship_simulated:coalesce(uo.simulated,false),
+                   claim_id:uo.claim_id, claim_simulated:coalesce(uc.simulated,false),
+                   artifact_simulated:CASE WHEN uc IS NULL THEN false ELSE EXISTS {
+                     MATCH (ua:Artifact)-[:EVIDENCES]->(uc) WHERE coalesce(ua.simulated,false)
+                   } END,
+                   evidence_simulated:CASE WHEN uc IS NULL THEN false ELSE EXISTS {
+                     MATCH (:Artifact)-[ue:EVIDENCES]->(uc) WHERE coalesce(ue.simulated,false)
+                   } END,
+                   source:coalesce(uo.source,uc.source),
+                   source_url:coalesce(uo.source_url,head([(ua:Artifact)-[:EVIDENCES]->(uc) | ua.url]))}) AS ultimate_parents,
+               collect(DISTINCT {id: dp.id, name: dp.name, pct: o.pct,
+                   simulated:coalesce(dp.simulated,false),
+                   relationship_id:coalesce(o.id, elementId(o)),
+                   relationship_simulated:coalesce(o.simulated,false),
+                   source:o.source, source_url:o.source_url}) AS direct_parents,
                collect(DISTINCT c{.id,.name,.kind}) AS categories
         LIMIT 1
         """,
@@ -80,12 +99,16 @@ async def entity_core(entity_id: str) -> dict | None:
         WITH e, ps, seat, pc ORDER BY seat.code, coalesce(ps.id, elementId(ps))
         RETURN collect({
           id:coalesce(ps.id, elementId(ps)), claim_id:ps.claim_id,
-          source:ps.source, retrieved_at:ps.retrieved_at, confidence:ps.confidence,
+          source:ps.source, source_url:ps.source_url,
+          retrieved_at:ps.retrieved_at, confidence:ps.confidence,
           status:ps.status, simulated:coalesce(ps.simulated,false),
           seat_code:seat.code, seat_simulated:coalesce(seat.simulated,false),
           claim_status:pc.status, claim_simulated:coalesce(pc.simulated,false),
           artifact_simulated:CASE WHEN pc IS NULL THEN false ELSE EXISTS {
             MATCH (pa:Artifact)-[:EVIDENCES]->(pc) WHERE coalesce(pa.simulated,false)
+          } END,
+          evidence_simulated:CASE WHEN pc IS NULL THEN false ELSE EXISTS {
+            MATCH (:Artifact)-[pe:EVIDENCES]->(pc) WHERE coalesce(pe.simulated,false)
           } END
         }) AS evidence
         """,
@@ -102,7 +125,8 @@ async def supply_position(entity_id: str, root_id: str | None) -> dict:
     rows = await db.read(
         """
         MATCH (e:Entity {id:$id})-[s:SUPPLIES]->(c:Entity)
-         RETURN c.id AS id, c.name AS name, s.tier AS tier, s.sole_source AS sole_source, s.psc AS psc, s.naics AS naics,
+         RETURN c.id AS id, c.name AS name, coalesce(s.id, elementId(s)) AS edge_id,
+                 s.tier AS tier, s.sole_source AS sole_source, s.psc AS psc, s.naics AS naics,
                 s.contract_ref AS contract_ref, s.amount AS amount, s.source AS source, s.source_url AS source_url,
                 coalesce(s.id, elementId(s)) AS evidence_id, s.claim_id AS claim_id, s.status AS status,
                 s.retrieved_at AS retrieved_at, s.confidence AS confidence,
@@ -127,6 +151,9 @@ async def supply_position(entity_id: str, root_id: str | None) -> dict:
           claim_status:sc.status, claim_simulated:coalesce(sc.simulated,false),
           artifact_simulated:CASE WHEN sc IS NULL THEN false ELSE EXISTS {
             MATCH (sa:Artifact)-[:EVIDENCES]->(sc) WHERE coalesce(sa.simulated,false)
+          } END,
+          evidence_simulated:CASE WHEN sc IS NULL THEN false ELSE EXISTS {
+            MATCH (:Artifact)-[se:EVIDENCES]->(sc) WHERE coalesce(se.simulated,false)
           } END
         }) AS evidence
         """,
@@ -154,10 +181,47 @@ async def people(entity_id: str) -> dict:
     rows = await db.read(
         """
         MATCH (p:Person)-[r:HELD_ROLE]->(e:Entity {id:$id})
+        OPTIONAL MATCH (rc:Claim {id:r.claim_id})
         OPTIONAL MATCH (p)-[r2:HELD_ROLE]->(o:Entity) WHERE o.id <> e.id AND (o.lei IS NULL OR e.lei IS NULL OR o.lei <> e.lei)
-        WITH p, r, collect(DISTINCT {entity_id:o.id, entity:o.name, title:r2.title, current:r2.current, flagged: coalesce(o.flagged,false)}) AS elsewhere
-        RETURN p.id AS person_id, p.name AS name, r.id AS edge_id, r.title AS title, r.role_type AS role_type, r.from AS from, r.to AS to,
-               coalesce(r.current, r.to IS NULL) AS current, r.source AS source, r.source_url AS source_url, elsewhere
+        OPTIONAL MATCH (rc2:Claim {id:r2.claim_id})
+        WITH p, r, rc, collect(DISTINCT {entity_id:o.id, entity:o.name, title:r2.title, current:r2.current,
+            flagged:coalesce(o.flagged,false),
+            simulated:coalesce(o.simulated,false) OR coalesce(r2.simulated,false) OR coalesce(rc2.simulated,false)
+              OR CASE WHEN rc2 IS NULL THEN false ELSE EXISTS {
+                MATCH (r2a:Artifact)-[:EVIDENCES]->(rc2) WHERE coalesce(r2a.simulated,false)
+              } END
+              OR CASE WHEN rc2 IS NULL THEN false ELSE EXISTS {
+                MATCH (:Artifact)-[r2e:EVIDENCES]->(rc2) WHERE coalesce(r2e.simulated,false)
+              } END,
+            role_edge_id:coalesce(r2.id,elementId(r2)), claim_id:r2.claim_id,
+            claim_simulated:coalesce(rc2.simulated,false),
+            artifact_simulated:CASE WHEN rc2 IS NULL THEN false ELSE EXISTS {
+              MATCH (r2a:Artifact)-[:EVIDENCES]->(rc2) WHERE coalesce(r2a.simulated,false)
+            } END,
+            evidence_simulated:CASE WHEN rc2 IS NULL THEN false ELSE EXISTS {
+              MATCH (:Artifact)-[r2e:EVIDENCES]->(rc2) WHERE coalesce(r2e.simulated,false)
+            } END,
+            source:coalesce(r2.source,rc2.source),
+            source_url:coalesce(r2.source_url,head([(r2a:Artifact)-[:EVIDENCES]->(rc2) | r2a.url]))}) AS elsewhere
+        RETURN p.id AS person_id, p.name AS name, coalesce(r.id,elementId(r)) AS edge_id,
+               r.claim_id AS claim_id, r.title AS title, r.role_type AS role_type, r.from AS from, r.to AS to,
+               coalesce(r.current, r.to IS NULL) AS current, coalesce(r.source,rc.source) AS source,
+               coalesce(r.source_url,head([(ra:Artifact)-[:EVIDENCES]->(rc) | ra.url])) AS source_url,
+               coalesce(rc.simulated,false) AS claim_simulated,
+               CASE WHEN rc IS NULL THEN false ELSE EXISTS {
+                 MATCH (ra:Artifact)-[:EVIDENCES]->(rc) WHERE coalesce(ra.simulated,false)
+               } END AS artifact_simulated,
+               CASE WHEN rc IS NULL THEN false ELSE EXISTS {
+                 MATCH (:Artifact)-[re:EVIDENCES]->(rc) WHERE coalesce(re.simulated,false)
+               } END AS evidence_simulated,
+               coalesce(p.simulated,false) OR coalesce(r.simulated,false) OR coalesce(rc.simulated,false)
+                 OR CASE WHEN rc IS NULL THEN false ELSE EXISTS {
+                   MATCH (ra:Artifact)-[:EVIDENCES]->(rc) WHERE coalesce(ra.simulated,false)
+                 } END
+                 OR CASE WHEN rc IS NULL THEN false ELSE EXISTS {
+                   MATCH (:Artifact)-[re:EVIDENCES]->(rc) WHERE coalesce(re.simulated,false)
+                 } END AS simulated,
+               elsewhere
         ORDER BY current DESC, r.from DESC
         LIMIT 200
         """,
@@ -178,14 +242,16 @@ async def screens(entity_id: str) -> list[dict]:
     """Sanctions / exclusion / registry screens are Claims with predicate *_screen."""
     rows = await db.read(
         """
-        MATCH (c:Claim)-[:ASSERTS]->(e:Entity {id:$id})
+        MATCH (c:Claim)-[asserts:ASSERTS]->(e:Entity {id:$id})
         WHERE c.predicate ENDS WITH '_screen'
-        OPTIONAL MATCH (a:Artifact)-[:EVIDENCES]->(c)
-        WITH c, collect(DISTINCT a{.id,.title,.url,.source,.retrieved_at,.simulated}) AS artifacts
+        OPTIONAL MATCH (a:Artifact)-[evidences:EVIDENCES]->(c)
+        WITH c, asserts, collect(DISTINCT a{.id,.title,.url,.source,.retrieved_at,.simulated,
+          evidence_edge_id:evidences.id, evidence_simulated:coalesce(evidences.simulated,false)}) AS artifacts
         ORDER BY c.retrieved_at DESC, c.id
         RETURN collect({
           claim_id:c.id, predicate:c.predicate, result:c.object_value, source:c.source,
-          confidence:c.confidence, status:c.status, simulated:coalesce(c.simulated,false),
+          confidence:c.confidence, status:c.status, asserts_edge_id:asserts.id,
+          simulated:coalesce(c.simulated,false) OR coalesce(asserts.simulated,false),
           retrieved_at:c.retrieved_at, artifacts:artifacts, detail:c.detail
         }) AS screens
         """,
@@ -228,11 +294,17 @@ def _confidence(value: object, default: float = 1.0) -> float:
     except (TypeError, ValueError):
         return 0.0
 
-
+def _graph_fact_simulated(fact: dict) -> bool:
+    return bool(
+        fact.get("simulated")
+        or fact.get("relationship_simulated")
+        or fact.get("entity_simulated")
+        or fact.get("claim_simulated")
+        or fact.get("artifact_simulated")
+        or fact.get("evidence_simulated")
+    )
 def _eligible_graph_fact(fact: dict, *nodes: dict) -> bool:
-    if fact.get("simulated") or fact.get("entity_simulated") or any(n.get("simulated") for n in nodes):
-        return False
-    if fact.get("claim_simulated") or fact.get("artifact_simulated"):
+    if _graph_fact_simulated(fact) or any(n.get("simulated") for n in nodes):
         return False
     if fact.get("claim_id"):
         if fact.get("claim_status") != "committed":
@@ -246,13 +318,17 @@ def _eligible_graph_fact(fact: dict, *nodes: dict) -> bool:
         return False
     return True
 
-
+def _screen_artifacts(item: dict) -> list[dict]:
+    evidence = [a for a in item.get("artifacts", []) if a]
+    legacy = item.get("artifact")
+    if legacy and legacy not in evidence:
+        evidence.insert(0, legacy)
+    return evidence
 def _screen_simulated(item: dict) -> bool:
     return bool(
         item.get("simulated")
         or item.get("artifact_simulated")
-        or (item.get("artifact") or {}).get("simulated")
-        or any(a.get("simulated") for a in item.get("artifacts", []) if a)
+        or any(a.get("simulated") or a.get("evidence_simulated") for a in _screen_artifacts(item))
     )
 
 
@@ -401,13 +477,13 @@ def evaluate_risk_contract(
                 "ownership_graph_evidence": {
                     "container": "parent_seat_evidence",
                     "fields": ["id", "claim_id", "claim_status", "claim_simulated",
-                               "artifact_simulated", "seat_code", "seat_simulated",
+                               "artifact_simulated", "evidence_simulated", "seat_code", "seat_simulated",
                                "source", "retrieved_at", "confidence", "status", "simulated"],
                 },
                 "supply_graph_evidence": {
                     "container": "risk_evidence",
                     "fields": ["evidence_id", "claim_id", "claim_status", "claim_simulated",
-                               "artifact_simulated", "sole_source", "entity_simulated",
+                               "artifact_simulated", "evidence_simulated", "sole_source", "entity_simulated",
                                "source", "retrieved_at", "confidence", "status", "simulated"],
                 },
             },
@@ -447,34 +523,126 @@ async def news(entity_id: str, limit: int = 10) -> list[dict]:
     )
 
 
-def _ind(family: str, label: str, severity: str | None, source: str | None, detail: str | None = None, url: str | None = None, ids: list[str] | None = None) -> dict:
-    return {"family": family, "label": label, "severity": severity, "source": source, "detail": detail, "source_url": url, "element_ids": ids or [], "no_data": severity is None}
+def _ind(family: str, label: str, severity: str | None, source: str | None, detail: str | None = None,
+         url: str | None = None, ids: list[str] | None = None, simulated: bool = False) -> dict:
+    return {
+        "family": family,
+        "label": label,
+        "severity": severity,
+        "source": source,
+        "detail": detail,
+        "source_url": url,
+        "element_ids": [i for i in (ids or []) if i],
+        "simulated": bool(simulated),
+        "no_data": severity is None,
+    }
 
-
+def _screen_refs(screen: dict) -> tuple[list[str], str | None, bool]:
+    evidence = _screen_artifacts(screen)
+    ids = [screen.get("claim_id"), screen.get("asserts_edge_id")]
+    ids.extend(ref for artifact in evidence for ref in (artifact.get("id"), artifact.get("evidence_edge_id")))
+    url = next((artifact.get("url") for artifact in evidence if artifact.get("url")), None)
+    return list(dict.fromkeys(i for i in ids if i)), url, _screen_simulated(screen)
 async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, scr: list[dict]) -> dict:
     inds: list[dict] = []
     e = core["e"]
     # 1. Ownership / foreign control
     seat = (core.get("parent_seat") or {}).get("code")
+    seat_ref = core.get("parent_seat") or {}
     ups = core.get("ultimate_parents") or []
     if seat:
         foreign = not seat.upper().startswith(HOME)
         detail = f"Ultimate parent seated in {seat}" + (f" — {ups[0]['name']}" if ups else "")
+        seat_evidence = [
+            fact for fact in core.get("parent_seat_evidence", [])
+            if fact.get("id") == seat_ref.get("relationship_id") or fact.get("seat_code") == seat
+        ]
+        ownership_ids = [
+            i for u in ups for i in (u.get("id"), u.get("relationship_id"), u.get("claim_id")) if i
+        ]
+        ownership_ids += [i for i in (seat_ref.get("id"), seat_ref.get("relationship_id")) if i]
+        ownership_ids += [
+            i for fact in seat_evidence for i in (fact.get("claim_id"), fact.get("id")) if i
+        ]
+        ownership_ids = list(dict.fromkeys(ownership_ids))
+        ownership_url = next((u.get("source_url") for u in ups if u.get("source_url")), None) or seat_ref.get("source_url")
+        ownership_url = ownership_url or next(
+            (fact.get("source_url") for fact in seat_evidence if fact.get("source_url")),
+            None,
+        )
+        ownership_simulated = (
+            any(_graph_fact_simulated(u) for u in ups)
+            or bool(seat_ref.get("simulated") or seat_ref.get("relationship_simulated"))
+            or any(_graph_fact_simulated(fact) for fact in seat_evidence)
+        )
         inds.append(_ind("ownership", "Foreign ultimate parent" if foreign else "Domestic ultimate parent", "high" if foreign else "clear",
-                         e.get("ownership_source") or "GLEIF", detail, ids=[u["id"] for u in ups]))
+                         e.get("ownership_source") or "GLEIF", detail, ownership_url, ownership_ids, ownership_simulated))
     elif ups:
-        inds.append(_ind("ownership", "Ultimate parent known, jurisdiction unresolved", "low", "GLEIF", ups[0]["name"], ids=[ups[0]["id"]]))
+        u0 = ups[0]
+        inds.append(_ind(
+            "ownership",
+            "Ultimate parent known, jurisdiction unresolved",
+            "low",
+            u0.get("source") or "GLEIF",
+            u0["name"],
+            u0.get("source_url"),
+            [u0.get("id"), u0.get("relationship_id"), u0.get("claim_id")],
+            _graph_fact_simulated(u0),
+        ))
     else:
         inds.append(_ind("ownership", "Ownership chain", None, None, "No parent records resolved"))
     # 2. Concentration / sole source
     if supply["supplies"]:
+        def backing_for(display: dict) -> list[dict]:
+            return [
+                fact for fact in supply.get("risk_evidence", [])
+                if (
+                    fact.get("evidence_id") == display.get("edge_id")
+                    or (
+                        fact.get("contract_ref")
+                        and fact.get("contract_ref") == display.get("contract_ref")
+                    )
+                )
+            ]
+
         ss = [s for s in supply["supplies"] if s.get("sole_source")]
         if ss:
             s0 = ss[0]
+            backing = backing_for(s0)
+            supply_ids = [s0.get("edge_id")]
+            supply_ids += [
+                i for fact in backing for i in (fact.get("claim_id"), fact.get("evidence_id")) if i
+            ]
+            supply_url = s0.get("source_url") or next(
+                (fact.get("source_url") for fact in backing if fact.get("source_url")),
+                None,
+            )
             inds.append(_ind("concentration", f"Sole source at tier {s0.get('tier') or '?'}" + (f" for PSC {s0['psc']}" if s0.get("psc") else ""),
-                             "medium", s0.get("source") or "USAspending", s0.get("contract_ref"), s0.get("source_url")))
+                             "medium", s0.get("source") or "USAspending", s0.get("contract_ref"), supply_url,
+                             ids=list(dict.fromkeys(i for i in supply_ids if i)),
+                             simulated=bool(s0.get("simulated") or any(_graph_fact_simulated(fact) for fact in backing))))
         else:
-            inds.append(_ind("concentration", "No sole-source awards on record", "clear", "USAspending"))
+            backing = [fact for display in supply["supplies"] for fact in backing_for(display)]
+            supply_ids = [display.get("edge_id") for display in supply["supplies"]]
+            supply_ids += [
+                i for fact in backing for i in (fact.get("claim_id"), fact.get("evidence_id")) if i
+            ]
+            supply_url = next(
+                (display.get("source_url") for display in supply["supplies"] if display.get("source_url")),
+                None,
+            ) or next((fact.get("source_url") for fact in backing if fact.get("source_url")), None)
+            inds.append(_ind(
+                "concentration",
+                "No sole-source awards on record",
+                "clear",
+                "USAspending",
+                url=supply_url,
+                ids=list(dict.fromkeys(i for i in supply_ids if i)),
+                simulated=bool(
+                    any(display.get("simulated") for display in supply["supplies"])
+                    or any(_graph_fact_simulated(fact) for fact in backing)
+                ),
+            ))
     else:
         inds.append(_ind("concentration", "Supply position", None, None, "No award records for this entity"))
     # 3. People
@@ -484,64 +652,114 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
     if moved or flagged_in:
         who = (moved or flagged_in)[0]
         other = next((x for x in who["elsewhere"] if x["flagged"]), None)
+        people_ids = [who.get("person_id"), who.get("edge_id"), who.get("claim_id")]
+        if other:
+            people_ids += [other.get("entity_id"), other.get("role_edge_id"), other.get("claim_id")]
         inds.append(_ind("people", f"{'Former' if moved else 'Current'} {who['title'] or 'officer'} linked to flagged entity" + (f" ({other['entity']})" if other else ""),
-                         "medium", who.get("source") or "LittleSis", who["name"], who.get("source_url"), ids=[who["person_id"]]))
+                         "medium", who.get("source") or (other or {}).get("source") or "LittleSis", who["name"],
+                         who.get("source_url") or (other or {}).get("source_url"), ids=people_ids,
+                          simulated=bool(_graph_fact_simulated(who) or _graph_fact_simulated(other or {}))))
     elif any(p.get("formerly_elsewhere") for p in ppl["current"]):
         p0 = next(p for p in ppl["current"] if p.get("formerly_elsewhere"))
         other = next((x for x in p0["elsewhere"] if not x["current"]), None)
+        people_ids = [p0.get("person_id"), p0.get("edge_id"), p0.get("claim_id")]
+        if other:
+            people_ids += [other.get("entity_id"), other.get("role_edge_id"), other.get("claim_id")]
         inds.append(_ind("people", f"Former {other['title'] or 'officer'} of {other['entity']} on current board" if other else "Former officer of another supplier on current board",
-                         "medium", p0.get("source") or "LittleSis", f"{p0['name']} — {p0['title'] or 'role'} since {p0.get('from') or '?'}", p0.get("source_url"), ids=[p0["person_id"]]))
+                         "medium", p0.get("source") or (other or {}).get("source") or "LittleSis",
+                         f"{p0['name']} — {p0['title'] or 'role'} since {p0.get('from') or '?'}",
+                         p0.get("source_url") or (other or {}).get("source_url"), ids=people_ids,
+                          simulated=bool(_graph_fact_simulated(p0) or _graph_fact_simulated(other or {}))))
     elif interlocks:
         p0 = interlocks[0]
         other = next((x for x in p0["elsewhere"] if x["current"]), None)
+        people_ids = [p0.get("person_id"), p0.get("edge_id"), p0.get("claim_id")]
+        if other:
+            people_ids += [other.get("entity_id"), other.get("role_edge_id"), other.get("claim_id")]
         inds.append(_ind("people", f"Board interlock — {p0['name']} also at {other['entity'] if other else 'another supplier'}", "low", p0.get("source") or "LittleSis",
-                         "An interlock is a lead, not a finding", p0.get("source_url"), ids=[p0["person_id"]]))
+                         "An interlock is a lead, not a finding", p0.get("source_url") or (other or {}).get("source_url"),
+                          ids=people_ids, simulated=bool(_graph_fact_simulated(p0) or _graph_fact_simulated(other or {}))))
     elif ppl["current"] or ppl["former"]:
-        inds.append(_ind("people", "No interlocks or flagged movements among resolved people", "clear", "LittleSis · EDGAR"))
+        resolved_people = ppl["current"] + ppl["former"]
+        people_ids = [
+            i for person in resolved_people
+            for i in (person.get("person_id"), person.get("edge_id"), person.get("claim_id")) if i
+        ]
+        people_ids += [
+            i for person in resolved_people for other in person.get("elsewhere", [])
+            for i in (other.get("entity_id"), other.get("role_edge_id"), other.get("claim_id")) if i
+        ]
+        people_url = next(
+            (person.get("source_url") for person in resolved_people if person.get("source_url")),
+            None,
+        ) or next(
+            (
+                other.get("source_url")
+                for person in resolved_people
+                for other in person.get("elsewhere", [])
+                if other.get("source_url")
+            ),
+            None,
+        )
+        people_simulated = any(
+            _graph_fact_simulated(person)
+            or any(_graph_fact_simulated(other) for other in person.get("elsewhere", []))
+            for person in resolved_people
+        )
+        inds.append(_ind(
+            "people",
+            "No interlocks or flagged movements among resolved people",
+            "clear",
+            "LittleSis · EDGAR",
+            url=people_url,
+            ids=list(dict.fromkeys(people_ids)),
+            simulated=people_simulated,
+        ))
     else:
         inds.append(_ind("people", "People", None, None, "No officers or directors resolved"))
     # 4. Sanctions & debarment
-    eligible_scr = [
-        s for s in scr
-        if s.get("status") == "committed" and not _screen_simulated(s) and not e.get("simulated")
-    ]
-    sanc = next((s for s in eligible_scr if s["predicate"] == "sanctions_screen"), None)
-    excl = next((s for s in eligible_scr if s["predicate"] == "exclusion_screen"), None)
+    # Report committed findings even when simulated; the separate score contract excludes
+    # simulated evidence from numeric contributions.
+    reported_scr = [s for s in scr if s.get("status", "committed") == "committed"]
+    sanc = next((s for s in reported_scr if s["predicate"] == "sanctions_screen"), None)
+    excl = next((s for s in reported_scr if s["predicate"] == "exclusion_screen"), None)
     if sanc or excl:
         hit = (sanc and sanc["result"] == "hit") or (excl and excl["result"] == "hit")
         src = " · ".join(x["source"] for x in (sanc, excl) if x)
         det = "; ".join(filter(None, [(sanc or {}).get("detail"), (excl or {}).get("detail")]))
-        inds.append(_ind("sanctions", "Sanctions and debarment screen" + (" — HIT" if hit else ""), "high" if hit else "clear", src, det or None))
+        refs = [_screen_refs(screen) for screen in (sanc, excl) if screen]
+        ids = list(dict.fromkeys(i for screen_ids, _, _ in refs for i in screen_ids))
+        url = next((screen_url for _, screen_url, _ in refs if screen_url), None)
+        simulated = any(screen_simulated for _, _, screen_simulated in refs)
+        inds.append(_ind("sanctions", "Sanctions and debarment screen" + (" — HIT" if hit else ""), "high" if hit else "clear", src, det or None, url, ids, simulated))
     else:
         inds.append(_ind("sanctions", "Sanctions and debarment screen", None, None, "Not yet screened"))
     # 5. Financial health — only meaningful for listed entities with filings
-    fin = next((s for s in eligible_scr if s["predicate"] == "financial_screen"), None)
+    fin = next((s for s in reported_scr if s["predicate"] == "financial_screen"), None)
     if fin:
-        inds.append(_ind("financial", "Financial health", fin["result"] if fin["result"] in SEVERITY_WEIGHT else "low", fin["source"], fin.get("detail")))
+        ids, url, simulated = _screen_refs(fin)
+        inds.append(_ind("financial", "Financial health", fin["result"] if fin["result"] in SEVERITY_WEIGHT else "low", fin["source"], fin.get("detail"), url, ids, simulated))
     elif e.get("public") and e.get("ticker"):
         inds.append(_ind("financial", "Financial health — listed, filings available", "clear", "EDGAR", f"Ticker {e['ticker']}"))
     else:
         inds.append(_ind("financial", "Financial health — private entity, no filings", None, None))
     # 6. Adverse media
-    adv = next((s for s in eligible_scr if s["predicate"] == "adverse_media_screen"), None)
+    adv = next((s for s in reported_scr if s["predicate"] == "adverse_media_screen"), None)
     if adv:
-        inds.append(_ind("media", "Adverse media", adv["result"] if adv["result"] in SEVERITY_WEIGHT else "low", adv["source"], adv.get("detail")))
+        ids, url, simulated = _screen_refs(adv)
+        inds.append(_ind("media", "Adverse media", adv["result"] if adv["result"] in SEVERITY_WEIGHT else "low", adv["source"], adv.get("detail"), url, ids, simulated))
     else:
         inds.append(_ind("media", "Adverse media — below coverage threshold", None, None))
 
-    scored = [i for i in inds if not i["no_data"]]
-    total = sum(SEVERITY_WEIGHT[i["severity"]] for i in scored)
-    maxv = 3.0 * len(scored) if scored else 0
-    composite = round(100 * total / maxv) if maxv else None
+    if e.get("simulated"):
+        for indicator in inds:
+            indicator["simulated"] = True
+    observed = [i for i in inds if not i["no_data"]]
     return {
         "indicators": inds,
-        "composite": composite,
         "families_requested": len(inds),
-        "families_with_data": len(scored),
-        "note": (
-            f"Composite is computed on available indicators only. {len(inds) - len(scored)} of {len(inds)} requested signal families returned no data; the score reflects {len(scored)}."
-            if scored else "No signal families returned data; no composite is computed."
-        ),
+        "families_with_data": len(observed),
+        "note": "Risk score uses approved, non-simulated evidence only. Missing, staged, rejected, and simulated evidence does not contribute.",
         "disclaimer": "Every indicator marks opacity, concentration or foreign control — conditions warranting human review. This tool flags; it does not accuse.",
     }
 

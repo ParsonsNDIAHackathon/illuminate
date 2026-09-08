@@ -15,6 +15,17 @@
           <v-list-item v-for="h in hits" :key="h.id" :title="h.name" :subtitle="[h.label, h.uei && `UEI ${h.uei}`].filter(Boolean).join(' · ')" @click="onPick(h.id)" />
         </v-list>
       </div>
+      <div v-if="graph.focusIds.length" class="focus-title">
+        <span>REPORT TRACE</span>
+        <strong>{{ graph.focusLabel || 'Selected risk indicator' }}</strong>
+        <small>Loaded mission context remains visible; unrelated elements are recessed.</small>
+        <small v-if="graph.focusUnavailableIds.length" class="focus-missing">{{ graph.focusUnavailableIds.length }} referenced element{{ graph.focusUnavailableIds.length === 1 ? '' : 's' }} unavailable in the loaded graph.</small>
+        <div class="focus-links">
+          <router-link :to="`/entities/${graph.focusVendorId}`">Vendor report</router-link>
+          <a v-if="route.query.evidence" :href="String(route.query.evidence)" target="_blank" rel="noopener">Matching evidence</a>
+          <span v-else>No matching evidence destination</span>
+        </div>
+      </div>
       <div class="cypher-peek" v-if="graph.lastCypher">
         <details><summary>last query</summary><CypherBlock :statement="graph.lastCypher.statement" :params="graph.lastCypher.params" /></details>
       </div>
@@ -31,6 +42,7 @@
 </template>
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { api, qs } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
 import Inspector from '../components/Inspector.vue'
@@ -42,6 +54,7 @@ import CypherBlock from '../components/CypherBlock.vue'
 import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 const graph = useGraph(); const ws = useWorkspace()
+const route = useRoute()
 const q = ref(''); const hits = ref<any[]>([]); const searching = ref(false); const open = ref(false)
 let t: any
 // A plain text field, not an autocomplete: the typed text — and the canvas filter it drives — must survive blur.
@@ -54,7 +67,29 @@ watch(q, (v) => {
 async function onPick(id: string) { open.value = false; q.value = ''; await graph.loadNeighbourhood(id, 1, ws.ws.layers); graph.select(id) }
 async function reload() { if (ws.ws.root_id) await graph.loadNeighbourhood(ws.ws.root_id, ws.depth, ws.ws.layers, true) }
 async function expand(id: string) { await graph.loadNeighbourhood(id, 1, ws.ws.layers) }
-onMounted(async () => { if (!ws.loaded) await ws.load(); if (!graph.nodes.size) reload() })
+async function applyRouteFocus() {
+  if (!ws.loaded) await ws.load()
+  const ids = String(route.query.focus || '').split(',').filter(Boolean)
+  const vendor = String(route.query.vendor || '')
+  if (vendor) {
+    if (ws.ws.root_id && !graph.nodes.has(ws.ws.root_id)) await graph.loadNeighbourhood(ws.ws.root_id, ws.depth, ws.ws.layers)
+    // A report trace may reference people, locations, or evidence hidden by the normal workspace
+    // layers. Merge those elements for the trace without changing the user's layer preferences.
+    await graph.loadNeighbourhood(vendor, Math.max(2, ws.depth), {
+      ...ws.ws.layers,
+      people: true,
+      countries: true,
+      artifacts: true,
+      categories: true,
+    })
+    graph.setFocus(ids, String(route.query.finding || 'Selected risk indicator'), vendor, String(route.query.family || ''))
+  } else {
+    graph.clearFocus()
+    if (!graph.nodes.size) await reload()
+  }
+}
+onMounted(applyRouteFocus)
+watch(() => route.fullPath, applyRouteFocus)
 watch(() => ws.depth, reload)
 </script>
 <style scoped>
@@ -69,4 +104,12 @@ watch(() => ws.depth, reload)
 .hits { position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; max-height: 320px; overflow: auto; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
 .cypher-peek { position: absolute; right: 56px; bottom: 12px; max-width: 520px; font-size: 12px; }
 .cypher-peek summary { cursor: pointer; opacity: .6; text-align: right; }
+.focus-title { position: absolute; left: 12px; top: 104px; z-index: 4; max-width: 350px; display: grid; padding: 9px 12px; border-left: 4px solid #006b62; background: rgba(245,248,240,.94); color: #173b37; box-shadow: 0 2px 10px rgba(25,45,40,.12); }
+.focus-title span { color: #006b62; font-size: 9px; font-weight: 800; letter-spacing: .14em; }
+.focus-title strong { font-size: 13px; line-height: 1.25; }
+.focus-title small { opacity: .68; font-size: 10px; margin-top: 2px; }
+.focus-title .focus-missing { margin-top: 6px; color: #8a321f; font-weight: 700; opacity: 1; }
+.focus-links { display: flex; gap: 10px; align-items: center; margin-top: 7px; padding-top: 6px; border-top: 1px solid rgba(0,107,98,.2); font-size: 11px; }
+.focus-links a { color: #006b62; font-weight: 750; text-decoration: none; }
+.focus-links span { opacity: .58; }
 </style>

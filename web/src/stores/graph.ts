@@ -19,6 +19,11 @@ export const useGraph = defineStore('graph', {
     version: 0,          // bumped when elements change
     styleVersion: 0,     // bumped when style ops change
     highlightIds: [] as string[],
+    focusIds: [] as string[], // report element_ids; ordered and stable so graph focus is reproducible
+    focusLabel: '',
+    focusVendorId: '',
+    focusFamily: '',
+    focusUnavailableIds: [] as string[],
     filter: '',          // search-bar text; canvas dims nodes that don't match
   }),
   getters: {
@@ -34,11 +39,24 @@ export const useGraph = defineStore('graph', {
       for (const e of sub.edges || []) if (this.nodes.has(e.source) && this.nodes.has(e.target)) this.edges.set(e.id, e)
       this.version++
     },
-    replace(sub: { nodes: GNode[]; edges: GEdge[] } | null | undefined) { this.nodes = new Map(); this.edges = new Map(); this.merge(sub) },
-    clear() { this.nodes = new Map(); this.edges = new Map(); this.selectedId = null; this.selectedEdgeId = null; this.version++ },
+    replace(sub: { nodes: GNode[]; edges: GEdge[] } | null | undefined) {
+      this.nodes = new Map(); this.edges = new Map(); this.merge(sub)
+      if (this.focusIds.length && !this.focusIds.some(id => this.nodes.has(id) || this.edges.has(id))) this.clearFocus()
+    },
+    clear() { this.nodes = new Map(); this.edges = new Map(); this.selectedId = null; this.selectedEdgeId = null; this.clearFocus(); this.version++ },
     select(id: string | null) { this.selectedId = id; if (id) this.selectedEdgeId = null },
     selectEdge(id: string | null) { this.selectedEdgeId = id; if (id) this.selectedId = null },
     setFilter(q: string) { this.filter = (q || '').trim() },
+    setFocus(ids: string[], label = '', vendorId = '', family = '') {
+      this.focusIds = [...new Set((ids || []).filter(Boolean))].sort()
+      this.focusLabel = label
+      this.focusVendorId = vendorId
+      this.focusFamily = family
+      this.focusUnavailableIds = []
+      this.styleVersion++
+    },
+    setFocusUnavailable(ids: string[]) { this.focusUnavailableIds = [...new Set(ids)].sort() },
+    clearFocus() { this.focusIds = []; this.focusLabel = ''; this.focusVendorId = ''; this.focusFamily = ''; this.focusUnavailableIds = []; this.styleVersion++ },
     applyStyleOps(ops: StyleOp[], append = false) {
       this.styleOps = append ? [...this.styleOps, ...ops] : ops
       this.legend = deriveLegend(this.styleOps)

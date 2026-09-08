@@ -81,14 +81,25 @@
         </v-list>
       </v-window-item>
       <v-window-item value="risk">
+        <v-alert v-if="rep.identity.simulated || rep.risk.indicators.some((i:any) => i.simulated)" type="warning" variant="tonal" density="compact" class="mb-2">
+          <strong>SIMULATION SCENARIO.</strong> These indicators are training material, not allegations or verified findings.
+        </v-alert>
         <v-list density="compact" lines="two">
-          <v-list-item v-for="i in rep.risk.indicators" :key="i.family" :title="i.label" :subtitle="i.detail || ''">
+          <v-list-item v-for="i in rep.risk.indicators" :key="i.family" :title="i.label" :subtitle="i.detail || ''" :class="{ 'finding-selected': selectedFinding === i.family, 'finding-simulated': i.simulated }" @click="selectedFinding = i.family">
             <template #prepend><v-icon :icon="sevIcon(i.severity)" :color="sevColor(i.severity)" /></template>
-            <template #append><v-chip size="x-small" variant="tonal" :color="sevColor(i.severity)">{{ i.severity ? i.severity : 'No data' }}</v-chip><a v-if="i.source_url" :href="i.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ i.source }}</a><span v-else class="ml-2 text-caption" style="opacity:.7">{{ i.source || '—' }}</span></template>
+            <template #append><v-chip v-if="i.simulated" size="x-small" color="warning" variant="outlined" class="mr-1">SIMULATION</v-chip><v-chip size="x-small" variant="tonal" :color="sevColor(i.severity)">{{ i.severity ? i.severity : 'No data' }}</v-chip><span class="ml-2 text-caption" style="opacity:.7">{{ i.source || '—' }}</span></template>
           </v-list-item>
         </v-list>
+        <div v-if="activeFinding" class="finding-actions">
+          <div><span class="section">Selected report indicator</span><strong>{{ activeFinding.label }}</strong><small>{{ activeFinding.element_ids?.length ? `${activeFinding.element_ids.length} matching graph element${activeFinding.element_ids.length === 1 ? '' : 's'}` : 'No matching graph elements supplied by this report' }}</small></div>
+          <v-btn color="primary" prepend-icon="mdi-vector-polyline" :disabled="!activeFinding.element_ids?.length" @click="traceFinding(activeFinding)">Focus mission path</v-btn>
+          <v-btn v-if="activeFinding.source_url" variant="outlined" prepend-icon="mdi-source-branch" :href="activeFinding.source_url" target="_blank" rel="noopener">Matching evidence</v-btn>
+          <span v-else class="evidence-unavailable">No matching evidence destination supplied</span>
+        </div>
         <v-alert variant="tonal" density="compact" class="mt-2" type="info">
-          <b v-if="rep.risk.composite != null">Composite {{ rep.risk.composite }}/100.</b> {{ rep.risk.note }}
+          <b v-if="rep.risk.score != null">Risk score {{ rep.risk.score }}/100 · {{ String(rep.risk.band || '').replaceAll('_', ' ') }}.</b>
+          <b v-else>Risk score not assessed.</b>
+          {{ rep.risk.note }}
         </v-alert>
         <p class="text-caption mt-2" style="opacity:.7">{{ rep.risk.disclaimer }}</p>
       </v-window-item>
@@ -106,7 +117,7 @@
   <v-container v-else><v-progress-linear indeterminate /></v-container>
 </template>
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
@@ -120,12 +131,18 @@ const router = useRouter(); const route = useRoute(); const graph = useGraph(); 
 const requestedTab = String(route.query.tab || '')
 const tab = ref(requestedTab === 'evidence' ? 'artifacts' : requestedTab || 'overview')
 const rep = ref<any>(null); const enriching = ref(false); const regen_busy = ref(false)
+const selectedFinding = ref<string | null>(null)
+const activeFinding = computed(() => rep.value?.risk?.indicators?.find((i: any) => i.family === selectedFinding.value) || null)
 async function load() { rep.value = await api.get(`/api/entities/${props.id}/report`) }
 function sevIcon(s: string | null) { return s === 'high' ? 'mdi-alert-octagon' : s === 'medium' ? 'mdi-alert' : s === 'low' ? 'mdi-information-outline' : s === 'clear' ? 'mdi-check-circle-outline' : 'mdi-help-circle-outline' }
 function sevColor(s: string | null) { return s === 'high' ? 'error' : s === 'medium' ? 'warning' : s === 'low' ? 'secondary' : s === 'clear' ? 'success' : undefined }
 async function enrich() { enriching.value = true; try { await jobs.enqueue(props.id) } finally { enriching.value = false } }
 async function regen() { regen_busy.value = true; try { await api.post(`/api/entities/${props.id}/summary`); await load() } catch (e: any) { alert(e.message) } finally { regen_busy.value = false } }
 async function openInGraph() { await graph.loadNeighbourhood(props.id, 2, ws.ws.layers); graph.select(props.id); router.push('/') }
+function traceFinding(i: any) {
+  const ids = [...new Set((i.element_ids || []).filter(Boolean))].sort()
+  router.push({ path: '/', query: { vendor: props.id, focus: ids.join(','), finding: i.label, family: i.family, evidence: i.source_url || undefined } })
+}
 watch(tab, async (t) => { if (t === 'graph') { await graph.loadNeighbourhood(props.id, 2, { ...ws.ws.layers, people: true, countries: true }, true); graph.select(props.id) } })
 watch(() => jobs.jobs.filter(j => j.entity_id === props.id && ['succeeded', 'empty', 'partial', 'failed', 'timed_out'].includes(j.status)).length, load)
 onMounted(load); watch(() => props.id, load)
@@ -134,4 +151,11 @@ onMounted(load); watch(() => props.id, load)
 .section { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; }
 dl { display: grid; grid-template-columns: 110px 1fr; gap: 3px 8px; margin: 6px 0 0; font-size: 13px; }
 dt { opacity: .6; } dd { margin: 0; }
+.finding-selected { background: rgba(0,107,98,.08); border-left: 3px solid #006b62; }
+.finding-simulated { border-right: 3px dashed #b77900; background-image: repeating-linear-gradient(135deg, rgba(183,121,0,.045) 0, rgba(183,121,0,.045) 5px, transparent 5px, transparent 11px); }
+.finding-actions { margin-top: 12px; padding: 12px; display: flex; align-items: center; gap: 8px; border: 1px solid rgba(0,107,98,.3); border-radius: 5px; background: rgba(0,107,98,.045); }
+.finding-actions > div { display: grid; margin-right: auto; }
+.finding-actions strong { font-size: 13px; }
+.finding-actions small { opacity: .65; font-size: 11px; }
+.evidence-unavailable { max-width: 150px; color: rgba(70,65,55,.72); font-size: 11px; line-height: 1.25; }
 </style>
