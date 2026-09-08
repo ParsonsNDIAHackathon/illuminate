@@ -220,7 +220,9 @@ def _as_of_board(p):
 def _neighbourhood(p):
     d = _depth(p.get("depth", 2))
     layers = p.get("layers") or {}
-    rel_filter = ["SUPPLIES", "OWNS", "ULTIMATE_PARENT_OF"]
+    # Entity-to-entity ties are always followed: supply, control, and the affiliations
+    # LittleSis records (memberships, lobbying, transactions, donations).
+    rel_filter = ["SUPPLIES", "OWNS", "ULTIMATE_PARENT_OF", "MEMBER_OF", "TRANSACTS_WITH", "LOBBIES", "DONATED_TO"]
     if layers.get("categories", False):
         rel_filter += ["PROVIDES", "SUBCATEGORY_OF"]
     if layers.get("people", True):

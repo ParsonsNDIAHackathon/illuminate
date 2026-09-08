@@ -18,3 +18,4 @@ api/data/
 .DS_Store
 # backups (make backup)
 backups/
+.claude

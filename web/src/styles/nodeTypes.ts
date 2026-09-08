@@ -54,6 +54,7 @@ const EDGE_TINTS: Record<string, Record<Theme, string>> = {
 const EDGE_FAMILY: Record<string, keyof typeof EDGE_TINTS> = {
   SUPPLIES: 'supply', OWNS: 'control', ULTIMATE_PARENT_OF: 'control', HELD_ROLE: 'people', BENEFICIAL_OWNER_OF: 'people',
   PROVIDES: 'category', SUBCATEGORY_OF: 'category', INCORPORATED_IN: 'place', OPERATES_IN: 'place', MANUFACTURES_IN: 'place', PARENT_SEATED_IN: 'place',
+  MEMBER_OF: 'people', TRANSACTS_WITH: 'people', LOBBIES: 'people', DONATED_TO: 'people',
   EVIDENCES: 'evidence', ABOUT: 'evidence', ASSERTS: 'claim', TARGETS: 'claim',
 }
 export function edgeColor(type: string, theme: Theme): string { return EDGE_TINTS[EDGE_FAMILY[type] || 'supply'][theme] }

@@ -49,6 +49,7 @@ function styleSheet(): any[] {
     { selector: 'node[?simulated]', style: { 'border-style': 'dashed', 'border-color': dark ? '#facc15' : '#ca8a04', 'border-width': 2 } },
     { selector: 'edge', style: { width: 1.4, 'line-color': 'data(color)', 'target-arrow-color': 'data(color)', 'target-arrow-shape': 'triangle', 'arrow-scale': 0.8, 'curve-style': 'bezier', label: 'data(label)', 'font-size': 8, color: dark ? '#9ca3af' : '#4b5563', 'text-rotation': 'autorotate', 'text-outline-color': outline, 'text-outline-width': 2, 'text-background-opacity': 0 } },
     { selector: 'edge[type = "HELD_ROLE"]', style: { 'line-style': 'dashed' } },
+    { selector: 'edge[type = "MEMBER_OF"], edge[type = "TRANSACTS_WITH"], edge[type = "LOBBIES"], edge[type = "DONATED_TO"]', style: { 'line-style': 'dashed', 'line-dash-pattern': [2, 3] } },
     { selector: 'edge[?simulated]', style: { 'line-style': 'dotted' } },
     { selector: 'node:selected', style: { 'border-width': 4, 'border-color': dark ? '#f472b6' : '#be185d' } },
     { selector: 'edge:selected', style: { width: 3.5, 'line-color': dark ? '#f472b6' : '#be185d', 'target-arrow-color': dark ? '#f472b6' : '#be185d', 'z-index': 20 } },
