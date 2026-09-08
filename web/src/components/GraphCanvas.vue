@@ -22,7 +22,7 @@ import { applyStyleOps, clearStyleOps } from '../styles/styleOps'
 import { nodeSize, supplierTiers } from '../styles/nodeSize'
 import { fillFor, glyphScaleFor, glyphYFor, iconFor, shapeFor } from '../styles/nodeTypes'
 import { relationshipFamily } from '../styles/relationshipFamilies'
-import { layerData, layerVisible } from '../stores/graphLayers'
+import { hiddenNodeIds, layerData } from '../stores/graphLayers'
 
 cytoscape.use(fcose)
 cytoscape.use(cola)
@@ -243,13 +243,14 @@ function clearVisualFocus() { graph.clearFocus(); graph.clearStyleOps() }
 // The server names each node's layer (graphio.layer_of); the fallback mirrors it for nodes from
 // a route that predates the field. Artifacts split by kind: registry entries and source records
 // are "sources", documents (filings, news, awards, web pages) are "artifacts".
+// Entities have no layer and are always fetched, so an organization that is in the graph only
+// through a hidden person would be left floating; graphLayers.hiddenNodeIds prunes those, and
+// with the "indirect orgs" toggle off it prunes every organization no entity chain joins to a
+// program or the root.
 function applyLayers() {
   if (!cy) return
-  const L = ws.ws.layers || {}
-  cy.nodes().forEach(n => {
-    const layer = n.data('layer')
-    n.toggleClass('layer-hide', !layerVisible(layer, L))
-  })
+  const hidden = hiddenNodeIds(graph.nodeList, graph.edgeList, ws.ws.layers || {}, graph.focusId ? [graph.focusId] : [])
+  cy.nodes().forEach(n => n.toggleClass('layer-hide', hidden.has(n.id())))
 }
 
 // Layout strategy: fcose arranges a fresh canvas (it is the better static layout), then cola takes
