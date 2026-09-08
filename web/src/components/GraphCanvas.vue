@@ -20,7 +20,7 @@ import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 import { applyStyleOps, clearStyleOps } from '../styles/styleOps'
 import { nodeSize, supplierTiers } from '../styles/nodeSize'
-import { edgeColor, fillFor, layerOf, shapeFor } from '../styles/nodeTypes'
+import { edgeColor, fillFor, glyphScaleFor, glyphYFor, iconFor, layerOf, shapeFor } from '../styles/nodeTypes'
 
 cytoscape.use(fcose)
 cytoscape.use(cola)
@@ -44,7 +44,9 @@ function styleSheet(): any[] {
   const text = dark ? '#e5e7eb' : '#111827'
   const outline = dark ? '#0e1013' : '#ffffff'
   return [
-    { selector: 'node', style: { 'background-color': 'data(baseColor)', shape: 'data(shape)', width: 'data(size)', height: 'data(size)', label: 'data(name)', color: text, 'font-size': 10, 'text-wrap': 'ellipsis', 'text-max-width': 120, 'text-valign': 'bottom', 'text-margin-y': 4, 'text-outline-color': outline, 'text-outline-width': 2, 'border-width': 1.5, 'border-color': dark ? '#374151' : '#cbd5e1', 'overlay-padding': 4 } },
+    // The glyph is sized as a share of the node, so it follows supplier tier and the simulated
+    // screen-space rescale on its own; `fit: none` is what makes the percentages authoritative.
+    { selector: 'node', style: { 'background-color': 'data(baseColor)', shape: 'data(shape)', width: 'data(size)', height: 'data(size)', 'background-image': 'data(icon)', 'background-fit': 'none', 'background-width': 'data(glyphScale)', 'background-height': 'data(glyphScale)', 'background-position-y': 'data(glyphY)', 'background-image-opacity': 0.95, label: 'data(name)', color: text, 'font-size': 10, 'text-wrap': 'ellipsis', 'text-max-width': 120, 'text-valign': 'bottom', 'text-margin-y': 4, 'text-outline-color': outline, 'text-outline-width': 2, 'border-width': 1.5, 'border-color': dark ? '#374151' : '#cbd5e1', 'overlay-padding': 4 } },
     { selector: 'node[?isRoot]', style: { 'border-width': 3, 'border-color': dark ? '#60a5fa' : '#1d4ed8', 'font-weight': 'bold', 'font-size': 12 } },
     { selector: 'node[badge != ""]', style: { label: (e: any) => `${e.data('name')}\n${e.data('badge')}`, 'text-wrap': 'wrap' } },
     { selector: 'node[?simulated]', style: { 'border-style': 'dashed', 'border-color': dark ? '#facc15' : '#ca8a04', 'border-width': 2 } },
@@ -84,7 +86,7 @@ function toElements() {
   const tiers = supplierTiers(graph.edgeList, graph.nodeList)
   const nodes = graph.nodeList.map(n => {
     const tier = tiers.get(n.id)
-    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, layer: layerOf(n), baseColor: fillFor(n, ws.theme), shape: shapeFor(n), size: nodeSize(n, tier), tier, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
+    return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, layer: layerOf(n), baseColor: fillFor(n, ws.theme), shape: shapeFor(n), icon: iconFor(n), glyphScale: glyphScaleFor(n), glyphY: glyphYFor(n), size: nodeSize(n, tier), tier, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n) } }
   })
   const edges = graph.edgeList.map(e => ({ group: 'edges', data: { id: e.id, source: e.source, target: e.target, type: e.type, color: edgeColor(e.type, ws.theme), simulated: !!e.props?.simulated, label: e.type === 'SUPPLIES' && e.props?.tier ? `T${e.props.tier}${e.props.sole_source ? ' · sole' : ''}` : e.type === 'HELD_ROLE' ? (e.props?.title || '').slice(0, 18) : e.type === 'OWNS' && e.props?.pct ? `${e.props.pct}%` : '' } }))
   return [...nodes, ...edges]
