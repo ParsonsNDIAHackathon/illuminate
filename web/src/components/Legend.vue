@@ -10,6 +10,12 @@
       <div v-if="types.length > 1" class="types">
         <span v-for="t in types" :key="t.key" class="type" :title="t.label"><span class="dot" :class="t.shape" :style="{ background: t.fill }"></span>{{ t.label }}</span>
       </div>
+      <div v-if="tiersDrawn" class="tier-key" title="Suppliers are drawn by tier: primes largest, each tier down the chain smaller">
+        <strong>Supplier tier</strong>
+        <span v-for="t in TIER_SIZES" :key="t.tier" class="tier">
+          <i :style="{ width: `${t.size * TIER_KEY_SCALE}px`, height: `${t.size * TIER_KEY_SCALE}px`, background: organizationColor() }"></i>T{{ t.tier }}{{ t.tier === TIER_SIZES[TIER_SIZES.length - 1].tier ? '+' : '' }}
+        </span>
+      </div>
       <div v-if="graph.legend.length" class="ops">
         <v-chip v-for="l in graph.legend" :key="l.swatch + l.label" variant="tonal" size="small">
           <span class="swatch" :style="{ background: resolveSwatch(l.swatch, ws.theme) }"></span>
@@ -25,6 +31,7 @@ import { computed, ref, watch } from 'vue'
 import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 import { resolveSwatch } from '../styles/palette'
+import { TIER_SIZES, supplierTiers } from '../styles/nodeSize'
 import { NODE_TYPES, nodeType, type NodeType } from '../styles/nodeTypes'
 const graph = useGraph(); const ws = useWorkspace()
 // The legend is a reference, not a fixture: once it has been read it can be folded away,
@@ -36,6 +43,10 @@ const types = computed(() => {
   const present = new Set(graph.nodeList.map(nodeType))
   return (Object.keys(NODE_TYPES) as NodeType[]).filter(k => present.has(k)).map(k => ({ key: k, label: NODE_TYPES[k].label, shape: NODE_TYPES[k].shape, fill: NODE_TYPES[k].fill[ws.theme] }))
 })
+const TIER_KEY_SCALE = 0.4   // canvas px → legend px, so a T1 disc fits a 12px line
+/** The tier key is only worth its line when something on the canvas is actually tiered. */
+const tiersDrawn = computed(() => supplierTiers(graph.edgeList, graph.nodeList).size > 0)
+function organizationColor() { return NODE_TYPES.Organization.fill[ws.theme] }
 </script>
 <style scoped>
 .legend { position: absolute; left: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
@@ -44,6 +55,10 @@ const types = computed(() => {
 .legend-heading .toggle { margin: -4px -6px -4px 0; opacity: .65; }
 .legend-heading .toggle:hover { opacity: 1; }
 .ops { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tier-key { display: flex; align-items: center; gap: 10px; }
+.tier-key strong { font-size: 10px; letter-spacing: .035em; text-transform: uppercase; opacity: .75; }
+.tier-key .tier { display: inline-flex; align-items: center; gap: 4px; }
+.tier-key .tier i { display: inline-block; border-radius: 50%; opacity: .85; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
 .hint { font-size: 11px; opacity: .6; margin-left: 4px; }
 .types { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; opacity: .8; pointer-events: none; padding: 3px 8px; border-radius: 6px; background: rgba(var(--v-theme-surface), .82); backdrop-filter: blur(2px); }
