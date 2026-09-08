@@ -132,6 +132,63 @@ export type VendorRiskProfile = {
   diligence_flags: RiskDiligenceFlag[]
 }
 
+export type AnalystDispositionAction =
+  | 'investigate'
+  | 'monitor'
+  | 'seek_alternate_source'
+  | 'accept_with_rationale'
+  | 'close_no_action'
+
+export interface AnalystDecisionEvent {
+  id: string
+  kind: 'analyst_decision'
+  entity_id: string
+  disposition: AnalystDispositionAction
+  rationale: string
+  owner: string
+  due_date?: string | null
+  actor: string
+  decided_at: string
+  program_id?: string | null
+  finding_ids: string[]
+  evidence_refs: string[]
+  version: number
+  simulated: boolean
+}
+
+export interface ClaimReviewEvent {
+  id: string
+  kind: 'claim_review'
+  claim_id: string
+  from_status: 'staged'
+  to_status: 'committed' | 'rejected'
+  rationale?: string | null
+  actor: string
+  decided_at: string
+  version: number
+  simulated: boolean
+}
+
+export interface DecisionHistory {
+  current: AnalystDecisionEvent | null
+  events: Array<AnalystDecisionEvent | ClaimReviewEvent>
+}
+
+export interface AnalystDecisionInput {
+  disposition: AnalystDispositionAction
+  rationale: string
+  owner: string
+  due_date?: string | null
+  program_id?: string | null
+  finding_ids: string[]
+  evidence_refs: string[]
+  expected_version: number
+}
+
+export function supportedDecisionEvidenceRefs(refs: string[]): string[] {
+  return [...new Set(refs.filter(ref => ref.startsWith('clm_') || ref.startsWith('art_')))].sort()
+}
+
 export async function getVendorRiskProfile(id: string, suppliedReport?: any): Promise<VendorRiskProfile> {
   const report = suppliedReport || await api.get<any>(`/api/entities/${encodeURIComponent(id)}/report`)
   const risk = report.risk || {}

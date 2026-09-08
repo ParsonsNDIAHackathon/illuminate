@@ -10,6 +10,7 @@ from ..connectors.http import HttpError, fetch_document
 from ..graphio import subgraph_from_graph
 from ..raw import find_raw
 from ..report import build_report, deterministic_summary, persist_summary
+from ..enrichment import decisions
 from ..supply_chain import SupplyChainAnalysis, get_supply_chain_analysis
 from ..schema import SOURCE_KINDS
 from ..tools.handlers import ToolContext, expand_subgraph, search_entities
@@ -276,6 +277,7 @@ async def report(entity_id: str, root_id: str | None = None, user: str = Depends
     rep = await build_report(entity_id, root_id)
     if not rep:
         raise HTTPException(404, "no such entity")
+    rep["analyst_decisions"] = await decisions.history(entity_id, program_id=root_id)
     return rep
 
 

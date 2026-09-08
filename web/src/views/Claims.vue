@@ -16,18 +16,40 @@
       <template #item.when="{ item }">{{ date(item.claim.retrieved_at) }}</template>
       <template #item.actions="{ item }">
         <template v-if="item.claim.status === 'staged'">
-          <v-btn size="x-small" color="success" @click="act(item.claim.id, 'commit')">Commit</v-btn>
-          <v-btn size="x-small" color="error" variant="text" @click="act(item.claim.id, 'reject')">Reject</v-btn>
+          <v-btn size="x-small" color="success" @click="openReview(item.claim.id, 'commit')">Commit</v-btn>
+          <v-btn size="x-small" color="error" variant="text" @click="openReview(item.claim.id, 'reject')">Reject</v-btn>
         </template>
         <span v-else class="text-caption">{{ item.claim.decision_note }}</span>
       </template>
     </v-data-table>
+    <v-card v-if="entityId && history.length" variant="outlined" class="mt-3">
+      <v-card-title class="text-subtitle-1">Accountability history</v-card-title>
+      <v-card-subtitle>Claim truth reviews and vendor dispositions are separate append-only events.</v-card-subtitle>
+      <v-list density="compact">
+        <v-list-item v-for="event in history" :key="event.id">
+          <template #prepend><TruthBadge :value="event.simulated ? 'simulated' : event.kind === 'claim_review' ? event.to_status : 'derived'" /></template>
+          <v-list-item-title>{{ event.kind === 'claim_review' ? `Claim ${event.claim_id} ${event.to_status}` : `Analyst disposition: ${labelize(event.disposition)}` }}</v-list-item-title>
+          <v-list-item-subtitle>{{ event.rationale || 'No rationale recorded' }} · {{ date(event.decided_at) }} · {{ event.actor }}</v-list-item-subtitle>
+        </v-list-item>
+      </v-list>
+    </v-card>
     <ArtifactViewer :artifact-id="rawId" @close="rawId = null" />
+    <v-dialog v-model="reviewDialog" max-width="560">
+      <v-card>
+        <v-card-title>{{ reviewAction === 'commit' ? 'Commit claim' : 'Reject claim' }}</v-card-title>
+        <v-card-text>
+          <v-alert type="info" variant="tonal" density="compact" class="mb-3">This changes claim truth status and records an attributed history event. It does not create a vendor disposition.</v-alert>
+          <v-textarea v-model="reviewRationale" label="Review rationale" maxlength="2000" counter rows="4" />
+          <v-alert v-if="reviewError" type="error" density="compact">{{ reviewError }}</v-alert>
+        </v-card-text>
+        <v-card-actions><v-spacer /><v-btn @click="reviewDialog = false">Cancel</v-btn><v-btn :color="reviewAction === 'commit' ? 'success' : 'error'" :loading="reviewSaving" :disabled="reviewRationale.trim().length < 3" @click="act">Record review</v-btn></v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-container>
 </template>
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
-import { api } from '../api/client'
+import { api, type DecisionHistory } from '../api/client'
 import ArtifactViewer from '../components/ArtifactViewer.vue'
 import SourceLink from '../components/SourceLink.vue'
 import TruthBadge from '../components/TruthBadge.vue'
@@ -35,11 +57,32 @@ import { useRoute } from 'vue-router'
 const route = useRoute()
 const requestedStatus = String(route.query.status || '')
 const status = ref(['staged', 'committed', 'rejected'].includes(requestedStatus) ? requestedStatus : 'staged'); const items = ref<any[]>([]); const loading = ref(false); const rawId = ref<string | null>(null)
+const entityId = String(route.query.entity_id || '')
+const programId = String(route.query.program_id || '')
+const history = ref<DecisionHistory['events']>([])
+const reviewDialog = ref(false); const reviewAction = ref<'commit' | 'reject'>('commit'); const reviewClaimId = ref(''); const reviewRationale = ref(''); const reviewSaving = ref(false); const reviewError = ref('')
 const headers = [{ title: 'Assertion', key: 'assertion', width: 360 }, { title: 'Truth status', key: 'status', width: 120 }, { title: 'Source lineage', key: 'source', width: 220 }, { title: 'Evidence', key: 'artifacts', width: 140 }, { title: 'Retrieved', key: 'when', width: 140 }, { title: '', key: 'actions', width: 170 }]
-async function load() { loading.value = true; try { const entity = String(route.query.entity_id || ''); items.value = await api.get(`/api/claims?status=${status.value}${entity ? `&entity_id=${encodeURIComponent(entity)}` : ''}&limit=500`) } finally { loading.value = false } }
-async function act(id: string, what: 'commit' | 'reject') { await api.post(`/api/claims/${id}/${what}`, {}); load() }
+async function load() {
+  loading.value = true
+  try {
+    items.value = await api.get(`/api/claims?status=${status.value}${entityId ? `&entity_id=${encodeURIComponent(entityId)}` : ''}&limit=500`)
+    history.value = entityId ? (await api.get<DecisionHistory>(`/api/claims/entities/${encodeURIComponent(entityId)}/history${programId ? `?program_id=${encodeURIComponent(programId)}` : ''}`)).events : []
+  } finally { loading.value = false }
+}
+function openReview(id: string, action: 'commit' | 'reject') {
+  reviewClaimId.value = id; reviewAction.value = action; reviewRationale.value = ''; reviewError.value = ''; reviewDialog.value = true
+}
+async function act() {
+  reviewSaving.value = true; reviewError.value = ''
+  try {
+    await api.post(`/api/claims/${reviewClaimId.value}/${reviewAction.value}`, { note: reviewRationale.value })
+    reviewDialog.value = false
+    await load()
+  } catch (error: any) { reviewError.value = error.message } finally { reviewSaving.value = false }
+}
 function confidence(value: unknown) { const n = Number(value); return Number.isFinite(n) ? `${Math.round(n * 100)}%` : 'Unavailable' }
 function date(value: unknown) { return value ? new Date(String(value)).toLocaleString() : 'Unavailable' }
+function labelize(value: string) { return value.replaceAll('_', ' ') }
 watch(status, load); onMounted(load)
 </script>
 <style scoped>

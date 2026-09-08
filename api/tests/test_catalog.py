@@ -136,7 +136,7 @@ async def test_submission_records_remote_identity_and_is_idempotent(catalog_env,
 async def test_status_refresh_and_safe_remote_errors(catalog_env, monkeypatch):
     path = catalog.settings.data_dir / "ndia-catalog.json"
     path.write_text(json.dumps({
-        "illuminate-insight-findings:1.0": {
+        f"illuminate-insight-findings:{catalog.exports.VERSION}": {
             "dataset_id": "ds_123", "contribution_state": "pending_review",
             "message": "Accepted", "submitted_at": "2026-09-08T00:00:00Z",
         }

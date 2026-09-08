@@ -3,6 +3,11 @@
 Illuminate publishes findings at `/api/exports/v1` without requiring the
 Illuminate frontend or its graph serializer.
 
+The current schema is `1.1`. It adds the vendor's current bounded analyst
+disposition and safe audit metadata. The analyst's free-form rationale remains
+inside the reviewed workspace and is never included in this export. Opaque
+pagination tokens from `1.0` are intentionally incompatible with `1.1`.
+
 | Endpoint | Purpose |
 | --- | --- |
 | `/schema` | JSON Schema for the canonical paged JSON response |

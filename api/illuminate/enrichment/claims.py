@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json as _json
 import hashlib
+import uuid
 
 from .. import db
 from ..connectors.base import Fact, NodeRef, now_iso
@@ -19,7 +20,10 @@ from ..ids import artifact_id, claim_id, edge_id
 from ..schema import RELS
 from ..connectors.registry import source_metadata
 
-REL_PREDICATES = set(RELS) - {"EVIDENCES", "ASSERTS", "TARGETS", "ABOUT"}
+REL_PREDICATES = set(RELS) - {
+    "EVIDENCES", "ASSERTS", "TARGETS", "ABOUT", "DECISION_FOR",
+    "REVIEW_OF", "DECISION_PROGRAM", "DECISION_EVIDENCE",
+}
 ATTR_ALLOWLIST = {"uei", "cage", "lei", "registration_status", "public", "ticker", "cik", "legal_name", "employees", "website",
                   "board_size", "flagged", "littlesis_id", "opencorporates_id", "duns", "business_types", "naics_codes", "sam_registered",
                   "incorporation_date", "entity_status", "market_cap", "last_price", "price_change_12m", "registration_expires", "organization_structure"}
@@ -147,13 +151,14 @@ async def decide(cid: str, *, trust: str) -> str:
     return "staged"
 
 
-async def commit(cid: str, note: str | None = None) -> str:
+async def commit(cid: str, note: str | None = None, actor: str = "system") -> str:
+    review_id = "cre_" + uuid.uuid4().hex
     async def work(tx) -> str:
         rows = await _tx_rows(
             tx,
             "MATCH (c:Claim {id:$id})-[:ASSERTS]->(s) "
             "OPTIONAL MATCH (c)-[:TARGETS]->(o) "
-            "SET c.decision_version=coalesce(c.decision_version,0)+1 "
+            "SET c.decision_guard=coalesce(c.decision_guard,0)+1 "
             "RETURN c{.*} AS c, s.id AS sid, head(labels(s)) AS slabel, "
             "o.id AS oid, head(labels(o)) AS olabel",
             {"id": cid},
@@ -241,8 +246,13 @@ async def commit(cid: str, note: str | None = None) -> str:
             tx,
             "MATCH (c:Claim {id:$id}) "
             "SET c.status='committed', c.source_status='committed', "
-            "c.decided_at=$now, c.decision_note=$note",
-            {"id": cid, "now": now_iso(), "note": note},
+            "c.decided_at=$now, c.decision_note=$note, c.decision_actor=$actor, "
+            "c.decision_version=coalesce(c.decision_version,0)+1 "
+            "CREATE (review:ClaimReview {id:$review_id, claim_id:$id, from_status:'staged', "
+            "to_status:'committed', rationale:$note, actor:$actor, decided_at:$now, "
+            "version:c.decision_version, simulated:coalesce(c.simulated,false)}) "
+            "CREATE (review)-[:REVIEW_OF]->(c)",
+            {"id": cid, "now": now_iso(), "note": note, "actor": actor, "review_id": review_id},
         )
         return "committed"
 
@@ -260,12 +270,13 @@ async def endpoints(cid: str) -> list[str]:
     return [i for i in (rows[0]["sid"], rows[0]["oid"], cid) if i]
 
 
-async def reject(cid: str, note: str | None = None) -> str:
+async def reject(cid: str, note: str | None = None, actor: str = "system") -> str:
+    review_id = "cre_" + uuid.uuid4().hex
     async def work(tx) -> str:
         rows = await _tx_rows(
             tx,
             "MATCH (c:Claim {id:$id}) "
-            "SET c.decision_version=coalesce(c.decision_version,0)+1 "
+            "SET c.decision_guard=coalesce(c.decision_guard,0)+1 "
             "RETURN c.status AS status",
             {"id": cid},
         )
@@ -280,8 +291,13 @@ async def reject(cid: str, note: str | None = None) -> str:
             tx,
             "MATCH (c:Claim {id:$id}) "
             "SET c.status='rejected', c.source_status='rejected', "
-            "c.decided_at=$now, c.decision_note=$note",
-            {"id": cid, "now": now_iso(), "note": note},
+            "c.decided_at=$now, c.decision_note=$note, c.decision_actor=$actor, "
+            "c.decision_version=coalesce(c.decision_version,0)+1 "
+            "CREATE (review:ClaimReview {id:$review_id, claim_id:$id, from_status:'staged', "
+            "to_status:'rejected', rationale:$note, actor:$actor, decided_at:$now, "
+            "version:c.decision_version, simulated:coalesce(c.simulated,false)}) "
+            "CREATE (review)-[:REVIEW_OF]->(c)",
+            {"id": cid, "now": now_iso(), "note": note, "actor": actor, "review_id": review_id},
         )
         return "rejected"
 

@@ -126,6 +126,10 @@ async def test_reject_staged_claim_and_repeat_is_idempotent(monkeypatch):
     assert await claims.reject("clm_1", "retry") == "rejected"
     assert state["status"] == "rejected"
     assert sum("c.status='rejected'" in query for query, _params in queries) == 1
+    assert sum("c.decision_version=coalesce" in query for query, _params in queries) == 1
+    event_writes = [(query, params) for query, params in queries if "CREATE (review:ClaimReview" in query]
+    assert len(event_writes) == 1
+    assert event_writes[0][1]["actor"] == "system"
 
 
 @pytest.mark.parametrize("status", ["committed", "unexpected"])

@@ -16,6 +16,8 @@ LABELS: dict[str, str] = {
     "Artifact": "Evidence: filing, award record, registry record, news article, web page. Never a raw blob. kind ∈ {award, registry, filing, news, web, document, record}.",
     "Claim": "Reified assertion (subject, predicate, object) with source, method, confidence, status ∈ {staged, committed, rejected}.",
     "SourceRecord": "A normalized source retrieval or connector attempt, including catalog identity, coverage limits, status, and any non-secret error.",
+    "AnalystDecision": "Append-only human disposition event for a vendor; advisory and distinct from recommendation and claim truth.",
+    "ClaimReview": "Append-only human or system claim truth transition event.",
 }
 
 # --- Relationship types ----------------------------------------------------------
@@ -35,6 +37,10 @@ RELS: dict[str, str] = {
     "ASSERTS": "(c:Claim)-[:ASSERTS]->(subject) — the claim's subject; predicate is a property on the Claim",
     "TARGETS": "(c:Claim)-[:TARGETS]->(object) — the claim's object node, when the object is a node",
     "ABOUT": "(a:Artifact)-[:ABOUT]->(e:Entity) — an artifact that mentions an entity without a specific claim",
+    "DECISION_FOR": "(d:AnalystDecision)-[:DECISION_FOR]->(e:Entity)",
+    "REVIEW_OF": "(r:ClaimReview)-[:REVIEW_OF]->(c:Claim)",
+    "DECISION_PROGRAM": "(d:AnalystDecision)-[:DECISION_PROGRAM]->(program:Entity)",
+    "DECISION_EVIDENCE": "(d:AnalystDecision)-[:DECISION_EVIDENCE]->(claim_or_artifact)",
 }
 
 # Artifact kinds that are a pointer at a data source (a LittleSis org page, a registry entry, a
@@ -103,6 +109,8 @@ CONSTRAINTS = [
     "CREATE CONSTRAINT artifact_id IF NOT EXISTS FOR (n:Artifact) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT claim_id IF NOT EXISTS FOR (n:Claim) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT source_record_id IF NOT EXISTS FOR (n:SourceRecord) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT analyst_decision_id IF NOT EXISTS FOR (n:AnalystDecision) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT claim_review_id IF NOT EXISTS FOR (n:ClaimReview) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT export_state_key IF NOT EXISTS FOR (n:InsightExportState) REQUIRE (n.version, n.finding_id) IS UNIQUE",
     "CREATE CONSTRAINT export_event_key IF NOT EXISTS FOR (n:InsightExportEvent) REQUIRE (n.version, n.revision) IS UNIQUE",
     "CREATE CONSTRAINT export_counter_version IF NOT EXISTS FOR (n:InsightExportCounter) REQUIRE n.version IS UNIQUE",
