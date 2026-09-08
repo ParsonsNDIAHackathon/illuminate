@@ -3,23 +3,22 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__, db, events
 from .config import settings
 from .enrichment.worker import worker
-from .routers import chat, claims, connectors, enrichment, graph, permissions, query
+from .readiness import build_readiness
+from .routers.deps import user_id
 from .routers import settings as settings_router
 from .schema import ensure_schema
 from .tools.permissions import gate
-
+from .routers import catalog, chat, claims, connectors, enrichment, exports, graph, permissions, query
 
 from .mcp_server import build_server
-
-
 class _MCPMount:
     """ASGI shim so the MCP transport (whose session manager runs once per
     lifespan) can be re-created each time the app starts — tests start it twice."""
@@ -61,22 +60,50 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Illuminate", version=__version__, lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-for r in (graph.router, query.router, permissions.router, claims.router, enrichment.router, connectors.router, settings_router.router, chat.router):
+
+@app.get("/api/health", tags=["operations"])
+async def health(refresh: bool = False, user: str = Depends(user_id)):
+    """Reusable readiness contract; always safe to expose and never returns secrets."""
+    return await build_readiness(user, refresh=refresh)
+
+
+for r in (graph.router, query.router, permissions.router, claims.router, enrichment.router, connectors.router, exports.router, catalog.router, settings_router.router, chat.router):
     app.include_router(r)
+
+@app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)
+async def mcp_endpoint_redirect():
+    """Keep the public MCP URL unambiguous without letting it fall through to the SPA."""
+    return RedirectResponse(url="/mcp/", status_code=307)
+
 
 app.mount("/mcp", _mcp_mount)
 
-# Serve the built frontend when present (docker image / single-process demo).
-_dist = Path(__file__).resolve().parents[2] / "web" / "dist"
-if _dist.exists():
-    app.mount("/assets", StaticFiles(directory=_dist / "assets"), name="assets")
+_dist = (Path(__file__).resolve().parents[2] / "web" / "dist").resolve()
 
-    @app.get("/{full_path:path}", include_in_schema=False)
+
+def _dist_file(full_path: str, dist: Path | None = None) -> Path | None:
+    """Resolve a requested asset without allowing traversal or escaping symlinks."""
+    root = (dist or _dist).resolve()
+    candidate = (root / full_path).resolve()
+    if candidate.is_relative_to(root) and candidate.is_file():
+        return candidate
+    return None
+
+
+def _mount_frontend(application: FastAPI, dist: Path) -> None:
+    """Register built assets and history fallback on a FastAPI application."""
+    application.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
+
+    @application.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str):
-        f = _dist / full_path
-        if full_path and f.is_file():
+        f = _dist_file(full_path, dist) if full_path else None
+        if f is not None:
             return FileResponse(f)
-        return FileResponse(_dist / "index.html")
+        return FileResponse(dist / "index.html")
+
+
+if _dist.exists():
+    _mount_frontend(app, _dist)
 
 
 def run() -> None:

@@ -15,6 +15,7 @@ LABELS: dict[str, str] = {
     "Location": "Country / region / city. kind ∈ {country, region, city}; code is ISO-3166 where applicable.",
     "Artifact": "Evidence: filing, award record, registry record, news article, web page. Never a raw blob. kind ∈ {award, registry, filing, news, web, document, record}.",
     "Claim": "Reified assertion (subject, predicate, object) with source, method, confidence, status ∈ {staged, committed, rejected}.",
+    "SourceRecord": "A normalized source retrieval or connector attempt, including catalog identity, coverage limits, status, and any non-secret error.",
 }
 
 # --- Relationship types ----------------------------------------------------------
@@ -22,8 +23,12 @@ RELS: dict[str, str] = {
     "SUPPLIES": "(supplier:Entity)-[:SUPPLIES {tier, sole_source, contract_ref, amount, psc, naics}]->(consumer:Entity)",
     "OWNS": "(parent:Entity)-[:OWNS {pct}]->(child:Entity) — direct ownership",
     "ULTIMATE_PARENT_OF": "(ultimate:Entity)-[:ULTIMATE_PARENT_OF]->(child:Entity)",
-    "HELD_ROLE": "(p:Person)-[:HELD_ROLE {title, role_type ∈ {executive, board, both}, from, to, current}]->(e:Entity) — one edge per tenure",
+    "HELD_ROLE": "(p:Person)-[:HELD_ROLE {title, role_type ∈ {executive, board, both, position}, from, to, current}]->(e:Entity) — one edge per tenure; the entity may be an agency (kind='agency') for a government post",
     "BENEFICIAL_OWNER_OF": "(p:Person)-[:BENEFICIAL_OWNER_OF {pct}]->(e:Entity)",
+    "MEMBER_OF": "(e:Entity)-[:MEMBER_OF {from, to, current}]->(org:Entity) — trade council, association or consortium membership",
+    "TRANSACTS_WITH": "(a:Entity)-[:TRANSACTS_WITH {from, to, current, amount, description}]->(b:Entity) — a recorded business relationship outside federal awards (customer, partner, foreign buyer)",
+    "LOBBIES": "(e:Entity)-[:LOBBIES {from, to, current}]->(body:Entity) — lobbying of a government body",
+    "DONATED_TO": "(donor:Entity)-[:DONATED_TO {from, to, amount}]->(recipient:Entity) — grants, sponsorships and political giving",
     "PROVIDES": "(e:Entity)-[:PROVIDES]->(c:Category)",
     "SUBCATEGORY_OF": "(c:Category)-[:SUBCATEGORY_OF]->(parent:Category)",
     "INCORPORATED_IN": "(e:Entity)-[:INCORPORATED_IN]->(l:Location)",
@@ -42,11 +47,20 @@ RELS: dict[str, str] = {
 SOURCE_KINDS = ("record", "registry")
 
 # Provenance every node and edge written by the system carries (Entity metadata table).
-PROVENANCE_FIELDS = ["source", "source_url", "retrieved_at", "method", "confidence", "claim_id"]
+PROVENANCE_FIELDS = [
+    "source", "source_id", "catalog_ids", "source_url", "retrieved_at",
+    "usage_note", "quality_note", "supports", "unknowns", "source_status",
+    "connector_error", "method", "confidence", "claim_id", "simulated",
+]
+
+# Claim truth states used by deterministic consumers such as vendor-risk scoring.
+# Only committed, non-simulated claims and artifacts are eligible as approved facts.
+CLAIM_TRUTH_STATUSES = ("staged", "committed", "rejected")
+APPROVED_TRUTH_STATUS = "committed"
 
 # APOC procedures/functions the validator allows (read side).
 APOC_ALLOWLIST = [
-    "apoc.path.expand", "apoc.path.subgraphAll", "apoc.path.subgraphNodes", "apoc.path.spanningTree",
+    "apoc.path.expand", "apoc.path.expandConfig", "apoc.path.subgraphAll", "apoc.path.subgraphNodes", "apoc.path.spanningTree",
     "apoc.algo.dijkstra", "apoc.algo.allSimplePaths", "apoc.coll.", "apoc.text.", "apoc.map.",
     "apoc.convert.", "apoc.date.", "apoc.meta.stats", "apoc.node.degree", "apoc.nodes.connected",
 ]
@@ -91,6 +105,11 @@ CONSTRAINTS = [
     "CREATE CONSTRAINT location_id IF NOT EXISTS FOR (n:Location) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT artifact_id IF NOT EXISTS FOR (n:Artifact) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT claim_id IF NOT EXISTS FOR (n:Claim) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT source_record_id IF NOT EXISTS FOR (n:SourceRecord) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT export_state_key IF NOT EXISTS FOR (n:InsightExportState) REQUIRE (n.version, n.finding_id) IS UNIQUE",
+    "CREATE CONSTRAINT export_event_key IF NOT EXISTS FOR (n:InsightExportEvent) REQUIRE (n.version, n.revision) IS UNIQUE",
+    "CREATE CONSTRAINT export_counter_version IF NOT EXISTS FOR (n:InsightExportCounter) REQUIRE n.version IS UNIQUE",
+    "CREATE CONSTRAINT export_lock_version IF NOT EXISTS FOR (n:InsightExportLock) REQUIRE n.version IS UNIQUE",
     "CREATE INDEX entity_uei IF NOT EXISTS FOR (n:Entity) ON (n.uei)",
     "CREATE INDEX entity_cage IF NOT EXISTS FOR (n:Entity) ON (n.cage)",
     "CREATE INDEX entity_lei IF NOT EXISTS FOR (n:Entity) ON (n.lei)",
@@ -126,7 +145,8 @@ def schema_prompt() -> str:
     for k, v in RELS.items():
         lines.append(f"  {v}")
     lines.append("COMMON PROPERTIES: every node has id (string, e.g. 'ent_…', 'per_…', 'cat_…', 'loc_…', 'art_…', 'clm_…') and name. "
-                 "Entity: uei, cage, lei, kind, aliases, registration_status, public (bool), ticker, summary, simulated (bool). "
+                 "Entity: uei, cage, lei, kind ∈ {organization, program, agency}, aliases, registration_status, public (bool), ticker, summary, simulated (bool), "
+                 "revenue, lda_registrant_id, org_types, federal (bool, agencies). Person: person_types, public_official (bool). "
                  "Location: code (ISO2 country / 'US-TX'), kind. Category: kind ∈ {goods, services}. "
                  "Edges carry an id property and provenance: " + ", ".join(PROVENANCE_FIELDS) + ".")
     lines.append("CATEGORY TAXONOMY (id → name, kind):")

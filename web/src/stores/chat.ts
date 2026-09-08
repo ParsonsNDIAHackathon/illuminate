@@ -19,11 +19,11 @@ export const useChat = defineStore('chat', {
       chatSocket.on((ev) => this.handle(ev))
       chatSocket.connect()
     },
-    send(text: string, canvasIds?: string[], layers?: Record<string, boolean>) {
+    send(text: string, canvasIds?: string[], layers?: Record<string, boolean>, focusId?: string | null, focusLabel?: string | null) {
       this.messages.push({ id: mid(), role: 'user', text })
       this.messages.push({ id: mid(), role: 'assistant', text: '', streaming: true, tools: [] })
       this.busy = true
-      chatSocket.send({ type: 'message', text, conversation_id: this.conversationId, canvas_ids: canvasIds?.slice(0, 200), layers })
+      chatSocket.send({ type: 'message', text, conversation_id: this.conversationId, canvas_ids: canvasIds?.slice(0, 200), layers, focus_id: focusId ?? null, focus_label: focusLabel ?? null })
     },
     current(): ChatMessage | undefined { return [...this.messages].reverse().find(m => m.role === 'assistant' && m.streaming) },
     handle(ev: any) {
@@ -51,6 +51,7 @@ export const useChat = defineStore('chat', {
           break
         }
         case 'error': { const m = this.current(); if (m) { m.error = ev.message; m.streaming = false } this.busy = false; break }
+        case 'model_unavailable': { const m = this.current(); if (m) m.error = ev.message; break }
         case 'permission_request': usePermissions().push(ev.payload); break
         case 'permission_resolved': case 'permission_failed': usePermissions().resolve(ev.payload); break
         case 'job_update': useJobs().update(ev.payload); break

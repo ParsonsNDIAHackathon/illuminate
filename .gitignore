@@ -12,6 +12,7 @@ web/dist/
 .env
 *.local
 api/data/
+/data/
 # neo4j volume
 .neo4j/
 # misc

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+STARTED_AT=$SECONDS
 
 export NEO4J_server_directories_data="$ROOT/.neo4j/data"
 export NEO4J_server_directories_logs="$ROOT/.neo4j/logs"
@@ -52,6 +53,7 @@ until curl -sf http://127.0.0.1:7474 >/dev/null; do
   fi
   sleep 1
 done
+echo "Neo4j ready after $((SECONDS - STARTED_AT))s"
 
 (
   cd api
@@ -60,13 +62,14 @@ done
 API_PID=$!
 
 echo "Waiting for Illuminate API..."
-until curl -sf http://127.0.0.1:8000/api/health >/dev/null; do
+until curl -sf http://127.0.0.1:8000/api/health | grep -q '"ok":true'; do
   if ! kill -0 "$API_PID" 2>/dev/null; then
     echo "Illuminate API exited before becoming ready." >&2
     exit 1
   fi
   sleep 1
 done
+echo "Illuminate API ready after $((SECONDS - STARTED_AT))s"
 
 (
   cd web

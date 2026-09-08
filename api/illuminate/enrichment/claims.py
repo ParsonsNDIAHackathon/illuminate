@@ -9,16 +9,21 @@ reachable."""
 from __future__ import annotations
 
 import json as _json
+import hashlib
 
 from .. import db
 from ..connectors.base import Fact, NodeRef, now_iso
+from ..connectors.http import HttpError
 from ..ids import artifact_id, claim_id, edge_id
 from ..schema import RELS
+from ..connectors.registry import source_metadata
 
 REL_PREDICATES = set(RELS) - {"EVIDENCES", "ASSERTS", "TARGETS", "ABOUT"}
 ATTR_ALLOWLIST = {"uei", "cage", "lei", "registration_status", "public", "ticker", "cik", "legal_name", "employees", "website",
                   "board_size", "flagged", "littlesis_id", "opencorporates_id", "duns", "business_types", "naics_codes", "sam_registered",
-                  "incorporation_date", "entity_status", "market_cap", "last_price", "price_change_12m", "registration_expires", "organization_structure"}
+                  "incorporation_date", "entity_status", "market_cap", "last_price", "price_change_12m", "registration_expires", "organization_structure",
+                  # LittleSis org record and person markers
+                  "revenue", "lda_registrant_id", "fedspending_id", "aliases_text", "blurb", "org_types", "littlesis_tags", "public_official"}
 SCREEN_PREDICATES = {"sanctions_screen", "exclusion_screen", "financial_screen", "adverse_media_screen", "registry_screen"}
 # 'mention' asserts only that an artifact is about the subject — the connector's own observation, committed on arrival.
 OBSERVATION_PREDICATES = SCREEN_PREDICATES | {"mention"}
@@ -58,25 +63,33 @@ async def _resolve_ref(ref: NodeRef) -> NodeRef:
 async def stage(fact: Fact, *, source: str, trust: str, model: str | None = None) -> str:
     """Write the Claim (+ Artifact) for a fact. Returns the claim id. Nothing about
     the world is asserted in the graph yet — only that a source said it."""
+    # Capture this before entity resolution, which intentionally keeps only
+    # identity properties when it redirects a reference to an existing entity.
+    simulated = bool(fact.props.get("simulated") or fact.subject.props.get("simulated") or
+                     (fact.object and fact.object.props.get("simulated")) or
+                     (fact.artifact and fact.artifact.props.get("simulated")))
     fact.subject = await _resolve_ref(fact.subject)
     if fact.object:
         fact.object = await _resolve_ref(fact.object)
     if fact.object and fact.object.id == fact.subject.id and fact.predicate in REL_PREDICATES:
         # e.g. GLEIF says the entity is its own parent after resolution — nothing to assert
-        return await _noop_claim(fact, source=source, trust=trust)
+        return await _noop_claim(fact, source=source, trust=trust, simulated=simulated)
     cid = claim_id()
+    meta = source_metadata(source)
     params: dict = {
         "cid": cid, "pred": fact.predicate, "source": source, "trust": trust, "method": fact.method, "model": model,
         "conf": float(fact.confidence), "now": now_iso(), "value": fact.value, "detail": fact.detail,
         "rel_props_json": _json.dumps({k: v for k, v in fact.props.items() if v is not None}),
         "merge_keys_json": _json.dumps(list(fact.merge_keys)), "sid": fact.subject.id, "oid": fact.object.id if fact.object else None,
         "rid1": edge_id(), "rid2": edge_id(), "rid3": edge_id(), "rid4": edge_id(),
+        "source_meta": meta, "simulated": simulated,
     }
     parts = [
         _merge_node("s", fact.subject, "s", params),
         "MERGE (c:Claim {id:$cid}) ON CREATE SET c.predicate=$pred, c.subject_id=$sid, c.object_id=$oid, c.object_value=$value, c.source=$source,",
-        "  c.trust=$trust, c.method=$method, c.model=$model, c.confidence=$conf, c.retrieved_at=$now, c.status='staged', c.detail=$detail,",
-        "  c.rel_props=$rel_props_json, c.merge_keys=$merge_keys_json",
+        "  c.trust=$trust, c.method=$method, c.model=$model, c.confidence=$conf, c.retrieved_at=$now, c.status='staged', c.source_status='staged', c.detail=$detail,",
+        "  c.rel_props=$rel_props_json, c.merge_keys=$merge_keys_json, c.simulated=$simulated",
+        "SET c += $source_meta",
         "MERGE (c)-[ra:ASSERTS]->(s) ON CREATE SET ra.id=$rid1",
     ]
     if fact.object:
@@ -87,9 +100,10 @@ async def stage(fact: Fact, *, source: str, trust: str, model: str | None = None
         params.update({"aid": artifact_id(a.url), "aurl": a.url, "atitle": a.title[:300], "akind": a.kind, "asource": a.source or source, "apub": a.published_at,
                        "aprops": {k: v for k, v in a.props.items() if v is not None}})
         parts += [
-            "MERGE (a:Artifact {id:$aid}) ON CREATE SET a.url=$aurl, a.title=$atitle, a.kind=$akind, a.source=$asource, a.published_at=$apub, a.retrieved_at=$now",
-            "SET a += $aprops",
-            "MERGE (a)-[re:EVIDENCES]->(c) ON CREATE SET re.id=$rid3",
+            "MERGE (a:Artifact {id:$aid}) ON CREATE SET a.url=$aurl, a.title=$atitle, a.kind=$akind, a.source=$asource, "
+            "a.published_at=$apub, a.retrieved_at=$now, a += $aprops, a += $source_meta, a.source_status='retrieved', a.simulated=$simulated",
+            "MERGE (a)-[re:EVIDENCES]->(c) ON CREATE SET re.id=$rid3, re.source=$source, re.retrieved_at=$now, "
+            "re.source_status='retrieved', re.simulated=$simulated, re += $source_meta",
             "MERGE (a)-[rb:ABOUT]->(s) ON CREATE SET rb.id=$rid4",
         ]
     parts.append("RETURN c.id AS id")
@@ -97,13 +111,17 @@ async def stage(fact: Fact, *, source: str, trust: str, model: str | None = None
     return cid
 
 
-async def _noop_claim(fact: Fact, *, source: str, trust: str) -> str:
+async def _noop_claim(fact: Fact, *, source: str, trust: str, simulated: bool | None = None) -> str:
     cid = claim_id()
+    meta = source_metadata(source)
+    simulated = bool(fact.props.get("simulated") or fact.subject.props.get("simulated")) if simulated is None else simulated
     await db.write(
         "MERGE (c:Claim {id:$cid}) ON CREATE SET c.predicate=$pred, c.subject_id=$sid, c.object_id=$sid, c.source=$source, c.trust=$trust, c.method=$method, "
-        "c.confidence=$conf, c.retrieved_at=$now, c.status='rejected', c.decision_note='self-referential after entity resolution' "
+        "c.confidence=$conf, c.retrieved_at=$now, c.status='rejected', c.source_status='rejected', c.simulated=$simulated, "
+        "c.decision_note='self-referential after entity resolution' SET c += $meta "
         "WITH c MATCH (s {id:$sid}) MERGE (c)-[r:ASSERTS]->(s) ON CREATE SET r.id=$rid",
-        {"cid": cid, "pred": fact.predicate, "sid": fact.subject.id, "source": source, "trust": trust, "method": fact.method, "conf": float(fact.confidence), "now": now_iso(), "rid": edge_id()},
+        {"cid": cid, "pred": fact.predicate, "sid": fact.subject.id, "source": source, "trust": trust, "method": fact.method,
+         "conf": float(fact.confidence), "now": now_iso(), "rid": edge_id(), "meta": meta, "simulated": simulated},
     )
     return cid
 
@@ -137,9 +155,21 @@ async def commit(cid: str, note: str | None = None) -> str:
         raise KeyError(cid)
     r = rows[0]
     c = r["c"]
+    status = c.get("status")
+    if status == "rejected":
+        return "rejected"
+    if status == "committed":
+        return "committed"
+    if status != "staged":
+        raise ValueError(f"claim {cid} cannot be committed from status {status!r}")
     pred = c["predicate"]
     rel_props = _json.loads(c.get("rel_props") or "{}") if c.get("rel_props") else {}
-    prov = {"source": c["source"], "source_url": None, "retrieved_at": c["retrieved_at"], "method": c["method"], "confidence": c["confidence"], "claim_id": cid}
+    simulated = bool(rel_props.get("simulated") or c.get("simulated"))
+    rel_props["simulated"] = simulated
+    prov = {k: c.get(k) for k in ("source", "source_id", "catalog_ids", "retrieved_at", "usage_note", "quality_note",
+                                  "supports", "unknowns", "method", "confidence")}
+    prov["simulated"] = simulated
+    prov.update({"source_url": None, "source_status": "committed", "connector_error": c.get("connector_error"), "claim_id": cid})
     art = await db.read("MATCH (a:Artifact)-[:EVIDENCES]->(c:Claim {id:$id}) RETURN a.url AS url LIMIT 1", {"id": cid})
     if art:
         prov["source_url"] = art[0]["url"]
@@ -163,7 +193,7 @@ async def commit(cid: str, note: str | None = None) -> str:
     elif pred == "sanctions_screen" or pred == "exclusion_screen":
         if c.get("object_value") == "hit":
             await db.write("MATCH (s {id:$sid}) SET s.flagged = true, s.flag_reason = $why", {"sid": r["sid"], "why": f"{pred}: {c.get('detail') or 'hit'}"})
-    await db.write("MATCH (c:Claim {id:$id}) SET c.status='committed', c.decided_at=$now, c.decision_note=$note", {"id": cid, "now": now_iso(), "note": note})
+    await db.write("MATCH (c:Claim {id:$id}) SET c.status='committed', c.source_status='committed', c.decided_at=$now, c.decision_note=$note", {"id": cid, "now": now_iso(), "note": note})
     return "committed"
 
 
@@ -179,8 +209,33 @@ async def endpoints(cid: str) -> list[str]:
 
 
 async def reject(cid: str, note: str | None = None) -> str:
-    await db.write("MATCH (c:Claim {id:$id}) SET c.status='rejected', c.decided_at=$now, c.decision_note=$note", {"id": cid, "now": now_iso(), "note": note})
+    await db.write("MATCH (c:Claim {id:$id}) SET c.status='rejected', c.source_status='rejected', c.decided_at=$now, c.decision_note=$note", {"id": cid, "now": now_iso(), "note": note})
     return "rejected"
+
+
+async def record_connector_error(source: str, entity_id: str, error: Exception) -> str:
+    """Persist a credential-free failed attempt so absence of claims is explainable downstream."""
+    meta = source_metadata(source)
+    retrieved_at = now_iso()
+    rid = "src_" + hashlib.sha256(f"{source}:{entity_id}:{retrieved_at}".encode()).hexdigest()[:24]
+    error_meta = connector_error_metadata(error)
+    await db.write(
+        "MERGE (r:SourceRecord {id:$id}) SET r += $meta, r.source=$source, r.entity_id=$entity_id, "
+        "r.retrieved_at=$now, r.source_status='error', r.connector_error=$error, "
+        "r.connector_error_type=$error_type, r.connector_error_status=$error_status",
+        {"id": rid, "meta": meta, "source": source, "entity_id": entity_id, "now": retrieved_at,
+         "error": error_meta["connector_error"], "error_type": error_meta["connector_error_type"],
+         "error_status": error_meta["connector_error_status"]},
+    )
+    return rid
+
+
+def connector_error_metadata(error: Exception) -> dict:
+    """Return only allowlisted diagnostics; exception messages can contain credential-bearing URLs or bodies."""
+    error_type = type(error).__name__
+    status = error.status if isinstance(error, HttpError) else None
+    summary = error_type + (f" (HTTP {status})" if status is not None else "")
+    return {"connector_error": summary, "connector_error_type": error_type, "connector_error_status": status}
 
 
 async def list_claims(status: str | None = None, entity_id: str | None = None, limit: int = 200) -> list[dict]:
@@ -197,8 +252,18 @@ async def list_claims(status: str | None = None, entity_id: str | None = None, l
         MATCH (c:Claim) WHERE {' AND '.join(where)}
         OPTIONAL MATCH (c)-[:ASSERTS]->(s) OPTIONAL MATCH (c)-[:TARGETS]->(o) OPTIONAL MATCH (a:Artifact)-[:EVIDENCES]->(c)
         RETURN c{{.*}} AS claim, s.name AS subject, head(labels(s)) AS subject_label, o.name AS object, head(labels(o)) AS object_label,
-               collect(DISTINCT a{{.id,.title,.url,.kind}}) AS artifacts
+               collect(DISTINCT a{{.id,.title,.url,.kind,.source_id,.source_identifier,.catalog_ids,.retrieved_at,.usage_note,.quality_note,.source_status,.connector_error,.simulated}}) AS artifacts
         ORDER BY claim.retrieved_at DESC LIMIT $limit
         """,
         params,
+    )
+
+
+async def list_source_records(entity_id: str | None = None, limit: int = 200) -> list[dict]:
+    """Expose successful cached retrievals and failures without promoting either to findings."""
+    where = "WHERE r.entity_id = $entity_id" if entity_id else ""
+    return await db.read(
+        f"MATCH (r:SourceRecord) {where} RETURN r{{.*}} AS source_record "
+        "ORDER BY r.retrieved_at DESC LIMIT $limit",
+        {"entity_id": entity_id, "limit": limit},
     )

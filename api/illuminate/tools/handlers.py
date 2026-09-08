@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from urllib.parse import urlsplit, urlunsplit
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,10 +17,65 @@ from ..cypher.templates import TEMPLATES
 from ..cypher.validator import CypherRejected, validate
 from ..graphio import merge_subgraphs, rows_clean, subgraph_from_graph
 from ..ids import edge_id, entity_id as make_entity_id, location_id, normalize_name, artifact_id, claim_id, lucene_query, search_tokens
-from ..report import build_report
+from ..report import approved_risk_projection, build_report
 from ..resolve import find_entity, fuzzy_candidates
 from ..styles import derive_legend, validate_ops
 from .permissions import gate
+
+_SENSITIVE_KEYS = re.compile(r"(authorization|cookie|password|secret|token|api[_-]?key|raw|payload|body|headers?)", re.IGNORECASE)
+_SENSITIVE_VALUES = re.compile(r"(?i)(bearer\s+\S+|(?:sk|pk)_[a-z0-9_-]{12,}|api[_-]?key\s*[:=]\s*\S+)")
+_TOOL_DATA_FIELDS = {
+    "search_entities": {"query", "results", "error"},
+    "expand_subgraph": {"entity_id", "nodes", "edges", "error"},
+    "run_template": {"template", "row_count", "rows", "templates", "schema", "error"},
+    # Arbitrary query aliases can conceal restricted values, so custom rows never
+    # leave the application through model/MCP projections.
+    "run_cypher": {"classification", "row_count", "counters", "error"},
+    "propose_entity": {"entity_id", "resolved_existing", "possible_duplicates", "counters", "note", "error"},
+    "attach_evidence": {"claim_id", "artifact_id", "counters", "error"},
+    "set_styles": {"applied", "legend", "error"},
+    "get_entity_report": {
+        "identity", "risk", "summary", "error",
+    },
+    "enrich_entity": {"job_id", "entity", "connectors", "status", "note", "error"},
+}
+
+
+def safe_tool_data(value: Any) -> Any:
+    """Remove credentials/restricted payload fields before any model transport."""
+    if isinstance(value, dict):
+        return {
+            str(key): "[redacted]" if _SENSITIVE_KEYS.search(str(key)) else safe_tool_data(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [safe_tool_data(item) for item in value]
+    if isinstance(value, tuple):
+        return [safe_tool_data(item) for item in value]
+    if isinstance(value, str):
+        if _SENSITIVE_VALUES.search(value):
+            return "[redacted]"
+        if value.lower().startswith(("http://", "https://")):
+            try:
+                parsed = urlsplit(value)
+                if not parsed.hostname:
+                    return "[redacted-invalid-url]"
+                host = parsed.hostname
+                if ":" in host and not host.startswith("["):
+                    host = f"[{host}]"
+                netloc = host + (f":{parsed.port}" if parsed.port else "")
+                return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
+            except (TypeError, ValueError):
+                return "[redacted-invalid-url]"
+    return value
+
+
+def safe_tool_result(tool_name: str, data: Any) -> Any:
+    """Allowlist each tool's intentionally model-facing top-level fields."""
+    if not isinstance(data, dict):
+        return None
+    allowed = _TOOL_DATA_FIELDS.get(tool_name, {"error"})
+    return safe_tool_data({key: value for key, value in data.items() if key in allowed})
 
 
 @dataclass
@@ -28,12 +84,24 @@ class ToolContext:
     conversation_id: str | None = None
     user: str = "local"
     layers: dict | None = None
+    # Backward-compatible name used by MCP callers and older deterministic tests.
+    # Program focus is the current name; either input resolves to the same context.
     root_id: str | None = None
+    # The program the canvas is currently narrowed to, sent per request by whoever is
+    # looking at it. Nothing is focused by default: a workspace holds every program.
+    focus_id: str | None = None
+    focus_label: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.focus_id is None and self.root_id is not None:
+            self.focus_id = self.root_id
+        elif self.root_id is None and self.focus_id is not None:
+            self.root_id = self.focus_id
 
     @classmethod
     def from_workspace(cls, **kw) -> "ToolContext":
         ws = load_workspace()
-        return cls(layers=kw.pop("layers", None) or ws.layers, root_id=kw.pop("root_id", None) or ws.root_id, **kw)
+        return cls(layers=kw.pop("layers", None) or ws.layers, **kw)
 
 
 @dataclass
@@ -48,15 +116,15 @@ class ToolResult:
     permission: dict | None = None              # decision summary when a write was involved
     notes: list[str] = field(default_factory=list)
 
-    def for_model(self, max_chars: int = 12000) -> str:
-        payload = {"ok": self.ok, "data": self.data}
+    def for_model(self, tool_name: str, max_chars: int = 12000) -> str:
+        payload = {"ok": self.ok, "data": safe_tool_result(tool_name, self.data)}
         if self.notes:
             payload["notes"] = self.notes
         if self.permission:
             payload["permission"] = self.permission
         if self.subgraph:
             payload["subgraph_summary"] = {"nodes": len(self.subgraph["nodes"]), "edges": len(self.subgraph["edges"])}
-        s = json.dumps(payload, default=str)
+        s = json.dumps(safe_tool_data(payload), default=str)
         if len(s) > max_chars:
             s = s[: max_chars - 40] + '… (truncated; refine the query)"}'
         return s
@@ -141,9 +209,10 @@ async def search_entities(ctx: ToolContext, query: str, kind: str = "any", limit
     return ToolResult(ok=True, data={"query": q, "results": rows[:limit]})
 
 
-async def expand_subgraph(ctx: ToolContext, entity_id: str, depth: int = 2, layers: dict | None = None) -> ToolResult:
+async def expand_subgraph(ctx: ToolContext, entity_id: str, depth: int = 2, layers: dict | None = None, program_id: str | None = None) -> ToolResult:
     t = TEMPLATES["neighbourhood"]
-    params = {"entity_id": entity_id, "depth": depth, "layers": {**(ctx.layers or {}), **(layers or {})}}
+    params = {"entity_id": entity_id, "depth": depth, "layers": {**(ctx.layers or {}), **(layers or {})},
+              "program_id": program_id or ctx.focus_id}
     cy, bound = t.build(params)
     v = validate(cy, params=bound)
     records, graph, _ = await db.read_graph(v.statement, bound)
@@ -164,10 +233,12 @@ async def run_template(ctx: ToolContext, name: str, params: dict | None = None, 
     if not t:
         return ToolResult(ok=False, data={"error": f"unknown template {name}", "templates": list(TEMPLATES)})
     p = dict(params or {})
+    # A template's "root" is whatever the canvas is focused on; with nothing focused the
+    # caller has to name the entity, and the missing-params error below says so.
     if "root_id" in t.required and not p.get("root_id"):
-        p["root_id"] = ctx.root_id
-    if "entity_id" in t.required and not p.get("entity_id") and ctx.root_id:
-        p["entity_id"] = ctx.root_id
+        p["root_id"] = ctx.focus_id
+    if "entity_id" in t.required and not p.get("entity_id") and ctx.focus_id:
+        p["entity_id"] = ctx.focus_id
     missing = [r for r in t.required if not p.get(r)]
     if missing:
         return ToolResult(ok=False, data={"error": f"missing params: {missing}", "schema": t.schema()})
@@ -225,16 +296,16 @@ async def set_styles(ctx: ToolContext, ops: list[dict]) -> ToolResult:
 
 
 async def get_entity_report(ctx: ToolContext, entity_id: str) -> ToolResult:
-    rep = await build_report(entity_id, ctx.root_id)
+    rep = await build_report(entity_id, ctx.focus_id)
     if not rep:
         return ToolResult(ok=False, data={"error": f"no entity {entity_id}"})
     compact = {
-        "identity": rep["identity"], "geography": rep["geography"], "control": rep["control"], "categories": rep["categories"],
-        "supply": {k: rep["supply"][k] for k in ("tier_from_root", "suppliers_count", "sole_source_edges", "awards")},
-        "supplies": rep["supply"]["supplies"][:10],
-        "people": {"current": [{k: p[k] for k in ("name", "title", "role_type", "from", "interlock")} for p in rep["people"]["current"][:12]],
-                   "former": [{k: p[k] for k in ("name", "title", "from", "to", "moved_to_flagged")} for p in rep["people"]["former"][:12]]},
-        "risk": rep["risk"], "screens": rep["screens"], "news": rep["news"][:5], "sources": rep["sources"], "summary": rep["summary"]["text"],
+        "identity": {
+            key: rep["identity"].get(key)
+            for key in ("id", "name", "simulated")
+        },
+        "risk": approved_risk_projection(rep),
+        "summary": rep["summary"],
     }
     return ToolResult(ok=True, data=compact)
 
@@ -346,7 +417,6 @@ async def attach_evidence(ctx: ToolContext, subject_id: str, predicate: str, sou
         return ToolResult(ok=True, data={"claim_id": params["cid"], "artifact_id": params["aid"], "counters": decision.result["counters"]}, cypher=v.statement, params=params, permission=perm)
     return ToolResult(ok=False, data={"error": f"write {decision.status}: {decision.reason or ''}".strip()}, cypher=v.statement, params=params, permission=perm)
 
-
 async def discover_suppliers(ctx: ToolContext, entity_id: str, keywords: list[str], agency: str | None = None, since: str | None = None,
                              until: str | None = None, max_primes: int | None = None, max_subs: int | None = None,
                              rationale: str | None = None) -> ToolResult:
@@ -398,8 +468,6 @@ async def discover_suppliers(ctx: ToolContext, entity_id: str, keywords: list[st
                                      "note": "Prime recipients arrive as tier-1 suppliers and reported sub-awardees as tier-2, each with its award record as evidence. "
                                              "Suppliers land with a name and UEI only — run enrich_entity on the ones that matter for identity, ownership, geography and screens."},
                       cypher=v.statement, params=params, permission=perm)
-
-
 async def enrich_entity(ctx: ToolContext, entity_id: str, connectors: list[str] | None = None) -> ToolResult:
     from ..enrichment.worker import worker
     rows = await db.read("MATCH (e:Entity {id:$id}) RETURN e.id AS id, e.name AS name", {"id": entity_id})

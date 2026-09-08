@@ -39,21 +39,3 @@ export function nodeType(n: Pick<GNode, 'label' | 'layer' | 'props'>): NodeType 
 
 export function fillFor(n: Pick<GNode, 'label' | 'layer' | 'props'>, theme: Theme): string { return NODE_TYPES[nodeType(n)].fill[theme] }
 export function shapeFor(n: Pick<GNode, 'label' | 'layer' | 'props'>): string { return NODE_TYPES[nodeType(n)].shape }
-
-// Edges take the tint of the type they lead to, a shade darker on the light ground so a 1.4px line
-// still shows. Same rule as the fills: quiet enough that a highlighted path is unmistakable.
-const EDGE_TINTS: Record<string, Record<Theme, string>> = {
-  supply:    { light: '#8a94a3', dark: '#6b7583' },
-  control:   { light: '#b48660', dark: '#b58a66' },
-  people:    { light: '#5f948b', dark: '#6f9e96' },
-  category:  { light: '#8c7eb0', dark: '#978bb9' },
-  place:     { light: '#9d8d65', dark: '#a39670' },
-  evidence:  { light: '#a3a39d', dark: '#7c7c77' },
-  claim:     { light: '#b07e97', dark: '#a9819a' },
-}
-const EDGE_FAMILY: Record<string, keyof typeof EDGE_TINTS> = {
-  SUPPLIES: 'supply', OWNS: 'control', ULTIMATE_PARENT_OF: 'control', HELD_ROLE: 'people', BENEFICIAL_OWNER_OF: 'people',
-  PROVIDES: 'category', SUBCATEGORY_OF: 'category', INCORPORATED_IN: 'place', OPERATES_IN: 'place', MANUFACTURES_IN: 'place', PARENT_SEATED_IN: 'place',
-  EVIDENCES: 'evidence', ABOUT: 'evidence', ASSERTS: 'claim', TARGETS: 'claim',
-}
-export function edgeColor(type: string, theme: Theme): string { return EDGE_TINTS[EDGE_FAMILY[type] || 'supply'][theme] }
