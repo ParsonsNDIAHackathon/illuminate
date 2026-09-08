@@ -7,6 +7,11 @@ Hackathon, Washington DC, 8–10 Sep 2026 (UC-7 supply chain illumination, UC-11
 For a concise judge-facing source-to-decision view, trust boundaries, deployment paths, and
 presenter answers, see the [architecture and lineage brief](docs/architecture-lineage-brief.md).
 
+**Building a partner consumer:** see the
+[`Interoperability consumer guide`](docs/INTEROPERABILITY.md) for versioned
+findings, incremental retrieval, provenance, simulation handling, and the
+planned NDIA catalog contribution.
+
 Requires Docker and `make`. For the host-side dev loop (hot reload) you also need
 Python ≥ 3.12 and Node ≥ 20.
 

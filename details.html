@@ -377,6 +377,7 @@
       <p>REST under <code>/api</code> with OpenAPI at <code>/docs</code>: graph, search and subgraph; entities and their report (the UC-11 profile); people; artifacts; claims with commit and reject; query (cypher, template, validate, styles); permissions with approve and refuse; connectors and credentials; enrichment jobs; workspace settings.</p>
       <p>Chat runs over a websocket at <code>/ws/chat</code>; permission requests and job updates are broadcast on the same socket. MCP is served at <code>POST /mcp/</code> as stateless streamable HTTP, and as <code>illuminate-mcp</code> over stdio, for Claude Desktop or Claude Code:</p>
       <pre><code>{ "mcpServers": { "illuminate": { "command": "/path/to/api/.venv/bin/illuminate-mcp" } } }</code></pre>
+      <p style="margin-top:14px">Partner teams should consume the planned versioned findings contract rather than the UI-shaped graph response. The <a href="docs/INTEROPERABILITY.md">interoperability consumer guide</a> maps fields to partner workflows and covers incremental retrieval, provenance, classification, completeness, simulation, datasets 1/49/62, and the planned catalog contribution.</p>
     </section>
 
     <section id="ask">
