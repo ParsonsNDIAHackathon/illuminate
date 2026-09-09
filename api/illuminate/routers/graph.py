@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from .. import db, events
+from ..config import RISK_PIN_FLOOR
 from ..content import document, summarize
 from ..connectors.http import HttpError, fetch_document
 from ..graphio import subgraph_from_graph
@@ -59,8 +60,10 @@ async def programs():
     return {"items": rows}
 
 
-# Layer name -> the node labels it governs. Entities are always drawn. Artifacts are one label
-# split over two layers by kind (see schema.SOURCE_KINDS), handled separately in the query.
+# Layer name -> the node labels it governs. Entities are always drawn, and so is a person scored
+# over RISK_PIN_FLOOR: the canvas can only pin what it was sent, and an off "people" layer must not
+# be how a designated director leaves the graph. Artifacts are one label split over two layers by
+# kind (see schema.SOURCE_KINDS), handled separately in the query.
 _LAYER_LABELS = {"people": ["Person"], "countries": ["Location"], "categories": ["Category"], "claims": ["Claim"]}
 
 
@@ -78,6 +81,7 @@ async def graph_all(people: bool = True, countries: bool = False, artifacts: boo
         """
         MATCH (n) WHERE any(l IN labels(n) WHERE l IN $labels)
            OR (n:Artifact AND CASE WHEN coalesce(n.kind, 'record') IN $source_kinds THEN $sources ELSE $artifacts END)
+           OR (n:Person AND coalesce(n.risk_score, 0) > $risk_floor)
         WITH n, CASE WHEN n:Entity THEN 0 WHEN n:Person THEN 1 WHEN n:Location THEN 2
                      WHEN n:Category THEN 3 WHEN n:Artifact THEN 4 ELSE 5 END AS rank
         ORDER BY rank, coalesce(n.name, n.id)
@@ -86,7 +90,8 @@ async def graph_all(people: bool = True, countries: bool = False, artifacts: boo
         OPTIONAL MATCH (n)-[r]->(m) WHERE m IN nodes
         RETURN nodes, collect(DISTINCT r) AS rels
         """,
-        {"labels": labels, "limit": limit, "artifacts": artifacts, "sources": sources, "source_kinds": list(SOURCE_KINDS)},
+        {"labels": labels, "limit": limit, "artifacts": artifacts, "sources": sources,
+         "source_kinds": list(SOURCE_KINDS), "risk_floor": RISK_PIN_FLOOR},
     )
     sub = subgraph_from_graph(graph)
     return {"subgraph": sub, "truncated": len(sub["nodes"]) >= limit}

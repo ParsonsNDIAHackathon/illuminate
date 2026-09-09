@@ -152,7 +152,8 @@ function restyle() {
 // through a hidden person would be left floating; graphLayers.hiddenNodeIds prunes those, and
 // with the "indirect orgs" toggle off it prunes every organization no chain of contracts or
 // ownership joins to a program or the root — affiliation edges (lobbying, memberships) do not
-// count as that chain. Organizations scored over 20 that reach a supplier survive both prunings.
+// count as that chain. A node scored over 20 that reaches a supplier survives all of it, a person
+// over an off people layer included; the server sends those people whatever the layer says.
 function applyLayers() {
   if (!cy) return
   const hidden = hiddenNodeIds(graph.nodeList, graph.edgeList, ws.ws.layers || {}, graph.focusId ? [graph.focusId] : [])

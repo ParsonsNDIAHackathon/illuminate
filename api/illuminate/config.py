@@ -63,6 +63,12 @@ settings = Settings()
 # reaches a supplier is drawn either way (web/src/stores/graphLayers.ts).
 LAYER_DEFAULTS = {"entities": True, "indirect_orgs": True, "people": True, "countries": False, "categories": False, "artifacts": False, "sources": False, "claims": False}
 
+# Risk score above which a node is drawn whatever the filters say, mirrored by RISK_PIN_FLOOR in
+# web/src/stores/graphLayers.ts. The canvas can only pin what it was sent, so the graph queries
+# carry risky people past an off "people" layer: hiding people is how the canvas gets readable and
+# must not be how a designated director disappears. Just under the "elevated" band floor (risk.py).
+RISK_PIN_FLOOR = 20
+
 
 class WorkspaceSettings(BaseModel):
     """Single-workspace settings (multi-tenant auth is an explicit hackathon cut).
