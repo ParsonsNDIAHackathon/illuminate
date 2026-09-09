@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { api, qs } from '../api/client.ts'
 import type { NewsArticle } from '../newsMap.ts'
 
-export interface NewsResult { articles: NewsArticle[]; query: string; timespan: string }
+export interface NewsResult { articles: NewsArticle[]; query: string; timespan: string; cached?: boolean; stale?: boolean; fetched_at?: string; notice?: string | null }
 
 /** Session state survives map unmounts, including an in-flight search. */
 export const useNews = defineStore('news', {

@@ -2,11 +2,35 @@
   <div class="canvas-wrap">
     <div ref="el" class="cy"></div>
     <div v-if="graph.loading" class="loading"><v-progress-circular indeterminate size="28" /></div>
+    <aside v-if="active && ws.ws.layers.indirect_orgs !== false && (affiliations.groups.length || affiliations.unconnected.length)" class="affiliations" aria-label="Affiliation groups">
+      <v-btn size="small" variant="tonal" :aria-expanded="panelOpen" @click="panelOpen = !panelOpen">Affiliations · {{ affiliations.groups.length }} groups</v-btn>
+      <div v-if="panelOpen" class="affiliation-panel">
+        <label class="group-switch"><input type="checkbox" v-model="grouped" /> Group affiliations</label>
+        <p>Expand a group to see its recorded connections. These are affiliations, not supplier relationships. Significant risk findings stay visible.</p>
+        <input v-model="affiliationQuery" class="affiliation-search" type="search" aria-label="Search affiliations" placeholder="Find an organization or group…" />
+        <div class="affiliation-results">
+          <section v-for="group in filteredGroups" :key="group.id" class="affiliation-entry">
+            <button class="group-button" :aria-expanded="expandedGroups.has(group.id)" @click="toggleGroup(group.id)">
+              <strong>{{ group.title }} ({{ group.members.length }})</strong><span>{{ group.anchorName }}</span>
+              <span>{{ expandedGroups.has(group.id) ? 'Collapse' : 'Expand' }}</span>
+            </button>
+            <ul v-if="expandedGroups.has(group.id) || affiliationQuery.trim()">
+              <li v-for="member in matchingMembers(group)" :key="member.id"><button @click="inspectAffiliation(member.id)">{{ member.name }}</button></li>
+            </ul>
+          </section>
+          <h3>Unconnected in this view ({{ affiliations.unconnected.length }})</h3>
+          <p>No recorded path to a program’s supply chain in the loaded graph. Other layers or additional data may provide a connection.</p>
+          <ul><li v-for="member in filteredUnconnected.slice(0, 50)" :key="member.id"><button @click="inspectAffiliation(member.id)">{{ member.name }}</button></li></ul>
+          <p v-if="filteredUnconnected.length > 50">Showing 50 of {{ filteredUnconnected.length }}. Search to narrow the list.</p>
+          <p v-if="!filteredGroups.length && !filteredUnconnected.length">No matching organizations.</p>
+        </div>
+      </div>
+    </aside>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, nextTick, ref, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, nextTick, ref, watch } from 'vue'
 import cytoscape, { type Core } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import cola from 'cytoscape-cola'
@@ -17,6 +41,7 @@ import { nodeSize, supplierTiers } from '../styles/nodeSize'
 import { edgeColor, fillFor, glyphScaleFor, glyphYFor, iconFor, shapeFor } from '../styles/nodeTypes'
 import { haloFor, isThin } from '../styles/risk'
 import { hiddenNodeIds, layerData } from '../stores/graphLayers'
+import { affiliationGroups, affiliationVisibility, type AffiliationGroup } from '../affiliations'
 
 cytoscape.use(fcose)
 cytoscape.use(cola)
@@ -24,6 +49,33 @@ const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true }
 const el = ref<HTMLElement>()
 const graph = useGraph()
 const ws = useWorkspace()
+const grouped = ref(true)
+const panelOpen = ref(false)
+const affiliationQuery = ref('')
+const expandedGroups = ref(new Set<string>())
+const groupingEnabled = computed(() => grouped.value && ws.ws.layers.indirect_orgs !== false)
+const affiliations = computed(() => affiliationGroups(graph.nodeList, graph.edgeList, graph.focusId ? [graph.focusId] : []))
+const affiliationMatch = (name: string) => fold(name).includes(fold(affiliationQuery.value.trim()))
+const filteredGroups = computed(() => affiliations.value.groups.filter(g => affiliationMatch(`${g.anchorName} ${g.title}`) || g.members.some(m => affiliationMatch(m.name))))
+const filteredUnconnected = computed(() => affiliations.value.unconnected.filter(n => affiliationMatch(n.name)))
+function matchingMembers(group: AffiliationGroup) {
+  return group.members.filter(m => affiliationMatch(m.name) || affiliationMatch(`${group.anchorName} ${group.title}`))
+}
+function toggleGroup(id: string) {
+  grouped.value = true
+  const next = new Set(expandedGroups.value)
+  if (next.has(id)) next.delete(id); else next.add(id)
+  expandedGroups.value = next
+}
+async function inspectAffiliation(id: string) {
+  panelOpen.value = false
+  graph.select(id)
+  await nextTick()
+  if (!cy) return
+  const node = cy.getElementById(id)
+  if (node.empty()) return
+  cy.animate({ center: { eles: node }, zoom: Math.max(cy.zoom(), 1) }, { duration: 250 })
+}
 let cy: Core | null = null
 let ro: ResizeObserver | null = null
 let restoringView = false
@@ -88,6 +140,9 @@ function styleSheet(): any[] {
     { selector: '.op-dim', style: { opacity: 0.18 } },
     { selector: '.op-hide', style: { display: 'none' } },
     { selector: '.layer-hide', style: { display: 'none' } },
+    { selector: '.affiliation-hide', style: { display: 'none' } },
+    { selector: 'node[?affiliationGroup]', style: { shape: 'round-rectangle', width: 110, height: 44, 'background-image': 'none', 'background-color': dark ? '#30334f' : '#e5e7f5', 'border-color': dark ? '#b4b9ef' : '#656ea4', 'border-style': 'dashed', label: 'data(name)', 'text-valign': 'center', 'text-margin-y': 0, 'text-wrap': 'wrap', 'text-max-width': 106, 'font-size': 10 } },
+    { selector: 'edge[?affiliationGroup]', style: { 'line-style': 'dotted', 'target-arrow-shape': 'none', width: 1, opacity: 0.65 } },
     // a node or edge that arrived from a live change — held for a few seconds, then released
     { selector: 'node.fresh', style: { 'border-width': 5, 'border-color': dark ? '#34d399' : '#059669', 'z-index': 30 } },
     { selector: 'edge.fresh', style: { width: 3.4, 'line-color': dark ? '#34d399' : '#059669', 'target-arrow-color': dark ? '#34d399' : '#059669', 'z-index': 30 } },
@@ -112,7 +167,11 @@ function toElements() {
     return { group: 'nodes', data: { id: n.id, name: n.name, label: n.label, ...layerData(n), baseColor: fillFor(n, ws.theme), shape: shapeFor(n), icon: iconFor(n), glyphScale: glyphScaleFor(n), glyphY: glyphYFor(n), size: nodeSize(n, tier), tier, isRoot: n.id === root, simulated: !!n.props?.simulated, badge: badgeFor(n), ...haloData(n, ws.theme) } }
   })
   const edges = graph.edgeList.map(e => ({ group: 'edges', data: { id: e.id, source: e.source, target: e.target, type: e.type, color: edgeColor(e.type, ws.theme), simulated: !!e.props?.simulated, label: e.type === 'SUPPLIES' && e.props?.tier ? `T${e.props.tier}${e.props.sole_source ? ' · sole' : ''}` : e.type === 'HELD_ROLE' ? (e.props?.title || '').slice(0, 18) : e.type === 'OWNS' && e.props?.pct ? `${e.props.pct}%` : '' } }))
-  return [...nodes, ...edges]
+  const summaries = groupingEnabled.value ? affiliations.value.groups.flatMap(g => [
+    { group: 'nodes', data: { id: g.id, affiliationGroup: true, name: `${g.title} (${g.members.length})\n${expandedGroups.value.has(g.id) ? '− Collapse' : '+ Expand'}`, size: 44, baseColor: '#7f86af', shape: 'round-rectangle', icon: '', glyphScale: 0, glyphY: 50, badge: '', haloOpacity: 0 } },
+    { group: 'edges', data: { id: `${g.id}:summary`, source: g.anchorId, target: g.id, affiliationGroup: true, type: 'AFFILIATION_SUMMARY', color: '#939bc6', label: '' } },
+  ]) : []
+  return [...nodes, ...edges, ...summaries]
 }
 
 function sync() {
@@ -127,6 +186,7 @@ function sync() {
   wanted.filter(w => existing.has(w.data.id)).forEach(w => cy!.getElementById(w.data.id).data(w.data))
   if (fresh.length) {
     cy.add(fresh as any)
+    restyle()
     if (existing.size === 0 && !restoringView) layout(true)
     else { seedNearNeighbours(fresh.filter(w => w.group === 'nodes').map(w => w.data.id)); startLive() }
   } else if (cy.elements().length === 0) {
@@ -163,7 +223,18 @@ function restyle() {
 function applyLayers() {
   if (!cy) return
   const hidden = hiddenNodeIds(graph.nodeList, graph.edgeList, ws.ws.layers || {}, graph.focusId ? [graph.focusId] : [])
-  cy.nodes().forEach(n => n.toggleClass('layer-hide', hidden.has(n.id())))
+  const reveal = new Set([...graph.highlightIds, ...(graph.selectedId ? [graph.selectedId] : [])])
+  const selectedEdge = graph.selectedEdgeId && graph.edges.get(graph.selectedEdgeId)
+  if (selectedEdge) { reveal.add(selectedEdge.source); reveal.add(selectedEdge.target) }
+  if (graph.filter.trim()) {
+    const match = matcher(graph.filter)
+    graph.nodeList.filter(match).forEach(n => reveal.add(n.id))
+  }
+  const visibility = groupingEnabled.value ? affiliationVisibility(affiliations.value, expandedGroups.value, reveal) : null
+  cy.nodes().forEach(n => {
+    n.toggleClass('layer-hide', hidden.has(n.id()) && !visibility?.visible.has(n.id()))
+    n.toggleClass('affiliation-hide', !!visibility?.hidden.has(n.id()))
+  })
 }
 
 // Layout strategy: fcose arranges a fresh canvas (it is the better static layout), then cola takes
@@ -290,15 +361,18 @@ function applyTrace() {
 }
 function layout(fit = true) {
   holdLayout = false
-  if (!cy || cy.nodes().length === 0) return
+  if (!cy || !props.active || cy.nodes().length === 0) return
+  staticLayout?.stop()
   stopLive()
   // A fresh canvas has every node at the origin; fcose must randomise from there or it collapses to a line.
-  const l = cy.layout({ name: 'fcose', animate: true, animationDuration: 400, randomize: fit, fit, padding: 40, nodeRepulsion: () => 9000, idealEdgeLength: () => 90, quality: 'default' } as any)
+  const visible = cy.elements().filter(e => e.visible())
+  if (!visible.nodes().length) return
+  const l = visible.layout({ name: 'fcose', animate: true, animationDuration: 400, randomize: fit, fit, padding: 50, nodeRepulsion: () => 9000, idealEdgeLength: () => 120, quality: 'default' } as any)
   staticLayout = l
   l.one('layoutstop', () => { staticLayout = null; if (props.active && !restoringView) { startLive(); focusPendingEntity() } })
   l.run()
 }
-function fit() { cy?.fit(undefined, 40) }
+function fit() { if (cy) cy.fit(cy.elements().filter(e => e.visible()), 50) }
 
 function focusPendingEntity() {
   if (!cy || !props.active || staticLayout || !pendingEntityFocus) return
@@ -316,8 +390,8 @@ function focusPendingEntity() {
 onMounted(() => {
   cy = cytoscape({ container: el.value!, style: styleSheet(), wheelSensitivity: 0.25, minZoom: 0.1, maxZoom: 4 })
   ;(window as any).__cy = cy
-  cy.on('tap', 'node', (ev) => graph.select(ev.target.id()))
-  cy.on('tap', 'edge', (ev) => graph.selectEdge(ev.target.id()))
+  cy.on('tap', 'node', (ev) => ev.target.data('affiliationGroup') ? toggleGroup(ev.target.id()) : graph.select(ev.target.id()))
+  cy.on('tap', 'edge', (ev) => { if (!ev.target.data('affiliationGroup')) graph.selectEdge(ev.target.id()) })
   cy.on('tap', (ev) => { if (ev.target === cy) { graph.select(null); graph.selectEdge(null) } })
   cy.on('dbltap', 'node', (ev) => { const n = graph.nodes.get(ev.target.id()); if (n && (n.label === 'Entity' || n.label === 'Person')) emit('expand', ev.target.id()) })
   cy.on('grab', 'node', () => { holdLayout = false; startLive(true) })
@@ -367,12 +441,16 @@ watch(() => props.active, async active => {
 watch(() => graph.version, sync)
 watch(() => graph.freshVersion, revealFresh)
 watch(() => graph.styleVersion, restyle)
-watch(() => graph.filter, applyFilter)
-watch(() => graph.highlightIds, applyTrace)
-watch(() => ws.ws.layers, applyLayers, { deep: true })
+watch(() => graph.filter, () => { applyFilter(); applyLayers(); startLive() })
+watch(() => graph.highlightIds, () => { applyTrace(); applyLayers(); startLive() })
+watch(() => ws.ws.layers, () => { sync(); startLive() }, { deep: true })
+watch([grouped, expandedGroups], () => { sync(); layout(true) })
+watch(() => graph.focusId, () => { expandedGroups.value = new Set(); affiliationQuery.value = ''; panelOpen.value = false })
 watch(() => ws.theme, () => { cy?.style(styleSheet() as any); sync() })
 watch(() => [graph.selectedId, graph.selectedEdgeId], ([id, eid]) => {
   if (!cy) return
+  applyLayers()
+  startLive()
   cy.elements().unselect()
   if (id) cy.getElementById(id).select()
   else if (eid) cy.getElementById(eid).select()
@@ -401,4 +479,19 @@ defineExpose({ fit, layout, panIntoView })
 .canvas-wrap { position: relative; width: 100%; height: 100%; }
 .cy { position: absolute; inset: 0; }
 .loading { position: absolute; top: 12px; left: 12px; }
+.affiliations { position: absolute; top: 112px; right: 12px; z-index: 6; max-width: calc(100% - 24px); max-height: calc(100% - 124px); display: flex; flex-direction: column; align-items: flex-end; }
+.affiliation-panel { margin-top: 8px; padding: 14px; width: 310px; max-width: 100%; min-height: 0; display: flex; flex-direction: column; border: 1px solid rgba(128,128,128,.4); border-radius: 8px; background: rgb(var(--v-theme-surface)); box-shadow: 0 8px 24px #0003; }
+.affiliation-panel p { font-size: 12px; line-height: 1.45; margin: 8px 0; opacity: .8; }
+.group-switch { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.affiliation-search { border: 1px solid #8888; border-radius: 4px; padding: 8px; width: 100%; font-size: 13px; color: inherit; }
+.affiliation-results { max-height: min(48vh, 430px); min-height: 0; overflow-y: auto; margin-top: 8px; }
+.affiliation-entry { border-bottom: 1px solid #8884; padding: 6px 0; }
+.group-button { text-align: left; width: 100%; display: grid; gap: 3px; padding: 7px 4px; font-size: 12px; }
+.group-button span { opacity: .8; }
+.affiliation-results h3 { font-size: 13px; margin-top: 12px; }
+.affiliation-results ul { list-style: none; padding: 0; }
+.affiliation-results li button { text-align: left; font-size: 12px; padding: 7px 4px; width: 100%; text-decoration: underline; text-underline-offset: 3px; }
+.affiliation-panel button:hover { background: #8882; }
+.affiliation-panel button:focus-visible { outline: 2px solid rgb(var(--v-theme-primary)); }
+@media (max-width: 1100px) { .affiliations { top: 148px; max-height: calc(100% - 160px); } }
 </style>

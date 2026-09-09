@@ -90,7 +90,10 @@ watch([() => graph.selectedId, () => graph.selectedEdgeId], ([node, edge]) => {
 })
 const route = useRoute(); const router = useRouter()
 const viewMode = ref(route.query.view === 'map' ? 'map' : 'graph')
-const graphLayers = computed(() => viewMode.value === 'map' ? { ...ws.ws.layers, countries: true } : ws.ws.layers)
+// Fetch role bridges for affiliation groups without enabling the People display layer.
+const graphLayers = computed(() => viewMode.value === 'map'
+  ? { ...ws.ws.layers, countries: true }
+  : { ...ws.ws.layers, people: !!ws.ws.layers.people || ws.ws.layers.indirect_orgs !== false })
 async function changeView(value: string) {
   await router.replace({ query: { ...route.query, view: value, map_location: undefined } })
 }
@@ -156,7 +159,7 @@ async function applyRoute() {
   if (root !== graph.focusId) {
     if (root) await graph.focus(root, graph.programs.find(p => p.id === root)?.name || null, ws.depth, graphLayers.value)
     else await graph.loadAll(graphLayers.value)
-  } else if (!graph.nodes.size || (viewMode.value === 'map' && previousView !== 'map')) await reload()
+  } else if (!graph.nodes.size || viewMode.value !== previousView) await reload()
 }
 onMounted(async () => { window.addEventListener('resize', onResize); await applyRoute(); graph.loadPrograms() })
 watch(() => route.fullPath, applyRoute)
@@ -173,6 +176,7 @@ watch(() => graph.selectedId, async (id) => {
 })
 // Depth only shapes a focused view; the whole graph is not walked from a root.
 watch(() => ws.depth, () => { if (graph.focusId) reload() })
+watch(() => ws.ws.layers.indirect_orgs, () => { if (viewMode.value === 'graph' && ws.loaded) reload() })
 </script>
 <style scoped>
 .explorer { display: grid; grid-template-columns: minmax(0, 1fr) 6px var(--side-width); height: calc(100vh - 48px); }

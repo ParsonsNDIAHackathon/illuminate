@@ -79,7 +79,33 @@ Either way the graph and `api/data/` are replaced with the archive's contents. D
 
 `make help` lists all targets.
 
+## Exploring indirect organizations
+
+With **Layers → Indirect orgs** enabled, the graph groups affiliations around the nearest
+organization in a program's supply or ownership chain. Click a dashed group on the canvas,
+or use the **Affiliations** panel, to expand or collapse it. Expansion reveals the original
+relationships and any connecting people, even with the People layer off. The graph fetches
+people as context for this purpose; it does not enable the People display layer.
+
+Groups use recorded organization relationships and person-role paths, classified by the
+first relationship from the anchor. Shared organizations are assigned once to a nearest
+anchor using a stable tie-break. Shared countries, documents and claims do not establish
+an affiliation. Organizations without a path in the loaded graph appear in the searchable
+**Unconnected in this view** list. The list reflects the current scope and data cap, not
+proof that no relationship exists anywhere.
+
+Scores above 20 and their available connecting paths remain visible when groups collapse.
+Selection, search and risk traces also reveal matching records and their paths. Uncheck
+**Group affiliations** for the individual-node layout. Groups are display controls only:
+they do not add graph records, supplier relationships, or change scores.
+
 ## Recent news on the map
+
+Successful map-news responses are cached on disk per topic and time window for 15 minutes.
+If GDELT rate limits or fails, the map can use the last successful response for up to
+seven days, labeled with its original retrieval time and a stale-results notice. Failed
+refreshes do not replace a valid cache entry; repeated requests back off for a minute
+after a failed refresh. The cache survives API restarts and browser reloads.
 
 Open the map to load recent GDELT coverage. Search a topic and choose the past 24 hours,
 3 days, or 7 days. Coral diamonds select source articles mentioning that country in their
@@ -89,9 +115,9 @@ English country names and selected aliases, so other languages often remain unpl
 The News checkbox hides the overlay without changing entity locations.
 
 The read-only `/api/news?query=flood&timespan=24h` endpoint uses GDELT DOC 2.0, requests
-up to 250 recent articles, and caches responses for five minutes. No API key is required.
-The API retries a rate-limited request once after six seconds; persistent outages and rate
-limits appear as retryable errors. After code changes, rebuild the running containers with
+up to 250 recent articles, and caches responses for 15 minutes. No API key is required.
+When no usable cached result exists, the API retries a rate-limited request once after six
+seconds; persistent outages and rate limits then appear as retryable errors. After code changes, rebuild the running containers with
 `docker compose up -d --build --no-deps api web`. See the
 [GDELT DOC API documentation](https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/).
 

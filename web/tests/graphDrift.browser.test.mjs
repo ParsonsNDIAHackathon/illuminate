@@ -106,11 +106,26 @@ before(async () => {
       });
       nodes.push({ id: 'hub', label: 'Entity', layer: 'entities', name: 'Atlas Precision', props: {} });
       for (let i = 0; i < 4; i++) nodes.push({ id: 'stranded-' + i, label: 'Entity', layer: 'entities', name: 'Stranded Holdings ' + i, props: {} });
-      const graph = { nodes, edges };
+      const graph = location.search.includes('affiliation_fixture') ? {
+        nodes: [
+          { id: 'program', label: 'Entity', name: 'Test Program', props: { kind: 'program' } },
+          { id: 'supplier', label: 'Entity', name: 'Test Supplier', props: {} },
+          { id: 'person', label: 'Person', name: 'Test Director', props: {} },
+          { id: 'affiliate', label: 'Entity', name: 'Board Company', props: {} },
+          { id: 'risk', label: 'Entity', name: 'Risk Company', props: { risk_score: 75 } },
+          { id: 'orphan', label: 'Entity', name: 'Unconnected Company', props: {} },
+        ],
+        edges: [
+          { id: 'supply', source: 'supplier', target: 'program', type: 'SUPPLIES', props: {} },
+          { id: 'role', source: 'person', target: 'supplier', type: 'HELD_ROLE', props: { role_type: 'board' } },
+          { id: 'board', source: 'person', target: 'affiliate', type: 'HELD_ROLE', props: {} },
+          { id: 'risky', source: 'person', target: 'risk', type: 'HELD_ROLE', props: {} },
+        ],
+      } : { nodes, edges };
       const json = body => Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }));
       window.fetch = input => {
         const url = String(input);
-        if (url.includes('/api/workspace')) return json({ root_id: null, root_label: null, permission_mode: 'ask_always', model_strong: null, model_fast: null, openai_base_url: null, layers: {} });
+        if (url.includes('/api/workspace')) return json({ root_id: null, root_label: null, permission_mode: 'ask_always', model_strong: null, model_fast: null, openai_base_url: null, layers: { entities: true, indirect_orgs: true, people: false } });
         if (url.includes('/api/permissions')) return json({ pending: [], history: [] });
         if (url.includes('/api/jobs')) return json([]);
         if (url.includes('/api/claims')) return json([]);
@@ -145,6 +160,30 @@ test('the graph does not fly apart', async () => {
     return { w: bb.w, h: bb.h };
   })()`)
   assert.ok(spread.w < 8000 && spread.h < 8000, `graph must stay bounded (bbox ${spread.w.toFixed(0)}x${spread.h.toFixed(0)})`)
+})
+
+test('affiliation groups expand real paths, retain risk findings, and keep unconnected records searchable', async () => {
+  await open('/?affiliation_fixture=1')
+  await waitFor(() => evaluate('!!window.__cy && window.__cy.nodes("[?affiliationGroup]").length === 1'), 'affiliation summary')
+  const visible = id => evaluate(`window.__cy.getElementById(${JSON.stringify(id)}).visible()`)
+  assert.equal(await visible('affiliate'), false)
+  assert.equal(await visible('orphan'), false)
+  assert.equal(await visible('risk'), true)
+  assert.equal(await visible('person'), true, 'risk explanation retains its role bridge over an off people layer')
+  await evaluate('window.__cy.nodes("[?affiliationGroup]").emit("tap"); true')
+  await waitFor(() => visible('affiliate'), 'expanded member')
+  assert.equal(await visible('board'), true, 'the recorded board edge is revealed')
+  assert.equal(await evaluate('document.querySelector(".selection-card") !== null'), false, 'summary groups are not entities')
+  await evaluate('window.__cy.nodes("[?affiliationGroup]").emit("tap"); true')
+  await waitFor(async () => !await visible('affiliate'), 'collapsed member')
+  assert.equal(await visible('risk'), true)
+  await evaluate('document.querySelector(".affiliations button").click(); true')
+  await waitFor(() => evaluate('!!document.querySelector(".affiliation-search")'), 'affiliation search')
+  await evaluate('const input = document.querySelector(".affiliation-search"); input.value = "Unconnected"; input.dispatchEvent(new Event("input", { bubbles: true })); true')
+  await waitFor(() => evaluate('document.querySelector(".affiliation-results").innerText.includes("Unconnected Company")'), 'unconnected search result')
+  await evaluate('[...document.querySelectorAll(".affiliation-results li button")].find(b => b.textContent.includes("Unconnected Company")).click(); true')
+  await waitFor(() => visible('orphan'), 'selected unconnected organization')
+  assert.equal(await visible('affiliate'), false)
 })
 
 after(() => {

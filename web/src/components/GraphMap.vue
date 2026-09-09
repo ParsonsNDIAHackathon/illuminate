@@ -14,6 +14,9 @@
     <v-alert v-if="news.error" type="warning" variant="tonal" density="compact" class="mb-2 news-error" role="alert">
       {{ news.error }} <span v-if="news.result">Previous results are still shown below.</span>
     </v-alert>
+    <v-alert v-if="news.visible && news.result?.stale" type="warning" variant="tonal" density="compact" class="mb-2" role="status">
+      {{ news.result.notice }} Saved {{ new Date(news.result.fetched_at!).toLocaleString() }}.
+    </v-alert>
     <TransportControls @focus-us="zoom = 4.8; center = [253.5, 159]" />
     <div class="map-stage">
       <svg ref="svg" :viewBox="viewBox" class="world" aria-label="World map. Scroll to zoom, drag to pan, or select a marker to review its entities." @wheel.prevent="wheelZoom" @pointerdown="startPan" @pointermove="movePan" @pointerup="drag = null" @pointercancel="drag = null">
@@ -61,6 +64,7 @@
       <div class="detail-heading">
         <v-select v-model="news.location" :items="newsLocations" label="News location" density="compact" variant="outlined" hide-details class="location-select" />
         <span>Coral diamonds: approximate country mentions. <template v-if="news.result">“{{ news.result.query }}” · past {{ news.result.timespan }} · {{ newsData.mapped }} mapped, {{ newsData.unmapped.length }} unplaced.</template></span>
+        <span v-if="news.result?.fetched_at" class="text-caption">{{ news.result.cached ? 'Cached' : 'Retrieved' }} {{ new Date(news.result.fetched_at).toLocaleString() }} · reused for 15 minutes.</span>
       </div>
       <v-progress-linear v-if="news.loading" indeterminate color="primary" aria-label="Searching recent coverage" />
       <p v-if="news.result && !newsArticles.length" class="text-caption pa-2" role="status">No articles found for this selection. Try another topic or a longer time window.</p>
