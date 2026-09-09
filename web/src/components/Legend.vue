@@ -71,4 +71,5 @@ function organizationColor() { return NODE_TYPES.Organization.fill[ws.theme] }
 .dot.hexagon { clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0 50%); }
 .dot.round-triangle { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 .dot.tag { clip-path: polygon(0 0, 70% 0, 100% 50%, 70% 100%, 0 100%); }
+.dot.cut-rectangle { clip-path: polygon(18% 0, 100% 0, 100% 82%, 82% 100%, 0 100%, 0 18%); }
 </style>

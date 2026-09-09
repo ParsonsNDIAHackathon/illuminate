@@ -28,14 +28,16 @@ def _clean(v: Any) -> Any:
     return v
 
 
-_LABEL_LAYER = {"Person": "people", "Location": "countries", "Category": "categories", "Claim": "claims"}
+_LABEL_LAYER = {"Person": "people", "Location": "countries", "Category": "categories", "Claim": "claims", "Report": "reports"}
 
 # Node properties too heavy to send with every node on the canvas. The risk breakdown is
 # ~1.8 KB of JSON per node, which at the 1500-node cap would add megabytes to every graph
 # load and every live delta for something only the selected node ever shows. The score,
 # band and confidence stay — they are what the canvas draws — and the breakdown is fetched
-# from /api/risk/{id} when a node is actually opened.
-HEAVY_PROPS = ("risk_components",)
+# from /api/risk/{id} when a node is actually opened. A report's html is the same story an
+# order of magnitude larger: the document is the point of the node and belongs in the reader,
+# not in every canvas payload, so it is fetched from /api/reports/{id}.
+HEAVY_PROPS = ("risk_components", "html")
 
 
 def layer_of(label: str, props: dict) -> str | None:
@@ -50,7 +52,7 @@ def layer_of(label: str, props: dict) -> str | None:
 def node_dict(n: Node) -> dict:
     props = {k: _clean(v) for k, v in dict(n).items() if k not in HEAVY_PROPS}
     labels = list(n.labels)
-    primary = next((l for l in ("Entity", "Person", "Category", "Location", "Artifact", "Claim") if l in labels), labels[0] if labels else "Node")
+    primary = next((l for l in ("Entity", "Person", "Category", "Location", "Artifact", "Claim", "Report") if l in labels), labels[0] if labels else "Node")
     return {
         "id": props.get("id") or n.element_id,
         "label": primary,

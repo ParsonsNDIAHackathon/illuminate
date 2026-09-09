@@ -102,5 +102,12 @@ def claim_id() -> str:
     return "clm_" + uuid.uuid4().hex[:12]
 
 
+def report_id(kind: str, subject_id: str) -> str:
+    """Stable per (kind, subject): asking twice for the risk assessment of a program gives
+    the same node, and regenerating rewrites it rather than littering the graph with a
+    dated pile of near-identical documents. The generated_at property is what moves."""
+    return stable_id("rep", kind, subject_id)
+
+
 def edge_id() -> str:
     return "rel_" + uuid.uuid4().hex[:12]

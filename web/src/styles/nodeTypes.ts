@@ -6,7 +6,7 @@
 import type { GNode } from '../stores/graph'
 
 export type Theme = 'light' | 'dark'
-export type NodeType = 'Organization' | 'Program' | 'Person' | 'Category' | 'Location' | 'Artifact' | 'Source' | 'Claim'
+export type NodeType = 'Organization' | 'Program' | 'Person' | 'Category' | 'Location' | 'Artifact' | 'Source' | 'Claim' | 'Report'
 
 /** Artifact kinds that point at where data came from rather than being a document. Mirrors schema.SOURCE_KINDS. */
 export const SOURCE_KINDS = new Set(['record', 'registry'])
@@ -29,6 +29,8 @@ const GLYPHS: Record<NodeType, string> = {
   Source: '<ellipse cx="12" cy="5.8" rx="7" ry="2.8"/><path d="M5 5.8v12.4c0 1.55 3.13 2.8 7 2.8s7-1.25 7-2.8V5.8"/><path d="M5 12c0 1.55 3.13 2.8 7 2.8s7-1.25 7-2.8"/>',
   // a speech bubble: something asserted
   Claim: '<path d="M20.5 14.6a2 2 0 0 1-2 2H8.2L4 20.8V5.4a2 2 0 0 1 2-2h12.5a2 2 0 0 1 2 2z"/>',
+  // a page with bars on it: a document this application wrote, not one it found
+  Report: '<path d="M14 3.2H7.5a2 2 0 0 0-2 2v13.6a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7.9z"/><path d="M14 3.2v4.7h4.5"/><path d="M9 17.4v-3.2M12 17.4v-5.4M15 17.4v-2.1"/>',
 }
 
 /** Order is the legend order. `shape` is a Cytoscape node shape.
@@ -47,6 +49,9 @@ export const NODE_TYPES: Record<NodeType, { label: string; shape: string; glyphS
   Artifact:     { label: 'Artifact',     shape: 'rectangle',       glyphScale: 58, glyphY: 50, fill: { light: '#9a9a94', dark: '#a3a39d' } },
   Source:       { label: 'Source',       shape: 'barrel',          glyphScale: 54, glyphY: 50, fill: { light: '#7da3bd', dark: '#8bb0c8' } },
   Claim:        { label: 'Claim',        shape: 'tag',             glyphScale: 48, glyphY: 50, fill: { light: '#bd8da6', dark: '#c69bb2' } },
+  // A report is the one node type the user made rather than found, so it gets a colour nothing
+  // else on the canvas uses and a clipped corner that reads as a page at 30px.
+  Report:       { label: 'Report',       shape: 'cut-rectangle',   glyphScale: 56, glyphY: 50, fill: { light: '#8a9a6b', dark: '#9aab7c' } },
 }
 
 // A Cytoscape background image cannot be recoloured by a selector, so the glyph colours are baked in.
@@ -76,7 +81,7 @@ export function iconForType(type: NodeType): string {
 export function layerOf(n: Pick<GNode, 'label' | 'layer' | 'props'>): string | null {
   if (n.layer !== undefined) return n.layer
   if (n.label === 'Artifact') return SOURCE_KINDS.has(n.props?.kind || 'record') ? 'sources' : 'artifacts'
-  return ({ Person: 'people', Location: 'countries', Category: 'categories', Claim: 'claims' } as Record<string, string>)[n.label] || null
+  return ({ Person: 'people', Location: 'countries', Category: 'categories', Claim: 'claims', Report: 'reports' } as Record<string, string>)[n.label] || null
 }
 
 export function nodeType(n: Pick<GNode, 'label' | 'layer' | 'props'>): NodeType {
@@ -98,12 +103,14 @@ const EDGE_TINTS: Record<string, Record<Theme, string>> = {
   place:     { light: '#9d8d65', dark: '#a39670' },
   evidence:  { light: '#a3a39d', dark: '#7c7c77' },
   claim:     { light: '#b07e97', dark: '#a9819a' },
+  report:    { light: '#7d8c60', dark: '#94a575' },
 }
 const EDGE_FAMILY: Record<string, keyof typeof EDGE_TINTS> = {
   SUPPLIES: 'supply', OWNS: 'control', ULTIMATE_PARENT_OF: 'control', HELD_ROLE: 'people', BENEFICIAL_OWNER_OF: 'people',
   PROVIDES: 'category', SUBCATEGORY_OF: 'category', INCORPORATED_IN: 'place', OPERATES_IN: 'place', MANUFACTURES_IN: 'place', PARENT_SEATED_IN: 'place',
   MEMBER_OF: 'people', TRANSACTS_WITH: 'people', LOBBIES: 'people', DONATED_TO: 'people',
   EVIDENCES: 'evidence', ABOUT: 'evidence', ASSERTS: 'claim', TARGETS: 'claim',
+  REPORTS_ON: 'report', CITES: 'report',
 }
 export function edgeColor(type: string, theme: Theme): string { return EDGE_TINTS[EDGE_FAMILY[type] || 'supply'][theme] }
 export function iconFor(n: Pick<GNode, 'label' | 'layer' | 'props'>): string { return iconForType(nodeType(n)) }

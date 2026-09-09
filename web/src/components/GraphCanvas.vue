@@ -2,12 +2,6 @@
   <div class="canvas-wrap">
     <div ref="el" class="cy"></div>
     <div v-if="graph.loading" class="loading"><v-progress-circular indeterminate size="28" /></div>
-    <div class="canvas-tools">
-      <v-btn icon="mdi-fit-to-screen" variant="text" title="Fit" @click="fit" />
-      <v-btn icon="mdi-graph-outline" variant="text" title="Re-layout" @click="layout" />
-      <v-btn icon="mdi-format-color-fill" variant="text" title="Clear styles" @click="graph.clearStyleOps()" />
-      <v-btn icon="mdi-broom" variant="text" title="Clear canvas" @click="graph.clear()" />
-    </div>
   </div>
 </template>
 
@@ -31,6 +25,7 @@ const el = ref<HTMLElement>()
 const graph = useGraph()
 const ws = useWorkspace()
 let cy: Core | null = null
+let ro: ResizeObserver | null = null
 let restoringView = false
 let holdLayout = false
 let pendingEntityFocus: string | null = null
@@ -161,8 +156,10 @@ function restyle() {
 // are "sources", documents (filings, news, awards, web pages) are "artifacts".
 // Entities have no layer and are always fetched, so an organization that is in the graph only
 // through a hidden person would be left floating; graphLayers.hiddenNodeIds prunes those, and
-// with the "indirect orgs" toggle off it prunes every organization no entity chain joins to a
-// program or the root.
+// with the "indirect orgs" toggle off it prunes every organization no chain of contracts or
+// ownership joins to a program or the root — affiliation edges (lobbying, memberships) do not
+// count as that chain. A node scored over 20 that reaches a supplier survives all of it, a person
+// over an off people layer included; the server sends those people whatever the layer says.
 function applyLayers() {
   if (!cy) return
   const hidden = hiddenNodeIds(graph.nodeList, graph.edgeList, ws.ws.layers || {}, graph.focusId ? [graph.focusId] : [])
@@ -325,8 +322,12 @@ onMounted(() => {
   cy.on('dbltap', 'node', (ev) => { const n = graph.nodes.get(ev.target.id()); if (n && (n.label === 'Entity' || n.label === 'Person')) emit('expand', ev.target.id()) })
   cy.on('grab', 'node', () => { holdLayout = false; startLive(true) })
   sync()
+  // The side panel is drag-resizable, so the container changes width without a window
+  // resize event — cytoscape would keep drawing to the old box until the next one.
+  ro = new ResizeObserver(() => cy?.resize())
+  ro.observe(el.value!)
 })
-onBeforeUnmount(() => { stopLive(); staticLayout?.stop(); cy?.destroy() })
+onBeforeUnmount(() => { stopLive(); ro?.disconnect(); staticLayout?.stop(); cy?.destroy() })
 watch(() => props.active, async active => {
   if (!cy) return
   if (!active) {
@@ -376,12 +377,28 @@ watch(() => [graph.selectedId, graph.selectedEdgeId], ([id, eid]) => {
   if (id) cy.getElementById(id).select()
   else if (eid) cy.getElementById(eid).select()
 })
-defineExpose({ fit, layout })
+/** Keep a selected node clear of the properties card: when it would sit at or behind the
+ *  card's left edge, slide the view so it lands in the middle of the strip still in view.
+ *  Vertical position is left alone unless the node is off-screen, which would otherwise
+ *  leave it "centred" somewhere the user cannot see. */
+function panIntoView(id: string, rightBound: number) {
+  if (!cy || rightBound <= 0) return
+  const n = cy.getElementById(id)
+  if (!n || n.empty()) return
+  const pos = n.renderedPosition()
+  if (!pos) return
+  const height = cy.height()
+  const offscreenY = pos.y < 0 || pos.y > height
+  if (pos.x < rightBound && !offscreenY) return
+  cy.animate({
+    panBy: { x: pos.x >= rightBound ? rightBound / 2 - pos.x : 0, y: offscreenY ? height / 2 - pos.y : 0 },
+  }, { duration: 250 })
+}
+defineExpose({ fit, layout, panIntoView })
 </script>
 
 <style scoped>
 .canvas-wrap { position: relative; width: 100%; height: 100%; }
 .cy { position: absolute; inset: 0; }
 .loading { position: absolute; top: 12px; left: 12px; }
-.canvas-tools { position: absolute; right: 8px; top: 8px; display: flex; flex-direction: column; gap: 2px; opacity: .85; }
 </style>

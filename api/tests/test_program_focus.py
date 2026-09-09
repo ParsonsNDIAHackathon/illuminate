@@ -18,9 +18,18 @@ def test_neighbourhood_confines_the_walk_only_when_a_program_is_given():
     assert "blacklistNodes" not in open_cy
     assert "program" not in open_params
 
+    # The risk sweep rides with the confinement: a focused program keeps its scored nodes whatever
+    # the depth, while expanding a bare entity stays where the user pointed.
+    assert "shortestPath" not in open_cy
+
     confined_cy, confined_params = t.build({"entity_id": "ent_x", "depth": 2, "program_id": "ent_x"})
     assert "blacklistNodes:blocked" in confined_cy
     assert confined_params["program"] == "ent_x"
+    assert "shortestPath" in confined_cy and confined_params["risk_floor"] > 0
+    # Ownership is walked upwards in a program view — the owner of a supplier, not that owner's
+    # other subsidiaries — while SUPPLIES stays two-way and the sweep's own path is undirected.
+    assert "<OWNS" in confined_cy and "<ULTIMATE_PARENT_OF" in confined_cy
+    assert "<SUPPLIES" not in confined_cy and "<OWNS" not in open_cy
     assert validate(confined_cy, params=confined_params).classification == "READ"
 
 
@@ -63,6 +72,62 @@ def test_focused_subgraph_leaves_the_other_programs_out(client):
     if other not in open_ids:
         pytest.skip("these two programs share no supplier within the depth, nothing to confine")
     assert ids < open_ids
+
+
+def test_a_focused_program_carries_its_risky_nodes_past_the_depth(client):
+    """Depth says how much context to draw, not which findings are out of sight. Around the
+    V-22 program at depth 2 the director scored 100 is three hops out and the metals group
+    five; both belong to that chain and both have to arrive, people layer or no people layer."""
+    from illuminate.config import RISK_PIN_FLOOR
+    me, scored = None, set()
+    for p in _programs(client):
+        reach = client.get(f"/api/graph/subgraph?entity_id={p['id']}&depth=6&program_id={p['id']}").json()["subgraph"]
+        found = {n["id"] for n in reach["nodes"] if (n["props"].get("risk_score") or 0) > RISK_PIN_FLOOR}
+        if found:
+            me, scored = p["id"], found
+            break
+    if not me:
+        pytest.skip("no program's chain has anything scored over the pin floor")
+
+    for people in ("true", "false"):
+        sub = client.get(f"/api/graph/subgraph?entity_id={me}&depth=1&program_id={me}&people={people}").json()["subgraph"]
+        ids = {n["id"] for n in sub["nodes"]}
+        assert scored <= ids, f"a scored node was left outside the depth with people={people}"
+        # Each one arrives on a path, not as a lone dot the canvas cannot place.
+        joined = {e["source"] for e in sub["edges"]} | {e["target"] for e in sub["edges"]}
+        assert scored <= joined
+
+
+async def test_a_focused_program_leaves_the_sister_companies_out():
+    """An OWNS edge earns its place by pointing at the chain. The owner of a supplier controls a
+    company on the contract; that owner's other subsidiaries say nothing about the program, and
+    RAYTHEON COMPANY alone brings a dozen of them. Risky ones are the exception — the sweep fetches
+    those and the canvas pins them."""
+    from illuminate.config import RISK_PIN_FLOOR
+    from illuminate.graphio import subgraph_from_graph
+    await db.close_driver()
+    try:
+        await db.read("RETURN 1 AS x")
+    except Exception:
+        pytest.skip("neo4j not reachable")
+    try:
+        programs = await db.read("MATCH (p:Entity {kind:'program'}) RETURN p.id AS id ORDER BY p.name")
+        t = TEMPLATES["neighbourhood"]
+        for prog in programs:
+            cy, bound = t.build({"entity_id": prog["id"], "depth": 2, "program_id": prog["id"]})
+            _, graph, _ = await db.read_graph(validate(cy, params=bound).statement, bound)
+            ids = list(subgraph_from_graph(graph)["nodes"])
+            siblings = await db.read(
+                "MATCH (owner:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(child:Entity) "
+                "WHERE owner.id IN $ids AND NOT (child)-[:SUPPLIES]->() "
+                "AND coalesce(child.risk_score, 0) <= $floor "
+                "RETURN DISTINCT child.id AS id, child.name AS name",
+                {"ids": ids, "floor": RISK_PIN_FLOOR},
+            )
+            drawn = [s["name"] for s in siblings if s["id"] in ids]
+            assert not drawn, f"sister companies on the {prog['id']} canvas: {drawn}"
+    finally:
+        await db.close_driver()
 
 
 PROG_ID = "ent_testfocusprog"

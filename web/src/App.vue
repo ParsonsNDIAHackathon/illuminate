@@ -14,8 +14,12 @@
         Simulated data
       </v-chip>
       <v-spacer />
-      <v-select v-if="route.name === 'graph'" :model-value="ws.depth" @update:model-value="ws.setDepth" :items="[1,2,3,4,5,6]" label="Depth" hide-details style="max-width: 110px" class="mr-2" />
       <v-badge v-if="jobs.running.length" :content="jobs.running.length" color="secondary" inline class="mr-2"><v-icon icon="mdi-cog-sync" size="20" /></v-badge>
+      <v-tooltip text="Show Help Page" location="bottom">
+        <template #activator="{ props }">
+          <v-btn v-bind="props" icon="mdi-help-circle-outline" variant="text" @click="help = true" />
+        </template>
+      </v-tooltip>
       <v-btn :icon="ws.theme === 'dark' ? 'mdi-weather-sunny' : 'mdi-weather-night'" variant="text" @click="ws.setTheme(ws.theme === 'dark' ? 'light' : 'dark')" />
       <v-avatar size="28" color="primary" class="ml-1 mr-2"><span class="text-caption">jb</span></v-avatar>
     </v-app-bar>
@@ -30,12 +34,12 @@
       <router-view />
     </v-main>
     <PermissionDialog />
+    <HelpDialog v-model="help" />
     <v-snackbar v-model="snack" timeout="4000" location="bottom right">{{ snackText }}</v-snackbar>
   </v-app>
 </template>
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
 import { useGraph } from './stores/graph'
 import { useWorkspace } from './stores/workspace'
 import { useChat } from './stores/chat'
@@ -43,13 +47,15 @@ import { usePermissions } from './stores/permissions'
 import { useJobs } from './stores/jobs'
 import { api } from './api/client'
 import PermissionDialog from './components/PermissionDialog.vue'
-const ws = useWorkspace(); const graph = useGraph(); const chat = useChat(); const perms = usePermissions(); const jobs = useJobs(); const route = useRoute()
-const staged = ref(0); const snack = ref(false); const snackText = ref('')
+import HelpDialog from './components/HelpDialog.vue'
+const ws = useWorkspace(); const graph = useGraph(); const chat = useChat(); const perms = usePermissions(); const jobs = useJobs()
+const staged = ref(0); const snack = ref(false); const snackText = ref(''); const help = ref(false)
 const nav = computed(() => [
   { to: '/', icon: 'mdi-graph', title: 'Graph' },
   { to: '/entities', icon: 'mdi-domain', title: 'Entities' },
   { to: '/people', icon: 'mdi-account-tie', title: 'People' },
   { to: '/risk', icon: 'mdi-shield-alert-outline', title: 'Risk' },
+  { to: '/reports', icon: 'mdi-file-chart-outline', title: 'Reports' },
   { to: '/artifacts', icon: 'mdi-file-document-multiple', title: 'Artifacts' },
   { to: '/claims', icon: 'mdi-check-decagram', title: 'Claims', badge: staged.value || undefined },
   { to: '/connectors', icon: 'mdi-power-plug', title: 'Connectors' },

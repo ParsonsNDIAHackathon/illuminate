@@ -271,10 +271,12 @@ async def scenario_insider(root_id: str, exclude: str) -> None:
     """A second, independent thread: an insider tie rather than an ownership one.
 
     The vendor's own record is clean — it screens clear, it is not foreign-owned, and
-    nothing about the company invites a second look. The exposure is one employee who
-    also sits inside a designated cyber-threat group, so it is only reachable by going
-    through the person: supplier → employee → flagged group. That is the shape a
-    document review misses and a graph does not.
+    nothing about the company invites a second look. So is the employee's: they are not
+    flagged and screen clear on every list. The exposure is that the same person also
+    sits inside a designated cyber-threat group, so it is only reachable by walking the
+    association: supplier → employee → flagged group. Screening the vendor finds nothing,
+    screening the person finds nothing; only the graph does. That is the shape a document
+    review misses.
 
     The group is invented. It carries no relation to any real threat actor, and the
     designations recorded against it are simulated.
@@ -320,9 +322,12 @@ async def scenario_insider(root_id: str, exclude: str) -> None:
                     {**S, "title": "Named affiliate", "role_type": "position", "from": "2021-08-01", "current": True,
                      "detail": "named in simulated threat reporting as an affiliate of the group"},
                     {"from": "2021-08-01"})
-    # The person, not the employer: screening the vendor alone returns nothing.
-    await screen_claim("clm_sim_person_sanctions", pid, "sanctions_screen", "hit", "OFAC",
-                       "individual designation, matched on full name")
+    # The person screens clear on the same lists that designate the group. Nothing on
+    # their own record flags them; the only route to the risk is the affiliation edge.
+    await screen_claim("clm_sim_person_sanctions", pid, "sanctions_screen", "clear", "OFAC",
+                       "no individual designation matched")
+    await screen_claim("clm_sim_person_un", pid, "sanctions_screen", "clear", "UN Security Council",
+                       "not on the UN Consolidated List")
     log(f"scenario: {person_name} employed by {v['name']} (tier 2) and affiliated with {group_name}")
 
 
