@@ -25,6 +25,7 @@ const graph = useGraph()
 const ws = useWorkspace()
 let cy: Core | null = null
 let ro: ResizeObserver | null = null
+let fitTimer: ReturnType<typeof setTimeout> | null = null
 const emit = defineEmits<{ (e: 'expand', id: string): void; (e: 'report', id: string): void }>()
 
 
@@ -282,15 +283,34 @@ function applyTrace() {
     if (el && el.nonempty()) el.addClass('trace')
   }
 }
-function layout(fit = true) {
+function layout(fitAfter = true) {
   if (!cy || cy.nodes().length === 0) return
   stopLive()
+  if (fitTimer) { clearTimeout(fitTimer); fitTimer = null }
   // A fresh canvas has every node at the origin; fcose must randomise from there or it collapses to a line.
-  const l = cy.layout({ name: 'fcose', animate: true, animationDuration: 400, randomize: fit, fit, padding: 40, nodeRepulsion: () => 9000, idealEdgeLength: () => 90, quality: 'default' } as any)
-  l.one('layoutstop', () => startLive())
+  // Keep fitting out of the layout itself: on first load Cytoscape otherwise computes the viewport
+  // while positions are still moving. Finish the re-layout, resume the live simulation, then fit
+  // once Cola has had a moment to relax from the static positions.
+  const l = cy.layout({ name: 'fcose', animate: true, animationDuration: 400, randomize: true, fit: false, padding: 40, nodeRepulsion: () => 9000, idealEdgeLength: () => 90, quality: 'default' } as any)
+  l.one('layoutstop', () => {
+    startLive()
+    if (fitAfter) fitTimer = setTimeout(() => {
+      cy?.resize()
+      fit()
+      fitTimer = null
+    }, 600)
+  })
   l.run()
 }
-function fit() { cy?.fit(undefined, 40) }
+function fit() {
+  if (!cy) return
+  const visible = cy.elements().filter(e => e.visible())
+  if (visible.empty()) return
+  cy.animate(
+    { fit: { eles: visible, padding: 40 } },
+    { duration: 450, easing: 'ease-in-out' },
+  )
+}
 
 onMounted(() => {
   cy = cytoscape({ container: el.value!, style: styleSheet(), wheelSensitivity: 0.25, minZoom: 0.1, maxZoom: 4 })
@@ -305,7 +325,7 @@ onMounted(() => {
   ro = new ResizeObserver(() => cy?.resize())
   ro.observe(el.value!)
 })
-onBeforeUnmount(() => { stopLive(); ro?.disconnect(); cy?.destroy() })
+onBeforeUnmount(() => { stopLive(); if (fitTimer) clearTimeout(fitTimer); ro?.disconnect(); cy?.destroy() })
 watch(() => graph.version, sync)
 watch(() => graph.freshVersion, revealFresh)
 watch(() => graph.styleVersion, restyle)
