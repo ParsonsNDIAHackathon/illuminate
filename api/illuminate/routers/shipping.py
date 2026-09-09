@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import ValidationError
 
 from ..config import settings
-from ..shipping import ShippingCatalog, TransportNetwork
+from ..shipping import ShippingCatalog, TransportNetwork, EstablishedLanes
 
 router = APIRouter(prefix="/api/shipping", tags=["shipping"])
 
@@ -28,3 +28,14 @@ async def transport_network():
         return TransportNetwork.model_validate_json(path.read_text())
     except (OSError, ValidationError) as exc:
         raise HTTPException(503, "US transport reference could not be loaded. Try again shortly.") from exc
+
+
+@router.get("/lanes", response_model=EstablishedLanes)
+async def established_lanes():
+    path = settings.data_dir / "shipping_lanes.json"
+    if not path.exists():
+        path = Path(__file__).resolve().parents[1] / "shipping_lanes.json"
+    try:
+        return EstablishedLanes.model_validate_json(path.read_text())
+    except (OSError, ValidationError) as exc:
+        raise HTTPException(503, "Established shipping lanes could not be loaded. Check the reference catalog and retry.") from exc

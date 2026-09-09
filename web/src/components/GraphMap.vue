@@ -5,7 +5,8 @@
       <div class="counts"><strong>{{ data.mappedCount }}</strong> entities placed <span>·</span> <strong>{{ data.unmappedCount }}</strong> not placed</div>
     </div>
     <form class="news-search" @submit.prevent="news.search()">
-      <v-checkbox v-model="shipping.visible" label="Shipping" density="compact" hide-details class="news-toggle" />
+      <v-checkbox v-model="lanes.enabled" label="Shipping lanes" density="compact" hide-details class="news-toggle" />
+      <v-checkbox v-model="shipping.visible" label="Supplier examples" density="compact" hide-details class="news-toggle" />
       <v-checkbox v-model="news.visible" label="News" density="compact" hide-details class="news-toggle" />
       <v-text-field v-model="news.query" label="News topic" placeholder="Search recent news…" density="compact" variant="outlined" hide-details maxlength="250" class="news-topic" />
       <v-select v-model="news.timespan" :items="timeWindows" label="News time window" density="compact" variant="outlined" hide-details class="news-window" />
@@ -45,6 +46,7 @@
           <title>{{ place.name }} · {{ place.articles.length }} news articles · Country mentioned in headline</title>
           <path :d="`M0,${-25 / (zoom * mapScale)} l${7 / (zoom * mapScale)},${7 / (zoom * mapScale)} l${-7 / (zoom * mapScale)},${7 / (zoom * mapScale)} l${-7 / (zoom * mapScale)},${-7 / (zoom * mapScale)} Z`" />
         </g>
+        <ShippingLanesLayer :scale="zoom * mapScale" :show-labels="zoom >= 2" />
         <ShippingLayer :scale="zoom * mapScale" :show-labels="zoom >= 2" />
       </svg>
       <v-sheet class="detail-toggle" rounded>
@@ -59,6 +61,7 @@
       <p v-if="!places.length && !(news.visible && newsData.places.length) && !(shipping.visible && shipping.routes.length) && !transport.visible.length" class="map-empty" role="status">{{ graph.loading ? 'Loading locations…' : graph.filter ? 'No mapped entities match your search.' : 'No geographic locations in this graph scope. Try a deeper traversal or another program.' }}</p>
       <a class="attribution" href="https://www.naturalearthdata.com/about/terms-of-use/" target="_blank" rel="noopener">Natural Earth · illustrative boundaries</a>
     </div>
+    <ShippingLanesPanel />
     <ShippingPanel />
     <div v-if="news.visible" class="news-details">
       <div class="detail-heading">
@@ -99,6 +102,9 @@ import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import TransportControls from './TransportControls.vue'
 import TransportLayer from './TransportLayer.vue'
 import { useTransport } from '../stores/transport'
+import ShippingLanesLayer from './ShippingLanesLayer.vue'
+import ShippingLanesPanel from './ShippingLanesPanel.vue'
+import { useShippingLanes } from '../stores/shippingLanes'
 import ShippingLayer from './ShippingLayer.vue'
 import ShippingPanel from './ShippingPanel.vue'
 import { useShipping } from '../stores/shipping'
@@ -117,6 +123,7 @@ const emit = defineEmits<{ select: []; 'select-news': [article: NewsArticle] }>(
 const selectedKey = ref('')
 const news = useNews()
 const shipping = useShipping()
+const lanes = useShippingLanes()
 const transport = useTransport()
 const timeWindows = [{ title: 'Past 24 hours', value: '24h' }, { title: 'Past 3 days', value: '3d' }, { title: 'Past 7 days', value: '7d' }]
 const newsData = computed(() => mapNews(news.result?.articles || [], world))

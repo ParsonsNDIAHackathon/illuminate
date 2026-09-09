@@ -1,0 +1,346 @@
+{
+  "ports": [
+    {
+      "id": "shanghai",
+      "name": "Shanghai",
+      "country": "CN",
+      "latitude": 31.3,
+      "longitude": 121.8
+    },
+    {
+      "id": "ningbo",
+      "name": "Ningbo",
+      "country": "CN",
+      "latitude": 29.9,
+      "longitude": 122
+    },
+    {
+      "id": "yantian",
+      "name": "Yantian",
+      "country": "CN",
+      "latitude": 22.57,
+      "longitude": 114.3
+    },
+    {
+      "id": "busan",
+      "name": "Busan",
+      "country": "KR",
+      "latitude": 35.1,
+      "longitude": 129.05
+    },
+    {
+      "id": "yokohama",
+      "name": "Yokohama",
+      "country": "JP",
+      "latitude": 35.45,
+      "longitude": 139.67
+    },
+    {
+      "id": "los-angeles",
+      "name": "Los Angeles",
+      "country": "US",
+      "latitude": 33.73,
+      "longitude": -118.26
+    },
+    {
+      "id": "oakland",
+      "name": "Oakland",
+      "country": "US",
+      "latitude": 37.8,
+      "longitude": -122.32
+    },
+    {
+      "id": "auckland",
+      "name": "Auckland",
+      "country": "NZ",
+      "latitude": -36.84,
+      "longitude": 174.77
+    }
+  ],
+  "lanes": [
+    {
+      "id": "shanghai-los-angeles",
+      "name": "Shanghai \u2192 Los Angeles",
+      "service": "TP8 / WC2",
+      "source": {
+        "title": "Port of Los Angeles \u2014 August 2026 service directory",
+        "reference": "https://kentico.portoflosangeles.org/getmedia/6092f0f7-9e77-4b80-9b65-f6c6b4b5f9e1/Shipping-Line-Services-and-Port-Rotations-by-Terminal-2020"
+      },
+      "published_at": "2026-08-05",
+      "segments": [
+        {
+          "from_port": "shanghai",
+          "to_port": "los-angeles",
+          "waypoints": [
+            {
+              "latitude": 32,
+              "longitude": 130
+            },
+            {
+              "latitude": 35,
+              "longitude": 150
+            },
+            {
+              "latitude": 38,
+              "longitude": 175
+            },
+            {
+              "latitude": 38,
+              "longitude": -160
+            },
+            {
+              "latitude": 35,
+              "longitude": -130
+            }
+          ],
+          "passages": [],
+          "mode": "ocean"
+        }
+      ]
+    },
+    {
+      "id": "ningbo-los-angeles",
+      "name": "Ningbo \u2192 Los Angeles",
+      "service": "TP7 / WC5",
+      "source": {
+        "title": "Port of Los Angeles \u2014 August 2026 service directory",
+        "reference": "https://kentico.portoflosangeles.org/getmedia/6092f0f7-9e77-4b80-9b65-f6c6b4b5f9e1/Shipping-Line-Services-and-Port-Rotations-by-Terminal-2020"
+      },
+      "published_at": "2026-08-05",
+      "segments": [
+        {
+          "from_port": "ningbo",
+          "to_port": "los-angeles",
+          "waypoints": [
+            {
+              "latitude": 30,
+              "longitude": 130
+            },
+            {
+              "latitude": 33,
+              "longitude": 150
+            },
+            {
+              "latitude": 36,
+              "longitude": 175
+            },
+            {
+              "latitude": 36,
+              "longitude": -160
+            },
+            {
+              "latitude": 34,
+              "longitude": -130
+            }
+          ],
+          "passages": [],
+          "mode": "ocean"
+        }
+      ]
+    },
+    {
+      "id": "yantian-los-angeles",
+      "name": "Yantian \u2192 Los Angeles",
+      "service": "TP6 / WC1",
+      "source": {
+        "title": "Port of Los Angeles \u2014 August 2026 service directory",
+        "reference": "https://kentico.portoflosangeles.org/getmedia/6092f0f7-9e77-4b80-9b65-f6c6b4b5f9e1/Shipping-Line-Services-and-Port-Rotations-by-Terminal-2020"
+      },
+      "published_at": "2026-08-05",
+      "segments": [
+        {
+          "from_port": "yantian",
+          "to_port": "los-angeles",
+          "waypoints": [
+            {
+              "latitude": 20,
+              "longitude": 118
+            },
+            {
+              "latitude": 20,
+              "longitude": 125
+            },
+            {
+              "latitude": 25,
+              "longitude": 140
+            },
+            {
+              "latitude": 30,
+              "longitude": 165
+            },
+            {
+              "latitude": 32,
+              "longitude": -170
+            },
+            {
+              "latitude": 33,
+              "longitude": -140
+            },
+            {
+              "latitude": 33,
+              "longitude": -123
+            }
+          ],
+          "passages": [],
+          "mode": "ocean"
+        }
+      ]
+    },
+    {
+      "id": "busan-los-angeles",
+      "name": "Busan \u2192 Los Angeles",
+      "service": "PS6",
+      "source": {
+        "title": "Port of Los Angeles \u2014 August 2026 service directory",
+        "reference": "https://kentico.portoflosangeles.org/getmedia/6092f0f7-9e77-4b80-9b65-f6c6b4b5f9e1/Shipping-Line-Services-and-Port-Rotations-by-Terminal-2020"
+      },
+      "published_at": "2026-08-05",
+      "segments": [
+        {
+          "from_port": "busan",
+          "to_port": "los-angeles",
+          "waypoints": [
+            {
+              "latitude": 33,
+              "longitude": 130
+            },
+            {
+              "latitude": 31,
+              "longitude": 135
+            },
+            {
+              "latitude": 34,
+              "longitude": 150
+            },
+            {
+              "latitude": 39,
+              "longitude": 175
+            },
+            {
+              "latitude": 40,
+              "longitude": -160
+            },
+            {
+              "latitude": 35,
+              "longitude": -130
+            }
+          ],
+          "passages": [],
+          "mode": "ocean"
+        }
+      ]
+    },
+    {
+      "id": "yokohama-los-angeles",
+      "name": "Yokohama \u2192 Los Angeles",
+      "service": "EX1",
+      "source": {
+        "title": "Port of Los Angeles \u2014 August 2026 service directory",
+        "reference": "https://kentico.portoflosangeles.org/getmedia/6092f0f7-9e77-4b80-9b65-f6c6b4b5f9e1/Shipping-Line-Services-and-Port-Rotations-by-Terminal-2020"
+      },
+      "published_at": "2026-08-05",
+      "segments": [
+        {
+          "from_port": "yokohama",
+          "to_port": "los-angeles",
+          "waypoints": [
+            {
+              "latitude": 35,
+              "longitude": 145
+            },
+            {
+              "latitude": 38,
+              "longitude": 165
+            },
+            {
+              "latitude": 40,
+              "longitude": -175
+            },
+            {
+              "latitude": 38,
+              "longitude": -150
+            },
+            {
+              "latitude": 34,
+              "longitude": -125
+            }
+          ],
+          "passages": [],
+          "mode": "ocean"
+        }
+      ]
+    },
+    {
+      "id": "los-angeles-oakland",
+      "name": "Los Angeles \u2192 Oakland",
+      "service": "TP8 / WC2",
+      "source": {
+        "title": "Port of Los Angeles \u2014 August 2026 service directory",
+        "reference": "https://kentico.portoflosangeles.org/getmedia/6092f0f7-9e77-4b80-9b65-f6c6b4b5f9e1/Shipping-Line-Services-and-Port-Rotations-by-Terminal-2020"
+      },
+      "published_at": "2026-08-05",
+      "segments": [
+        {
+          "from_port": "los-angeles",
+          "to_port": "oakland",
+          "waypoints": [
+            {
+              "latitude": 33,
+              "longitude": -120
+            },
+            {
+              "latitude": 35,
+              "longitude": -122
+            },
+            {
+              "latitude": 37,
+              "longitude": -123
+            }
+          ],
+          "passages": [],
+          "mode": "ocean"
+        }
+      ]
+    },
+    {
+      "id": "los-angeles-auckland",
+      "name": "Los Angeles \u2192 Auckland",
+      "service": "PANZ",
+      "source": {
+        "title": "Port of Los Angeles \u2014 August 2026 service directory",
+        "reference": "https://kentico.portoflosangeles.org/getmedia/6092f0f7-9e77-4b80-9b65-f6c6b4b5f9e1/Shipping-Line-Services-and-Port-Rotations-by-Terminal-2020"
+      },
+      "published_at": "2026-08-05",
+      "segments": [
+        {
+          "from_port": "los-angeles",
+          "to_port": "auckland",
+          "waypoints": [
+            {
+              "latitude": 25,
+              "longitude": -125
+            },
+            {
+              "latitude": 5,
+              "longitude": -140
+            },
+            {
+              "latitude": -15,
+              "longitude": -160
+            },
+            {
+              "latitude": -30,
+              "longitude": -178
+            },
+            {
+              "latitude": -35,
+              "longitude": 178
+            }
+          ],
+          "passages": [],
+          "mode": "ocean"
+        }
+      ]
+    }
+  ]
+}

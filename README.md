@@ -195,3 +195,20 @@ and **illustrative** for scenarios. A corridor reference documents infrastructur
 not shipment evidence. Status is author supplied, not independently certified by the app.
 Dates are record review dates. The overlays do not create graph assertions or change
 vendor risk scores, and nearby news does not establish disruption of a route.
+
+### Established shipping lanes
+
+**Shipping lanes** is an independent map reference layer, enabled by default. The
+initial coverage is seven selected Los Angeles connections from the Port of Los
+Angeles August 2026 service directory, published August 5, 2026. Select a lane for
+its service identifier and original source. Paths and port positions are schematic;
+this is a dated reference snapshot, not live vessel traffic or supplier shipment evidence.
+The reference stays visible even when the graph is empty or supplier relationships change.
+Search and port filters are separate from graph search. This is partial coverage.
+
+`GET /api/shipping/lanes` validates and serves `shipping_lanes.json` in
+`ILLUMINATE_DATA_DIR`, falling back to the bundled reference file of the same name.
+**Refresh** reloads that catalog; it does not scrape or update the source publication.
+A malformed override reports an error. To extend coverage, add sourced, dated port
+connections to this catalog. The previous hypothetical routes remain under
+**Supplier examples**, disabled by default; US highway and rail references are unchanged.

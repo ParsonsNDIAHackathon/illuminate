@@ -116,3 +116,36 @@ class TransportNetwork(Record):
             if c.updated_at > date.today():
                 raise ValueError("Corridor update date cannot be in the future")
         return self
+
+
+class EstablishedLane(Record):
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    service: str = Field(min_length=1)
+    source: Source
+    published_at: date
+    segments: list[Segment] = Field(min_length=1)
+
+
+class EstablishedLanes(Record):
+    ports: list[Port]
+    lanes: list[EstablishedLane]
+
+    @model_validator(mode="after")
+    def validate_lanes(self):
+        ports = {p.id for p in self.ports}
+        if len(ports) != len(self.ports) or len({r.id for r in self.lanes}) != len(self.lanes):
+            raise ValueError("Port and lane IDs must be unique")
+        for lane in self.lanes:
+            if lane.published_at > date.today():
+                raise ValueError("Publication date cannot be in the future")
+            if not lane.source.reference.startswith("https://"):
+                raise ValueError("An established lane requires a published HTTPS source")
+            for i, segment in enumerate(lane.segments):
+                if segment.mode != "ocean" or segment.from_port == segment.to_port:
+                    raise ValueError("Established shipping lanes connect distinct ports by ocean")
+                if segment.from_port not in ports or segment.to_port not in ports:
+                    raise ValueError("Lane endpoints must exist")
+                if i and lane.segments[i - 1].to_port != segment.from_port:
+                    raise ValueError("Lane segments must be continuous")
+        return self

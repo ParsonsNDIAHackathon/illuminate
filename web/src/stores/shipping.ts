@@ -6,7 +6,7 @@ import { linkedShippingRoutes, usesPort, type ShippingCatalog, type RouteStatus,
 
 export const useShipping = defineStore('shipping', () => {
   const graph = useGraph()
-  const visible = ref(true)
+  const visible = ref(false)
   const status = ref<RouteStatus | ''>('')
   const mode = ref<TransportMode | ''>('')
   const port = ref('')

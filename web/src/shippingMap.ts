@@ -46,14 +46,14 @@ export function shippingPath(points: ShippingPoint[]): string {
   return path
 }
 
-export function routePath(route: ShippingRoute, ports: ShippingPort[]): string {
+export function routePath(route: Pick<ShippingRoute, 'segments'>, ports: ShippingPort[]): string {
   const byId = new Map(ports.map(p => [p.id, p]))
   return route.segments.map(s => {
     const a = byId.get(s.from_port), b = byId.get(s.to_port)
     return a && b ? shippingPath([a, ...s.waypoints, b]) : ''
   }).join(' ')
 }
-export function usesPort(route: ShippingRoute, port: string) {
+export function usesPort(route: Pick<ShippingRoute, 'segments'>, port: string) {
   return route.segments.some(s => s.from_port === port || s.to_port === port)
 }
 
