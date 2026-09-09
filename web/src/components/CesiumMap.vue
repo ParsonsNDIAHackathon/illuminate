@@ -9,7 +9,9 @@ import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import {
   Viewer, Cartesian2, Cartesian3, Color, Credit, CreditDisplay, CustomDataSource, DistanceDisplayCondition,
   LabelStyle, PolylineDashMaterialProperty, ScreenSpaceEventHandler, ScreenSpaceEventType,
-  SingleTileImageryProvider, OpenStreetMapImageryProvider,
+  SingleTileImageryProvider, OpenStreetMapImageryProvider, ProviderViewModel,
+  ArcGisMapServerImageryProvider, TileMapServiceImageryProvider, buildModuleUrl,
+  BingMapsImageryProvider, BingMapsStyle,
 } from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { visibleMarkerIds } from '../mapVisibility'
@@ -95,8 +97,38 @@ async function initialize() {
   try {
     // This viewer uses no ion services; retain an accurate engine credit.
     CreditDisplay.cesiumCredit = new Credit('<a href="https://cesium.com/cesiumjs/" target="_blank" rel="noopener">CesiumJS</a>', true)
+    const imageryChoices = [
+      new ProviderViewModel({
+        name: 'OpenStreetMap', tooltip: 'Street map with roads and place names',
+        iconUrl: buildModuleUrl('Widgets/Images/ImageryProviders/openStreetMap.png'),
+        creationFunction: () => new OpenStreetMapImageryProvider({
+          url: 'https://tile.openstreetmap.org/', maximumLevel: 19,
+          credit: new Credit('&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>', true),
+        }),
+      }),
+      new ProviderViewModel({
+        name: 'Satellite', tooltip: 'Esri World Imagery — satellite and aerial photography',
+        iconUrl: buildModuleUrl('Widgets/Images/ImageryProviders/ArcGisMapServiceWorldImagery.png'),
+        creationFunction: () => ArcGisMapServerImageryProvider.fromUrl('https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'),
+      }),
+      new ProviderViewModel({
+        name: 'Natural Earth', tooltip: 'Bundled physical world map — no external tile service',
+        iconUrl: buildModuleUrl('Widgets/Images/ImageryProviders/naturalEarthII.png'),
+        creationFunction: () => TileMapServiceImageryProvider.fromUrl(buildModuleUrl('Assets/Textures/NaturalEarthII')),
+      }),
+    ]
+    const bingKey = import.meta.env.VITE_BING_MAPS_KEY?.trim()
+    if (bingKey) imageryChoices.unshift(new ProviderViewModel({
+      name: 'Bing Maps', tooltip: 'Bing aerial imagery with road and place labels',
+      iconUrl: buildModuleUrl('Widgets/Images/ImageryProviders/bingAerialLabels.png'),
+      creationFunction: () => BingMapsImageryProvider.fromUrl('https://dev.virtualearth.net', {
+        key: bingKey, mapStyle: BingMapsStyle.AERIAL_WITH_LABELS_ON_DEMAND,
+      }),
+    }))
     viewer = new Viewer(container.value, {
-      baseLayer: false, baseLayerPicker: false, geocoder: false, homeButton: false,
+      baseLayerPicker: true, imageryProviderViewModels: imageryChoices,
+      selectedImageryProviderViewModel: imageryChoices[0], terrainProviderViewModels: [],
+      geocoder: false, homeButton: false,
       sceneModePicker: false, navigationHelpButton: true, navigationInstructionsInitiallyVisible: false, animation: false, timeline: false,
       fullscreenButton: false, infoBox: false, selectionIndicator: false,
       requestRenderMode: true, maximumRenderTimeChange: Infinity,
@@ -117,13 +149,6 @@ async function initialize() {
     observer.observe(container.value)
     removeVisibilityListener = viewer.scene.postRender.addEventListener(updateVisibility)
     draw()
-    const imagery = new OpenStreetMapImageryProvider({
-      url: 'https://tile.openstreetmap.org/',
-      maximumLevel: 19,
-      credit: new Credit('&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>', true),
-    })
-    if (disposed) return
-    viewer.imageryLayers.addImageryProvider(imagery)
     // Rasterize the existing geographic boundaries once, rather than creating thousands of entities.
     const canvas = document.createElement('canvas'); canvas.width = 4096; canvas.height = 2048
     const context = canvas.getContext('2d')!
@@ -154,5 +179,6 @@ onBeforeUnmount(() => {
 .cesium-map { position:absolute; inset:0; }
 .globe-error,.globe-loading { position:absolute; top:45%; left:15%; right:15%; padding:16px; background:#102b38eb; color:white; border-radius:8px; text-align:center; }
 .cesium-map :deep(.cesium-viewer-toolbar) { top:52px; right:10px; }
+.cesium-map :deep(.cesium-baseLayerPicker-dropDown) { max-width:calc(100vw - 110px); }
 .cesium-map :deep(.cesium-widget-credits) { font-size:10px; }
 </style>

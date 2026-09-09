@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --no-audit --no-fund
 COPY . .
+ARG VITE_BING_MAPS_KEY
 RUN npm run build
 
 FROM nginx:alpine

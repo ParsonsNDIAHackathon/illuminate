@@ -73,7 +73,10 @@ services:
       - "8000:8000"
 
   web:
-    build: ./web
+    build:
+      context: ./web
+      args:
+        VITE_BING_MAPS_KEY: ${VITE_BING_MAPS_KEY:-}
     container_name: illuminate-web
     depends_on:
       - api
