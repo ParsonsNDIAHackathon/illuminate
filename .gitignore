@@ -16,6 +16,8 @@ api/data/
 .neo4j/
 # misc
 .DS_Store
+# LFS cache key, written by the Pages workflow
+.lfs-assets-id
 # backups (make backup)
 backups/
 .claude
