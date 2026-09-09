@@ -15,6 +15,26 @@ The running app also serves the deck at `/slides/` — <http://localhost:8080/sl
 bottom of the app's left rail opens it in a new tab, so a demo can cut between the two. The
 container bind-mounts this directory, so editing a slide needs a reload, not a rebuild.
 
+## Publishing
+
+`.github/workflows/pages.yml` puts this directory on GitHub Pages —
+<https://parsonsndiahackathon.github.io/illuminate/>, with the short deck at `short.html`. It runs
+on any push to `main` that touches `slides/`, and can be triggered by hand from the Actions tab.
+
+Nothing about the deck changes to make this work: reveal is already vendored and every path in
+`index.html` is relative, so the same files that open over `file://` serve unmodified from a
+subpath. The workflow only has two jobs beyond copying the directory up:
+
+- **Pull the LFS media.** `actions/checkout` leaves LFS files as pointer stubs by default, which
+  would publish a 134-byte text file named `chat-report.mp4` and leave that slide showing its
+  placeholder. The objects are pulled through a cache keyed on their oids — a cold build spends
+  ~120MB of the account's monthly LFS bandwidth, a cached one spends none — and the build then
+  asserts no pointer survived, so this fails loudly rather than silently.
+- **Regenerate `short.html`.** Same `make-short.py` you would run locally, so the published short
+  deck cannot drift from the long one even if someone forgets to commit it.
+
+Pages must be switched on once, under **Settings → Pages → Source: GitHub Actions**.
+
 ## The short deck
 
 `short.html` is the same deck cut to six slides — the big picture, the person, risk colouring,
