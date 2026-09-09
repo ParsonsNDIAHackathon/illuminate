@@ -98,6 +98,7 @@ adds a scrubber; `data-once` stops the loop.
 | `media/report-risk.png` | The report's risk section | from `docs/screenshots/06-report-risk.png` |
 | `media/chat-add-program.png` | **Chat: add a new program** | **your capture** |
 | `media/permission-dialog.png` | Ask before writing | from `docs/screenshots/04-permission-dialog.png` |
+| `media/map.png` | Map view — the optional closer | **your capture** |
 
 The rows marked *from `docs/screenshots/`* are stand-ins — overwrite any of them with a fresher
 capture under the same filename.
