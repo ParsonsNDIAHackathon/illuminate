@@ -1,6 +1,6 @@
 # Illuminate — pitch deck
 
-A [reveal.js](https://revealjs.com) deck, 20 slides. No build step and no network: reveal is
+A [reveal.js](https://revealjs.com) deck, 21 slides. No build step and no network: reveal is
 vendored in `vendor/`, so `slides/index.html` opens straight from disk.
 
 ```bash
@@ -51,6 +51,7 @@ adds a scrubber; `data-once` stops the loop.
 | File | Slide | Status |
 | --- | --- | --- |
 | `media/program-overview.png` | The big picture — whole program graph | placeholder art from `docs/screenshots/01-explorer.png` |
+| `media/birdsnest.png` | Nobody holds this in their head — the same graph unfiltered | **your capture** (V-22, every layer, no depth limit) |
 | `media/employee-risk.png` | Employee of a sub-contractor — person risk tab | **your capture** (R. Ostrowski) |
 | `media/risk-graph.*` | **Canvas coloured by risk** — the money slide | ⬜ empty — png or a short mp4 |
 | `media/risk-path.*` | Clicking a dimension lights its path up | ⬜ empty — optional slide, cut it if short |
@@ -61,8 +62,8 @@ adds a scrubber; `data-once` stops the loop.
 | `media/chat-add-program.*` | **Chat: add a new program** | ⬜ empty — mp4 preferred |
 | `media/permission-dialog.png` | Ask before writing | from `docs/screenshots/04-permission-dialog.png` |
 
-The six seeded images are stand-ins from `docs/screenshots/` — overwrite any of them with a
-fresher capture under the same filename.
+The rows marked *from `docs/screenshots/`* are stand-ins — overwrite any of them with a fresher
+capture under the same filename.
 
 Capture at 1600×900 or wider. Screenshots sit on a dark card with a shadow, so grab the app in
 dark theme and they drop straight in.
