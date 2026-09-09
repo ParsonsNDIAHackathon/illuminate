@@ -1,6 +1,6 @@
 # Illuminate — pitch deck
 
-A [reveal.js](https://revealjs.com) deck, 20 slides. No build step and no network: reveal is
+A [reveal.js](https://revealjs.com) deck, 19 slides. No build step and no network: reveal is
 vendored in `vendor/`, so `slides/index.html` opens straight from disk.
 
 ```bash

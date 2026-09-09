@@ -447,47 +447,24 @@
 </section>
 
 <!-- =================================================================== 13 -->
-<section class="s">
-  <p class="kicker">Candour</p>
-  <h2>Honest limits.</h2>
-  <ul class="compact" style="font-size:24px;margin-top:8px">
-    <li><strong>Entity resolution is the whole game.</strong> UEI, CAGE and LEI carry it; the residue is name matching,
-      tuned to refuse the subset trap, and every fuzzy merge records its method and confidence.</li>
-    <li><strong>Sub-award coverage is uneven</strong>, so tier depth varies by program. People are harder to resolve than
-      companies, and coverage skews to large listed firms.</li>
-    <li><strong>The risk score is a triage instrument, not an adjudication.</strong> Financial distress is read from filing
-      behaviour, never from the statements themselves — and a private sub-tier vendor with no filings produces no
-      signal at all, which is the common case.</li>
-    <li><strong>A clear result is not a clearance.</strong> The §1260H roster is an excerpt of the published annex, and
-      every result says so — including the clear ones.</li>
-    <li><strong>SAM.gov's personal-key tier allows about ten Entity calls a day</strong>, so registration details fill in
-      slowly. The exclusion screen does not depend on it — it runs against the public daily extract.</li>
-  </ul>
-  <aside class="notes">
-    Do not skip this slide. Judges trust a team that names its own failure modes more than one
-    that does not have any.
-  </aside>
-</section>
-
-<!-- =================================================================== 14 -->
 <section class="s pad-sm">
   <p class="kicker">What's next</p>
-  <h2 style="font-size:44px">Cut for the three days — and where it goes.</h2>
+  <h2 style="font-size:44px">Where it goes next.</h2>
   <div class="grid-2" style="flex:1;min-height:0;align-items:start;margin-top:6px;gap:26px">
     <div class="card next" style="height:100%">
-      <span class="tag">Cut on purpose, scoped and understood</span>
-      <ul class="compact" style="font-size:20px;margin-top:4px">
-        <li>A <strong>vector index over filings</strong>, so “who else mentions this supplier?” is answerable from
-          10-K and 10-Q text rather than structured fields alone.</li>
-        <li><strong>Multi-tenant auth.</strong> Today: one workspace, one set of encrypted keys.</li>
-        <li><strong>Live feeds behind the conflict and hazard tables</strong> — a committed snapshot with a stated
-          date stands in, deliberately.</li>
-        <li><strong>Full-text financial-statement analysis</strong>, beyond filing behaviour.</li>
-        <li><strong>Market data</strong> — wired, keyed off.</li>
+      <span class="tag">The analysis to add</span>
+      <ul class="compact" style="font-size:21px;margin-top:4px">
+        <li><strong>Adversarial analysis, aimed at foreign supply chains.</strong> Turn the graph around and ask it
+          the other side’s question: to reach this program, which supplier would you buy, which person would you
+          approach, which sole-source node would you squeeze? The routes are already in the graph — today it walks
+          them defensively, and the same walk read from the outside names the exposure worth watching first.</li>
+        <li><strong>Scenario planning.</strong> “What happens if a natural disaster or a conflict hits this
+          region?” Mark the region, propagate the outage along <code>SUPPLIES</code>, and read out what stops
+          and how far up it reaches — including the single-source parts where the answer is <em>everything</em>.</li>
       </ul>
     </div>
     <div class="card" style="height:100%">
-      <span class="tag">Where it goes next</span>
+      <span class="tag">The platform around it</span>
       <ul class="compact" style="font-size:20px;margin-top:4px">
         <li><strong>Monitoring, not snapshots.</strong> Re-run the graph on a schedule and alert on the delta —
           a new designation, a lapsed registration, an ownership change. Claims are already timestamped and
@@ -496,8 +473,6 @@
           plus supplier-submitted BOMs, would carry the walk further down.</li>
         <li><strong>Portfolio view.</strong> Run one risk pass across many programs and rank them — the scorer is
           already graph-wide, so this is mostly a question of UI.</li>
-        <li><strong>What-if.</strong> “If this supplier fails, what stops?” The dependency dimension computes it;
-          it just needs to be exposed as a simulation.</li>
         <li><strong>Into the acquisition workflow.</strong> MCP already exposes the tools, so a contracting
           officer's own agent could call this pre-award. Air-gapped is the same stack with a local model.</li>
         <li><strong>Entity resolution as a service</strong>, with human-in-the-loop merge review.</li>
@@ -505,12 +480,14 @@
     </div>
   </div>
   <aside class="notes">
-    The honest framing: nothing in the left column was hard to see coming, we just chose the graph
-    and the evidence model first. The right column is what the architecture was built to allow.
+    Left column is new analysis the graph can already carry — both are reads of edges that exist
+    today, not new data. Right column is the platform around it. If pushed on the adversarial one:
+    it is the same dependency walk, scored from the other end, and it is why the evidence model
+    matters — an attacker’s route you cannot cite is a story.
   </aside>
 </section>
 
-<!-- =================================================================== 15 -->
+<!-- =================================================================== 14 -->
 <section class="s title">
   <p class="kicker">Illuminate</p>
   <h1 style="font-size:66px">One graph, any consumer.</h1>
