@@ -15,6 +15,7 @@ LABELS: dict[str, str] = {
     "Location": "Country / region / city. kind ∈ {country, region, city}; code is ISO-3166 where applicable.",
     "Artifact": "Evidence: filing, award record, registry record, news article, web page. Never a raw blob. kind ∈ {award, registry, filing, news, web, document, record}.",
     "Claim": "Reified assertion (subject, predicate, object) with source, method, confidence, status ∈ {staged, committed, rejected}.",
+    "Report": "A generated document about a subject in the graph, kept in the graph beside it: an HTML deliverable with the findings it made and when it was made. kind ∈ {risk_assessment, entity_profile}; regenerating rewrites it in place under the same id.",
 }
 
 # --- Relationship types ----------------------------------------------------------
@@ -38,6 +39,8 @@ RELS: dict[str, str] = {
     "ASSERTS": "(c:Claim)-[:ASSERTS]->(subject) — the claim's subject; predicate is a property on the Claim",
     "TARGETS": "(c:Claim)-[:TARGETS]->(object) — the claim's object node, when the object is a node",
     "ABOUT": "(a:Artifact)-[:ABOUT]->(e:Entity) — an artifact that mentions an entity without a specific claim",
+    "REPORTS_ON": "(r:Report)-[:REPORTS_ON]->(subject:Entity) — what the report is about; one per report",
+    "CITES": "(r:Report)-[:CITES]->(n) — a node the report actually names in a finding, so the document and the canvas point at the same evidence",
 }
 
 # Artifact kinds that are a pointer at a data source (a LittleSis org page, a registry entry, a
@@ -95,12 +98,15 @@ CONSTRAINTS = [
     "CREATE CONSTRAINT location_id IF NOT EXISTS FOR (n:Location) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT artifact_id IF NOT EXISTS FOR (n:Artifact) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT claim_id IF NOT EXISTS FOR (n:Claim) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT report_id IF NOT EXISTS FOR (n:Report) REQUIRE n.id IS UNIQUE",
     "CREATE INDEX entity_uei IF NOT EXISTS FOR (n:Entity) ON (n.uei)",
     "CREATE INDEX entity_cage IF NOT EXISTS FOR (n:Entity) ON (n.cage)",
     "CREATE INDEX entity_lei IF NOT EXISTS FOR (n:Entity) ON (n.lei)",
     "CREATE INDEX entity_name IF NOT EXISTS FOR (n:Entity) ON (n.name_norm)",
     "CREATE INDEX person_name IF NOT EXISTS FOR (n:Person) ON (n.name_norm)",
     "CREATE INDEX claim_status IF NOT EXISTS FOR (n:Claim) ON (n.status)",
+    # The reports list is ordered newest first and is the whole of the Reports tab's query.
+    "CREATE INDEX report_generated IF NOT EXISTS FOR (n:Report) ON (n.generated_at)",
     # Risk is a first-class way into the graph: "show me everything severe" is a range
     # scan, not a full scan, and the canvas asks it on every load.
     "CREATE INDEX entity_risk IF NOT EXISTS FOR (n:Entity) ON (n.risk_score)",
@@ -141,6 +147,8 @@ def schema_prompt() -> str:
                  "risk_dimensions_requested (int), risk_components (JSON string — do not filter on it), risk_scored_at. "
                  "Designation markers set by a screen hit: flagged (bool, any designation), sanctioned, debarred, restricted (bool). "
                  "Location: code (ISO2 country / 'US-TX'), kind. Category: kind ∈ {goods, services}. "
+                 "Report: kind, title, subject_id, subject_name, generated_at, generated_by, finding_count, summary — the html "
+                 "property is the document itself and is far too large to return in a query; select the other fields. "
                  "Edges carry an id property and provenance: " + ", ".join(PROVENANCE_FIELDS) + ".")
     lines.append("CATEGORY TAXONOMY (id → name, kind):")
     for c in TAXONOMY:

@@ -55,6 +55,7 @@ const nav = computed(() => [
   { to: '/entities', icon: 'mdi-domain', title: 'Entities' },
   { to: '/people', icon: 'mdi-account-tie', title: 'People' },
   { to: '/risk', icon: 'mdi-shield-alert-outline', title: 'Risk' },
+  { to: '/reports', icon: 'mdi-file-chart-outline', title: 'Reports' },
   { to: '/artifacts', icon: 'mdi-file-document-multiple', title: 'Artifacts' },
   { to: '/claims', icon: 'mdi-check-decagram', title: 'Claims', badge: staged.value || undefined },
   { to: '/connectors', icon: 'mdi-power-plug', title: 'Connectors' },

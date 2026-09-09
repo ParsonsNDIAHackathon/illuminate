@@ -12,6 +12,7 @@ from . import __version__, db, events
 from .config import settings
 from .enrichment.worker import worker
 from .routers import chat, claims, connectors, enrichment, graph, permissions, query
+from .routers import reports as reports_router
 from .routers import risk as risk_router
 from .routers import settings as settings_router
 from .schema import ensure_schema
@@ -62,7 +63,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Illuminate", version=__version__, lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-for r in (graph.router, query.router, permissions.router, claims.router, enrichment.router, risk_router.router, connectors.router, settings_router.router, chat.router):
+for r in (graph.router, query.router, permissions.router, claims.router, enrichment.router, risk_router.router, reports_router.router, connectors.router, settings_router.router, chat.router):
     app.include_router(r)
 
 app.mount("/mcp", _mcp_mount)

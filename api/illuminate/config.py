@@ -62,7 +62,10 @@ settings = Settings()
 # edges (lobbying, memberships, donations) do not carry that chain, and ownership carries it only
 # pointing in, so the owner of a supplier is drawn and that owner's other subsidiaries are not. A
 # node scored over 20 that reaches a supplier is drawn either way (web/src/stores/graphLayers.ts).
-LAYER_DEFAULTS = {"entities": True, "indirect_orgs": True, "people": True, "countries": False, "categories": False, "artifacts": False, "sources": False, "claims": False}
+# "reports" is on by default: a report exists because someone asked for it, and there are a handful
+# of them at most, so hiding the thing the user just generated would be the surprising default.
+LAYER_DEFAULTS = {"entities": True, "indirect_orgs": True, "people": True, "countries": False, "categories": False, "artifacts": False, "sources": False, "claims": False,
+                  "reports": True}
 
 # Risk score above which a node is drawn whatever the filters say, mirrored by RISK_PIN_FLOOR in
 # web/src/stores/graphLayers.ts. The canvas can only pin what it was sent, so the graph queries

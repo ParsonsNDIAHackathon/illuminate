@@ -24,7 +24,7 @@ function pruneStyleOps(ops: StyleOp[]): StyleOp[] {
 }
 
 /** The layer toggles the graph endpoints take. Entities are always fetched. */
-export const LAYER_KEYS = ['people', 'countries', 'categories', 'artifacts', 'sources', 'claims'] as const
+export const LAYER_KEYS = ['people', 'countries', 'categories', 'artifacts', 'sources', 'claims', 'reports'] as const
 function layerParams(layers: Record<string, boolean>) {
   return Object.fromEntries(LAYER_KEYS.map(k => [k, !!layers[k]]))
 }

@@ -50,6 +50,7 @@ const chat = useChat(); const graph = useGraph(); const ws = useWorkspace()
 const draft = ref('')
 const scroller = ref<HTMLElement>()
 const suggestions = [
+  'write a risk assessment for this program',
   'color graph by risk',
   'highlight single source suppliers',
   'color nodes affected by active conflicts orange',

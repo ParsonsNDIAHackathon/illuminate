@@ -14,6 +14,7 @@ export type GraphLayer =
   | 'artifacts'
   | 'sources'
   | 'claims'
+  | 'reports'
 
 /** Workspace layer key for organizations no chain of contracts or ownership joins to a program —
  *  they reach the canvas through a person, a place, a document, a claim, or through another
@@ -53,6 +54,7 @@ const LAYER_OF: Record<string, GraphLayer> = {
   Category: 'categories',
   Artifact: 'artifacts',
   Claim: 'claims',
+  Report: 'reports',
 }
 const LAYER_DEFAULT: Record<GraphLayer, boolean> = {
   people: true,
@@ -61,6 +63,9 @@ const LAYER_DEFAULT: Record<GraphLayer, boolean> = {
   artifacts: false,
   sources: false,
   claims: false,
+  // On, unlike every other optional layer: a report is on the canvas because the user asked for
+  // it by name, and there are a handful of them, not a thousand.
+  reports: true,
 }
 
 export function layerOf(node: LayerNode): GraphLayer | null {

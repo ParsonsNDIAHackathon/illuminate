@@ -89,11 +89,52 @@
         <template v-if="p.form"><dt>Form</dt><dd>{{ p.form }}</dd></template>
       </dl>
     </section>
+    <!-- A generated document, kept in the graph beside what it is about. The two things that
+         belong on a stored report are when it was written and a way to write it again, because
+         a report about a graph that keeps changing is only as good as its timestamp. -->
+    <section v-if="node.label === 'Report'">
+      <h4>Report</h4>
+      <dl>
+        <dt>Kind</dt><dd>{{ kindLabel(p.kind) }}</dd>
+        <dt>Subject</dt><dd><a href="#" @click.prevent="showSubject">{{ p.subject_name || p.subject_id }}</a></dd>
+        <dt>Generated</dt><dd>{{ generatedAt }}</dd>
+        <dt>Written by</dt><dd>{{ p.generated_by && p.generated_by !== 'derived' ? p.generated_by : 'computed from the graph' }}</dd>
+        <template v-if="p.finding_count != null"><dt>Findings</dt><dd>{{ p.finding_count }}<span v-if="p.top_band"> · worst {{ p.top_band }}</span></dd></template>
+        <template v-if="p.cited_count"><dt>Cites</dt><dd>{{ p.cited_count }} nodes</dd></template>
+      </dl>
+      <p v-if="p.summary" class="text-body-2 mt-2" style="opacity:.85">{{ p.summary }}</p>
+    </section>
     <div class="d-flex flex-wrap ga-1 mt-2">
       <v-btn v-if="node.label === 'Artifact'" prepend-icon="mdi-text-box-search-outline" @click="rawId = node.id">Contents</v-btn>
       <v-btn v-if="node.label === 'Artifact'" prepend-icon="mdi-eye-outline" @click="viewId = node.id">View</v-btn>
-      <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-file-document-outline" :to="`/entities/${node.id}`">Report</v-btn>
-      <v-btn prepend-icon="mdi-arrow-expand-all" @click="$emit('expand', node.id)">Expand</v-btn>
+      <template v-if="node.label === 'Report'">
+        <v-btn prepend-icon="mdi-book-open-variant" :to="`/reports/${node.id}`">Read</v-btn>
+        <v-btn prepend-icon="mdi-refresh" :loading="reports.busy === node.id" @click="regenerate"
+               title="Rebuild this report from current graph data — same report, new timestamp">Regenerate</v-btn>
+        <v-btn v-if="citations.length" prepend-icon="mdi-map-marker-path" variant="text" @click="traceCitations"
+               title="Light up everything this report names">Trace</v-btn>
+      </template>
+      <!-- Generating is the one action that makes something new, so it is a menu rather than a
+           button: which kind of document is a decision, not a default. -->
+      <v-menu v-if="node.label === 'Entity'" location="bottom start">
+        <template #activator="{ props: act }">
+          <v-btn v-bind="act" prepend-icon="mdi-file-document-outline" append-icon="mdi-menu-down"
+                 :loading="!!reports.busy">Report</v-btn>
+        </template>
+        <v-list density="compact" style="min-width:280px">
+          <v-list-subheader>Generate</v-list-subheader>
+          <v-list-item v-for="k in reports.kinds" :key="k.kind" :title="k.label" :subtitle="k.description"
+                       @click="makeReport(k.kind)" />
+          <template v-if="existingReports.length">
+            <v-divider />
+            <v-list-subheader>Already written</v-list-subheader>
+            <v-list-item v-for="r in existingReports" :key="r.id" :title="kindLabel(r.kind)"
+                         :subtitle="`generated ${new Date(r.generated_at).toLocaleString()}`"
+                         :to="`/reports/${r.id}`" prepend-icon="mdi-book-open-variant" />
+          </template>
+        </v-list>
+      </v-menu>
+      <v-btn v-if="node.label !== 'Report'" prepend-icon="mdi-arrow-expand-all" @click="$emit('expand', node.id)">Expand</v-btn>
       <v-btn v-if="isProgram" prepend-icon="mdi-sitemap-outline" @click="openDiscover" :loading="discovering">Find suppliers</v-btn>
       <v-btn v-if="node.label === 'Entity'" prepend-icon="mdi-auto-fix" @click="enrich" :loading="enriching">Enrich</v-btn>
       <v-btn v-if="isProgram && node.id !== graph.focusId" prepend-icon="mdi-target" variant="text" @click="focusHere" :loading="focusing" title="Show only this program and its supply chain">Focus</v-btn>
@@ -130,14 +171,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { api, qs } from '../api/client'
+import { useRouter } from 'vue-router'
 import { useGraph } from '../stores/graph'
 import { useJobs } from '../stores/jobs'
+import { useReports } from '../stores/reports'
 import { useWorkspace } from '../stores/workspace'
 import ArtifactViewer from './ArtifactViewer.vue'
 import SourceFrame from './SourceFrame.vue'
 import SourceLink from './SourceLink.vue'
 import { bandChip, confidenceNote, isThin, scoreLabel, sevColor, sevIcon } from '../styles/risk'
-const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace()
+const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace(); const reports = useReports()
+const router = useRouter()
 const rawId = ref<string | null>(null); const viewId = ref<string | null>(null)
 defineEmits<{ (e: 'expand', id: string): void }>()
 const node = computed(() => graph.selected)
@@ -163,14 +207,47 @@ const rs = computed(() => risk.value ?? {
 /** Light up the nodes and edges a dimension was computed from: a score the user cannot walk
  *  back to its evidence is only an assertion. */
 function trace(c: any) { if (c.element_ids?.length) graph.trace(c.element_ids) }
+
+// --- reports -------------------------------------------------------------------------
+// The canvas payload carries a report's metadata but never its html or its citation list
+// (graphio.HEAVY_PROPS), so the open node fetches what it needs to show and to trace.
+const reportDetail = ref<any>(null)
+const citations = computed<string[]>(() => reportDetail.value?.element_ids || [])
+const existingReports = computed(() => (node.value ? reports.forSubject(node.value.id) : []))
+const generatedAt = computed(() => (p.value.generated_at ? new Date(p.value.generated_at).toLocaleString() : '—'))
+function kindLabel(k: string) { return reports.kinds.find(x => x.kind === k)?.label || k }
+async function showSubject() {
+  const id = p.value.subject_id
+  if (!id) return
+  if (!graph.nodes.has(id)) await graph.loadNeighbourhood(id, 1, ws.ws.layers)
+  graph.select(id)
+}
+/** Everything the document names, lit up on the canvas: the report and the graph should
+ *  never be able to disagree about what a finding was made of. */
+function traceCitations() { if (citations.value.length) graph.trace(citations.value) }
+async function regenerate() {
+  const id = node.value!.id
+  await reports.regenerate(id)
+  reportDetail.value = await reports.fetch(id, false)
+}
+async function makeReport(kind: string) {
+  const row = await reports.generate(kind, node.value!.id)
+  router.push(`/reports/${row.id}`)
+}
 const discoverDlg = ref(false); const discovering = ref(false); const discoverError = ref('')
 const kw = ref<string[]>([]); const agency = ref(''); const maxSubs = ref<number | null>(null)
 watch(node, async (n) => {
-  detail.value = null; supplies.value = []; personRoles.value = []; risk.value = null
+  detail.value = null; supplies.value = []; personRoles.value = []; risk.value = null; reportDetail.value = null
   if (!n) return
+  // The kinds and the reports already written are what the Report menu is built from, and
+  // the list is a dozen rows at most; load it once, the first time a node is opened.
+  if (!reports.kinds.length) reports.load()
   // Both labels are scored, so this is fetched before the label-specific work below.
   if (scorable.value) {
     try { risk.value = await api.get(`/api/risk/${n.id}`) } catch {}
+  }
+  if (n.label === 'Report') {
+    try { reportDetail.value = await reports.fetch(n.id, false) } catch {}
   }
   if (n.label === 'Entity') {
     try {

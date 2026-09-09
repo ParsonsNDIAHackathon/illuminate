@@ -8,6 +8,7 @@
     <v-chip value="artifacts" size="small" title="Documents: filings, awards, news, web pages">Artifacts</v-chip>
     <v-chip value="sources" size="small" title="Where data came from: registry entries and source records (LittleSis, GLEIF, SAM.gov, OFAC…)">Sources</v-chip>
     <v-chip value="claims" size="small" title="Reified assertions the evidence supports">Claims</v-chip>
+    <v-chip value="reports" size="small" title="Generated reports, drawn beside what they are about">Reports</v-chip>
   </v-chip-group>
 </template>
 <script setup lang="ts">
@@ -16,7 +17,7 @@ import { useWorkspace } from '../stores/workspace'
 import { INDIRECT_ORGS } from '../stores/graphLayers'
 const ws = useWorkspace()
 // Layers the server fetches by; a change here means a reload.
-const FETCHED = ['people', 'countries', 'categories', 'artifacts', 'sources', 'claims']
+const FETCHED = ['people', 'countries', 'categories', 'artifacts', 'sources', 'claims', 'reports']
 // Indirect orgs is a canvas-side filter over entities the server always sends, so it redraws without a fetch.
 const TOGGLABLE = [...FETCHED, INDIRECT_ORGS]
 const active = computed(() => Object.entries(ws.ws.layers).filter(([, v]) => v).map(([k]) => k))

@@ -8,6 +8,7 @@ import { hiddenNodeIds, indirectOrganizations, layerData, layerVisible, orphaned
 const claim = { id: 'claim-a', label: 'Claim', props: {} }
 const source = { id: 'source-a', label: 'Artifact', props: { kind: 'record' } }
 const document = { id: 'document-a', label: 'Artifact', props: { kind: 'filing' } }
+const report = { id: 'report-a', label: 'Report', props: { kind: 'risk_assessment' } }
 const nodes = [
   { id: 'entity-a', label: 'Entity', props: { kind: 'organization' } },
   { id: 'person-a', label: 'Person', props: {} },
@@ -16,6 +17,7 @@ const nodes = [
   claim,
   source,
   document,
+  report,
 ]
 
 function renderedWith(layers: Record<string, boolean>) {
@@ -51,6 +53,31 @@ test('disabled layers remain hidden when projected into Cytoscape data', () => {
   assert.equal(cy.getElementById('person-a').data('layer'), 'people')
   assert.equal(cy.getElementById('country-a').data('layer'), 'countries')
   assert.equal(cy.getElementById('category-a').data('layer'), 'categories')
+})
+
+test('a generated report is drawn unless the reports layer is turned off', () => {
+  // Every other optional layer defaults off; this one defaults on. A report is on the canvas
+  // because the user asked for it by name, and there are a handful of them, not a thousand —
+  // so an unset toggle draws it, and only an explicit off takes it away.
+  const unset = renderedWith({ people: false, countries: false, categories: false, claims: false, sources: false, artifacts: false })
+  assert.equal(unset.getElementById('report-a').data('layer'), 'reports')
+  assert.equal(unset.getElementById('report-a').hasClass('layer-hide'), false)
+
+  const off = renderedWith({ reports: false })
+  assert.equal(off.getElementById('report-a').hasClass('layer-hide'), true)
+  // and it is never mistaken for the evidence layers it sits next to
+  assert.equal(off.getElementById('document-a').data('layer'), 'artifacts')
+})
+
+test('a report is never pruned as an orphan, whatever its subject is doing', () => {
+  // Reports hang off one entity. When that entity is hidden the pruning rules must leave the
+  // report alone: they exist to clear organizations the layers stranded, and a report the user
+  // generated is not clutter the canvas gets to decide about.
+  const nodes = [{ id: 'entity-a', label: 'Entity', props: { kind: 'program' } }, report]
+  const edges = [{ source: 'report-a', target: 'entity-a', type: 'REPORTS_ON' }]
+  const hidden = [...hiddenNodeIds(nodes, edges, { reports: true })]
+  assert.deepEqual(hidden, [])
+  assert.deepEqual([...orphanedOrganizations(nodes, edges, new Set(['entity-a']))], [])
 })
 
 test('source records and documents obey independent layer toggles', () => {

@@ -3,7 +3,13 @@ definitions and to outside agents over MCP (D1)."""
 from __future__ import annotations
 
 from ..cypher.templates import TEMPLATES
+from ..reports import DEFAULT_KIND as DEFAULT_REPORT_KIND, kinds as report_kinds
 from ..styles import SWATCHES
+
+# Report kinds are declared once, in reports.py, and published from there: a kind the contract
+# knows about and the module cannot build would be a tool call that always fails.
+REPORT_KINDS = report_kinds()
+REPORT_KIND_NAMES = [k["kind"] for k in REPORT_KINDS]
 
 TOOLS: list[dict] = [
     {
@@ -140,6 +146,24 @@ TOOLS: list[dict] = [
                 }
             },
             "required": ["ops"],
+        },
+    },
+    {
+        "name": "generate_report",
+        "description": "Write a report and store it in the graph as a Report node, with its HTML document, the time it was "
+                       "generated and the findings it made. Use this whenever the user asks for a report, an assessment or a "
+                       "write-up — it is what produces a deliverable, where get_entity_report only hands you facts to talk about. "
+                       "Kinds: " + "; ".join(f"{k['kind']} — {k['description']}" for k in REPORT_KINDS) + ". "
+                       "The default is risk_assessment on the program the canvas is focused on. Regenerating the same kind for the "
+                       "same subject rewrites that one report with current data rather than making a second one, so say so rather "
+                       "than warning about duplicates. Say what the report found and that it is now on the Reports tab and on the canvas.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "subject_id": {"type": "string", "description": "entity id the report is about; defaults to the focused program"},
+                "kind": {"type": "string", "enum": REPORT_KIND_NAMES, "default": DEFAULT_REPORT_KIND},
+            },
+            "required": [],
         },
     },
     {

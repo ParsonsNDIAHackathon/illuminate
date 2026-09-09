@@ -373,6 +373,7 @@
         <div><p><strong>Country is not one field.</strong> Incorporation, operations, manufacturing and the seat of the parent are four different relationships to <code>Location</code> nodes: <code>INCORPORATED_IN</code>, <code>OPERATES_IN</code>, <code>MANUFACTURES_IN</code>, <code>PARENT_SEATED_IN</code>. A Delaware shell that manufactures in China is representable without a lie.</p></div>
         <div><p><strong>Evidence attaches to assertions.</strong> Claims are reified nodes with <code>ASSERTS</code> and <code>TARGETS</code> edges, and an <code>Artifact</code> evidences a claim. The direct relationship is written alongside for traversal speed, carrying the claim id.</p></div>
       </div>
+      <p style="margin-top:14px"><strong>A report is a node too.</strong> Asking for one — from the chat, or from any entity's properties card — writes a <code>Report</code> node holding the finished HTML document, the time it was generated and the findings it made, joined to its subject by <code>REPORTS_ON</code> and to everything it names by <code>CITES</code>. It draws on its own canvas layer, it can be traced back to the nodes each finding was computed from, and regenerating rewrites that same node from current data rather than leaving a drift of near-identical documents. The default kind is a supply-chain risk assessment of a program: every path into it that carries significant risk, the goods and services on that path, where the risk comes from and what to do about it.</p>
     </section>
 
     <section id="risk">

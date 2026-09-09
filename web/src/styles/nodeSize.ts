@@ -28,6 +28,7 @@ const BASE_SIZE: Record<NodeType, number> = {
   Artifact: 22,
   Source: 22,
   Claim: 22,
+  Report: 30,     // a deliverable, drawn a size up from the evidence it was written from
 }
 
 export function tierSize(tier: number): number {

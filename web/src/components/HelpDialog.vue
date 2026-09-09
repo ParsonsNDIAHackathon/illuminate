@@ -52,7 +52,9 @@
           <p>
             Every node and edge carries its source, when it was retrieved, and how it was derived.
             <strong>Enrich</strong> sends a company off to gather more; <strong>Find suppliers</strong>
-            searches federal award records for a program; <strong>Report</strong> opens the long form.
+            searches federal award records for a program; <strong>Report</strong> generates a document — a supply-chain
+            risk assessment for a program, a vendor profile for a company — and keeps it in the graph, on the
+            Reports tab, where it can be regenerated once the graph has moved on.
             Anything badged <strong>SIM</strong> is scenario material for analysis — not an allegation
             and not a verified finding.
           </p>

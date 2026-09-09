@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from .. import db
+from .. import db, events
 from ..config import load_workspace
 from ..cypher.templates import TEMPLATES
 from ..cypher.validator import CypherRejected, validate
@@ -230,6 +230,37 @@ async def set_styles(ctx: ToolContext, ops: list[dict]) -> ToolResult:
     return ToolResult(ok=True, data={"applied": len(dumped), "legend": legend}, style_ops=dumped, legend=legend)
 
 
+async def generate_report(ctx: ToolContext, subject_id: str | None = None, kind: str | None = None) -> ToolResult:
+    """Write a report into the graph and hand the canvas the node it just made.
+
+    The subject defaults to whatever program the canvas is focused on, because "write me a
+    risk assessment" almost always means the thing on screen; with nothing focused the
+    caller has to name one, and says so rather than guessing at a program.
+    """
+    from .. import reports as reports_mod
+
+    kind = kind or reports_mod.DEFAULT_KIND
+    subject_id = subject_id or ctx.focus_id
+    if not subject_id:
+        return ToolResult(ok=False, data={
+            "error": "no subject: name the entity to report on, or focus the canvas on a program first",
+            "kinds": reports_mod.kinds()})
+    try:
+        row = await reports_mod.generate(kind, subject_id, user=ctx.user)
+    except reports_mod.ReportError as e:
+        return ToolResult(ok=False, data={"error": str(e), "kinds": reports_mod.kinds()})
+    # The report and its subject, one hop out: the node the user asked for is drawn beside
+    # what it is about without a reload, the same way a committed write announces itself.
+    sub = await events.delta_for([row["id"]])
+    return ToolResult(
+        ok=True,
+        data={**row, "note": "Stored as a Report node in the graph and listed on the Reports tab. Its properties "
+                             "carry the generation time and a regenerate control; regenerating rewrites this same "
+                             "report from current data."},
+        subgraph=sub,
+    )
+
+
 async def get_entity_report(ctx: ToolContext, entity_id: str) -> ToolResult:
     rep = await build_report(entity_id, ctx.focus_id)
     if not rep:
@@ -424,6 +455,7 @@ HANDLERS = {
     "propose_entity": propose_entity,
     "attach_evidence": attach_evidence,
     "set_styles": set_styles,
+    "generate_report": generate_report,
     "get_entity_report": get_entity_report,
     "discover_suppliers": discover_suppliers,
     "enrich_entity": enrich_entity,
