@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Illuminate — short</title>
+  <link rel="stylesheet" href="vendor/reveal.min.css">
+  <link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<!-- =================================================================== 1 -->
+<section class="s pad-sm tight">
+  <p class="kicker">The big picture</p>
+  <h2 style="font-size:44px">One complex program, end to end.</h2>
+  <figure class="shot" data-slot="media/birdsnest" data-try="png,jpg,mp4"
+          data-note="Explorer canvas: the whole V-22 program graph, every layer on, no depth limit">
+    <figcaption><b>V-22 Osprey Program (PMA-275)</b> — every layer on, no depth limit, laid out to its
+      full extent. Nobody reads this, and nobody is meant to: it is the object a program office is
+      already reasoning about, and it has never once fitted on a whiteboard.</figcaption>
+  </figure>
+  <div class="stats" style="margin-top:2px">
+    <div class="stat"><div class="n">811</div><div class="l">nodes</div></div>
+    <div class="stat"><div class="n">1,714</div><div class="l">relationships</div></div>
+    <div class="stat"><div class="n">66</div><div class="l">entities</div></div>
+    <div class="stat"><div class="n">45</div><div class="l">people</div></div>
+    <div class="stat"><div class="n">467</div><div class="l">claims</div></div>
+    <div class="stat sim"><div class="n">7</div><div class="l">simulated, badged</div></div>
+  </div>
+  <aside class="notes">
+    Let the picture sit for a beat before saying anything — it is the argument for the tool, not a
+    screenshot of a feature, and the room reads it faster than you can narrate it. Then the numbers.
+    Claims outnumber entities seven to one because every screen, ownership link and role is a
+    reified assertion with its own evidence. Eight tier-1 suppliers resolve to a foreign
+    ultimate parent — that is a real finding from real data, not the scenario. If someone asks
+    whether it is always this unreadable: no, the canvas opens focused and filtered, and the next
+    slide is one person out of this.
+  </aside>
+</section>
+
+<!-- ==================================================================== 7 -->
+
+<!-- =================================================================== 2 -->
+<section class="s">
+  <p class="kicker">Now zoom all the way in</p>
+  <h2>An employee of a sub-contractor.</h2>
+  <div class="split media-left">
+    <figure class="shot" data-slot="media/employee-risk" data-try="png,jpg"
+            data-note="Person report — the risk tab for R. Ostrowski">
+    </figure>
+    <div>
+      <p class="lead" style="max-width:24ch;margin-bottom:22px">
+        Not a vendor. Not designated. Screens clear on every list.
+      </p>
+      <p style="font-size:25px;line-height:1.5">
+        <span class="band"><span class="dot high"></span> 67 / 100 · High</span> — because he is
+        <strong>one hop from a designated party</strong>.
+      </p>
+      <p class="small" style="margin-top:18px">
+        A Network Operations Engineer at a tier-2 sub-contractor, holding administrative access to
+        production and supplier-facing systems. He is also a named affiliate of a designated group.
+        The company screens clean. The person screens clean. <em>Only the graph finds it.</em>
+      </p>
+      <p class="small" style="margin-top:16px">
+        <strong>69% of the model answered</strong> (2 of 4 dimensions) — stated next to the score, never hidden.
+      </p>
+    </div>
+  </div>
+  <aside class="notes">
+    This is the shape a document review misses, and it is the whole argument for a graph.
+    Both threads in the demo are simulated and badged as such — disclosed once in the app bar.
+    Also note: people are scored only on what a person can be scored on. The graph records no
+    nationality, and guessing one is how a screening tool becomes a discrimination engine.
+  </aside>
+</section>
+
+<!-- ==================================================================== 8 -->
+
+<!-- =================================================================== 3 -->
+<section class="s pad-sm tight">
+  <p class="kicker">The point of the whole thing</p>
+  <h2 style="font-size:44px">Colour the graph by risk, and watch it flow.</h2>
+  <figure class="shot" data-slot="media/risk-graph" data-try="png,mp4,jpg,gif"
+          data-note="Explorer canvas coloured by risk band — red at the edge, and the path inward">
+    <figcaption>
+      <span class="band"><span class="dot severe"></span> Severe 75+</span> &nbsp;
+      <span class="band"><span class="dot high"></span> High 50+</span> &nbsp;
+      <span class="band"><span class="dot elevated"></span> Elevated 25+</span> &nbsp;
+      <span class="band"><span class="dot low"></span> Low</span> &nbsp;
+      <span class="band"><span class="dot unscored"></span> Unscored — never painted as safe</span>
+    </figcaption>
+  </figure>
+  <p class="small">
+    Same canvas, one encoding change. The hot nodes sit at the <em>edge</em> of the network, and the
+    colour walks inward along the edges that carry the exposure — three hops, then two, then the prime,
+    then the program.
+  </p>
+  <aside class="notes">
+    Say the sentence: risk is not a property of a vendor, it is a property of a path. Proximity is
+    the dimension only a graph can compute, and it is the one that catches a vendor whose own
+    record is spotless.
+  </aside>
+</section>
+
+<!-- =================================================================== 10 -->
+
+<!-- =================================================================== 4 -->
+<section class="s">
+  <p class="kicker">Why it flows</p>
+  <h2>Risk is a property of the node — computed over the whole graph.</h2>
+  <table class="dims">
+    <tr><th>Dimension</th><th style="width:84px">Weight</th><th>What it reads</th></tr>
+    <tr class="lead-dim"><td class="n">Designation</td><td class="w">×3.0</td>
+      <td class="d">The node's own screens: OFAC, UN, SAM exclusions, DoD §1260H. A hit here is the finding.</td></tr>
+    <tr class="graph-dim"><td class="n">Proximity</td><td class="w">×2.0</td>
+      <td class="d">Degrees of separation from a designated party, walked up to three hops over ownership,
+        personnel and commercial edges. <strong>The dimension only a graph can compute.</strong>
+        Asymmetric on supply edges — buying from a designated party puts its problem inside your product.</td></tr>
+    <tr><td class="n">Dependency</td><td class="w">×2.0</td>
+      <td class="d">What a consumer inherits from suppliers it cannot replace. Sole sources are graded on the
+        worst, never summed — a long list of unremarkable ones must not manufacture a severe finding.</td></tr>
+    <tr><td class="n">Foreign control</td><td class="w">×1.5</td>
+      <td class="d">Incorporation, ultimate-parent seat, operations, manufacture — read separately, worst wins.</td></tr>
+    <tr><td class="n">Financial distress</td><td class="w">×1.5</td>
+      <td class="d">Filing <em>behaviour</em>: lapsed SAM registration, late-filing notices, a listed company that stopped filing.</td></tr>
+    <tr><td class="n">Regional exposure</td><td class="w">×1.0</td>
+      <td class="d">Conflict and natural hazard where the entity physically operates — blind to incorporation,
+        since a hurricane does not read the paperwork.</td></tr>
+    <tr><td class="n">Adverse media</td><td class="w">×0.75</td><td class="d">The GDELT screen, where one has run.</td></tr>
+  </table>
+  <p class="small">
+    <strong>A signal that returned no data is not a zero.</strong> A dimension with nothing to go on abstains, so every
+    node also carries <em>risk_confidence</em> — the share of the model's weight that answered — drawn next to the
+    score everywhere. And nothing is scored that cannot be shown: every dimension carries the ids of the nodes and
+    edges it was computed from. Click one, and the route lights up on the canvas.
+  </p>
+  <aside class="notes">
+    Sole-source status is scored on the customer, not the supplier — being a sole source says
+    nothing about whether that company will fail. The exposure belongs to whoever depends on it.
+  </aside>
+</section>
+
+<!-- =================================================================== 11 -->
+
+<!-- =================================================================== 5 -->
+<section class="s pad-sm tight">
+  <p class="kicker">The chat interface · generate a report</p>
+  <h2 style="font-size:44px">“Write me the risk assessment for this program.”</h2>
+  <div class="ask" style="flex:none"><span class="caret">›</span> generate a supply-chain risk assessment for the V-22 program</div>
+  <figure class="shot" data-slot="media/chat-report" data-try="mp4,webm,gif,png" data-kind="video" data-controls
+          data-note="Screen recording: asking for a report and watching it generate">
+    <figcaption>Every path into the program that carries significant risk, the goods and services on that path,
+      where the risk comes from, and what to do about it — each line carrying its source.</figcaption>
+  </figure>
+  <aside class="notes">
+    Demo beat. If the recording is not in, talk over the static report slide that follows.
+  </aside>
+</section>
+
+<!-- 12d -->
+
+<!-- =================================================================== 6 -->
+<section class="s title">
+  <p class="kicker">Illuminate</p>
+  <h1 style="font-size:66px">One graph, any consumer.</h1>
+  <div class="rule"></div>
+  <p class="lead wide" style="max-width:40ch">
+    Every answer is a subgraph. Every fact has an artifact behind it.<br>
+    Every score can be walked back to the edges it came from.
+  </p>
+  <div class="spacer"></div>
+  <div class="chips">
+    <span class="chip on"><code>make up</code></span>
+    <span class="chip on"><code>make seed</code></span>
+    <span class="chip">web · localhost:8080</span>
+    <span class="chip">API + docs · localhost:8000/docs</span>
+    <span class="chip">MCP · stdio or streamable HTTP</span>
+  </div>
+  <p class="meta" style="margin-top:20px">NDIA Global Defense Hackathon · Washington DC · 8–10 September 2026</p>
+  <aside class="notes">
+    Offer the live demo and the MCP hookup — plugging it into Claude Desktop in front of a judge
+    lands better than another slide.
+  </aside>
+</section>
+
+</div>
+</div>
+
+<script src="vendor/reveal.min.js"></script>
+<script src="vendor/plugin/notes/notes.min.js"></script>
+<script src="deck.js"></script>
+</body>
+</html>

@@ -15,6 +15,24 @@ The running app also serves the deck at `/slides/` — <http://localhost:8080/sl
 bottom of the app's left rail opens it in a new tab, so a demo can cut between the two. The
 container bind-mounts this directory, so editing a slide needs a reload, not a rebuild.
 
+## The short deck
+
+`short.html` is the same deck cut to six slides — the big picture, the person, risk colouring,
+why it flows, the generated report, and the close. It shares `theme.css`, `deck.js` and
+`vendor/`, so it is served and opened exactly like the full one (`slides/short.html`, or
+<http://localhost:8080/slides/short.html> under `make up`).
+
+It is **generated, not hand-edited**. Change a slide in `index.html`, then:
+
+```bash
+python3 slides/make-short.py
+```
+
+The list of slides it keeps is `PICKS` at the top of that script, written in reveal's own hash
+coordinates — the numbers in the address bar as you page through the full deck, so `#/8` is
+`'8'` and `#/11/2` is `'11/2'`. A sub-slide pulled out of a vertical stack becomes an ordinary
+slide in the short deck.
+
 | Key | |
 | --- | --- |
 | `→` / `space` | next step — walks vertical stacks too |
