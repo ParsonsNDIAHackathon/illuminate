@@ -95,3 +95,80 @@ async def search_news(
         _retry_after.pop(key, None)
         stored = read_cached_json("GET", DOC, params=params, max_age=NEWS_TTL)
         return _response(result, query, timespan, stored["_ts"] if stored else time.time())
+
+
+# Keep /api/news as the GDELT-only endpoint for existing consumers.
+from ..connectors.web_news import search_web_news
+from ..connectors.news_locations import locate_articles
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+import re
+
+
+def _article_key(article):
+    parts = urlsplit(article['url'])
+    params = [(k, v) for k, v in parse_qsl(parts.query) if not k.lower().startswith('utm_') and k.lower() not in ('gclid', 'fbclid')]
+    url = urlunsplit((parts.scheme, parts.netloc.lower(), parts.path.rstrip('/'), urlencode(sorted(params)), ''))
+    headline = re.sub(r'[^\w]+', ' ', article.get('title', '').casefold()).strip()
+    domain = article.get('domain', '').casefold().removeprefix('www.')
+    return url, (domain, headline) if domain and headline else None
+
+
+def merge_articles(groups):
+    articles, urls, titles = [], {}, {}
+    for group in groups:
+        for original in group:
+            article = dict(original)
+            url, title = _article_key(article)
+            existing = urls.get(url)
+            if existing is None and title:
+                existing = titles.get(title)
+            if existing is not None:
+                existing['providers'] = list(dict.fromkeys(existing['providers'] + article['providers']))
+                if article.get('published_at'):
+                    existing['published_at'] = article['published_at']
+            else:
+                articles.append(article)
+                existing = article
+            urls[url] = existing
+            if title:
+                titles[title] = existing
+    def timestamp(a):
+        try:
+            value = a.get('published_at') or a.get('seendate') or ''
+            return datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
+        except ValueError:
+            return 0
+    return sorted(articles, key=timestamp, reverse=True)
+
+
+@router.get('/search')
+async def search_all_news(
+    query: str = Query('(conflict OR earthquake OR flood OR protest)', min_length=2, max_length=250),
+    timespan: Literal['24h', '3d', '7d'] = '24h',
+):
+    query = query.strip()
+    if len(query) < 2:
+        raise HTTPException(422, 'Enter a news topic with at least two characters.')
+    results = await asyncio.gather(
+        asyncio.wait_for(search_news(query, timespan), timeout=25),
+        asyncio.wait_for(search_web_news(query, timespan), timeout=15),
+        return_exceptions=True,
+    )
+    sources, groups, notices = [], [], []
+    for name, result in zip(('GDELT', 'Google News'), results):
+        if isinstance(result, BaseException):
+            sources.append({'name': name, 'status': 'unavailable'})
+            notices.append(f'{name} is unavailable; its results may be missing.')
+            continue
+        stale = result.get('stale', False)
+        fetched = result.get('fetched_at') or datetime.fromtimestamp(result['_ts'], timezone.utc).isoformat()
+        sources.append({'name': name, 'status': 'stale' if stale else 'ok', 'cached': result.get('cached', False), 'fetched_at': fetched})
+        if stale:
+            notices.append(f'{name} is unavailable; showing its saved results from {fetched}.')
+        groups.append([{**a, 'provider': name, 'providers': [name]} for a in result['articles']])
+    if not groups:
+        raise HTTPException(503, 'Both news sources are unavailable. Try again shortly.')
+    articles = await asyncio.to_thread(locate_articles, merge_articles(groups))
+    return {'articles': articles, 'query': query, 'timespan': timespan,
+            'sources': sources, 'stale': any(s['status'] == 'stale' for s in sources),
+            'notice': ' '.join(notices) or None}

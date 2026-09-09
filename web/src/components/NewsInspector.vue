@@ -1,7 +1,7 @@
 <template>
   <div class="pa-3 news-inspector" v-if="news.selected">
     <div class="d-flex align-center ga-2 mb-2">
-      <v-chip size="x-small" variant="tonal">News · GDELT</v-chip>
+      <v-chip size="x-small" variant="tonal">News · {{ news.selected.providers?.join(' + ') || news.selected.provider || 'GDELT' }}</v-chip>
       <v-spacer />
       <v-btn icon="mdi-close" aria-label="Close news inspector" variant="text" size="x-small" @click="news.selectedUrl = null" />
     </div>
@@ -19,12 +19,13 @@ import { computed, ref, watch } from 'vue'
 import { useNews } from '../stores/news'
 import { mapNews, newsPreview } from '../newsMap'
 import world from '../data/worldMap.json'
+import regions from '../data/mapRegions.json'
 import ArtifactSummary from './ArtifactSummary.vue'
 import ArtifactViewer from './ArtifactViewer.vue'
 import SourceLink from './SourceLink.vue'
 const news = useNews()
 const viewing = ref(false)
-const preview = computed(() => news.selected ? newsPreview(news.selected, mapNews([news.selected], world).places.map(place => place.name)) : null)
+const preview = computed(() => news.selected ? newsPreview(news.selected, mapNews([news.selected], world, regions).places.map(place => place.name)) : null)
 watch(() => news.selectedUrl, () => { viewing.value = false })
 </script>
 

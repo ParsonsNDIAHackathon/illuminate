@@ -37,4 +37,4 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.setuptools.package-data]
-illuminate = ["shipping_demo.json", "transport_network.json"]
+illuminate = ["shipping_demo.json", "transport_network.json", "data/news_places.json.gz", "data/README.md"]

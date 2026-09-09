@@ -107,11 +107,12 @@ seven days, labeled with its original retrieval time and a stale-results notice.
 refreshes do not replace a valid cache entry; repeated requests back off for a minute
 after a failed refresh. The cache survives API restarts and browser reloads.
 
-Open the map to load recent GDELT coverage. Search a topic and choose the past 24 hours,
-3 days, or 7 days. Coral diamonds select source articles mentioning that country in their
-headline. These are approximate country mentions, not verified incident locations; articles
-without a recognized country remain available under **Unplaced**. Matching currently uses
-English country names and selected aliases, so other languages often remain unplaced.
+Open the map to load recent coverage. Search a topic and choose the past 24 hours,
+3 days, or 7 days. Coral count badges select source articles mentioning nearby locations.
+Both the map and article list show only coverage within 250 km of a visible entity
+or route (shipping, highway, or rail). Changing entity or route filters updates the
+news scope. Distances use approximate headline location centroids, not verified
+incident coordinates. Articles without recognized locations are hidden.
 The News checkbox hides the overlay without changing entity locations.
 
 The read-only `/api/news?query=flood&timespan=24h` endpoint uses GDELT DOC 2.0, requests
@@ -212,3 +213,28 @@ Search and port filters are separate from graph search. This is partial coverage
 A malformed override reports an error. To extend coverage, add sourced, dated port
 connections to this catalog. The previous hypothetical routes remain under
 **Supplier examples**, disabled by default; US highway and rail references are unchanged.
+
+### Combined internet news search
+
+The map's **Search news** searches GDELT and Google News search RSS in parallel
+through `/api/news/search`. It needs no additional API key. Articles retain their
+publisher, search provider, and publication date (Google) or seen date (GDELT).
+Duplicate URLs and matching headlines from the same publisher are merged. Google
+links open through Google News to the publisher; article bodies are not scraped.
+Headline city/town mentions are resolved against a bundled GeoNames locality lookup.
+State/country context disambiguates duplicate names; unresolved names fall back to
+country and supported state/province centers. Town coordinates are approximate
+event areas, not verified incident points. Locality matches take precedence in
+both marker placement and the 250 km proximity filter.
+Coral count badges group articles at their best available location. Distinctive
+US, Canadian, and Australian region names can stand alone; other region names
+require a matching country in the headline. Only placements within 250 km of visible
+entities or routes appear; unrecognized and distant locations are hidden.
+Use **Show news on map** to restore the world view.
+
+Each provider has a 15-minute cache and independently reports errors or stale data.
+GDELT keeps its persistent cache; Google uses a bounded process-local cache with
+up to seven days of clearly labelled stale fallback. A provider failure still returns
+results from the other; if both fail, the UI retains its previous labelled search.
+Google's public RSS feed has no availability guarantee; its results are not exhaustive.
+The original `/api/news` endpoint remains GDELT-only for existing clients.

@@ -64,3 +64,10 @@ test('preview preserves provenance without inventing an artifact id or publicati
   assert.equal(preview.raw[0].body, article)
   assert.equal(preview.summary.sections[0].fields[1].value, '2026-09-09 12:15 UTC')
 })
+
+test('web news preview uses publication date and its actual source', () => {
+  const preview = newsPreview({ ...article, provider: 'Google News', providers: ['Google News'], seendate: '', published_at: '2026-09-09T10:00:00+00:00' }, ['Nepal'])
+  assert.equal(preview.artifact.source, 'Google News')
+  assert.equal(preview.summary.sections[0].fields[1].label, 'Published')
+  assert.equal(preview.raw[0].match, 'Google News search result')
+})

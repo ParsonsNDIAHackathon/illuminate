@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { api, qs } from '../api/client.ts'
 import type { NewsArticle } from '../newsMap.ts'
 
-export interface NewsResult { articles: NewsArticle[]; query: string; timespan: string; cached?: boolean; stale?: boolean; fetched_at?: string; notice?: string | null }
+export interface NewsResult { articles: NewsArticle[]; query: string; timespan: string; cached?: boolean; stale?: boolean; fetched_at?: string; notice?: string | null; sources?: { name: string; status: string; cached?: boolean; fetched_at?: string }[] }
 
 /** Session state survives map unmounts, including an in-flight search. */
 export const useNews = defineStore('news', {
@@ -32,12 +32,12 @@ export const useNews = defineStore('news', {
       this.visible = true
       const query = this.query.trim(), timespan = this.timespan
       try {
-        const result = await api.get<NewsResult>(`/api/news?${qs({ query, timespan })}`)
+        const result = await api.get<NewsResult>(`/api/news/search?${qs({ query, timespan })}`)
         this.result = result
         this.location = ''
         if (!result.articles.some(article => article.url === this.selectedUrl)) this.selectedUrl = null
       } catch (error) {
-        this.error = error instanceof Error ? error.message.split(': ').slice(1).join(': ') || error.message : 'Unable to load GDELT news.'
+        this.error = error instanceof Error ? error.message.split(': ').slice(1).join(': ') || error.message : 'Unable to load news.'
         // Keep the previous, explicitly labelled result when the service is unavailable.
       } finally {
         this.loading = false
