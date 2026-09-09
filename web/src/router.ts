@@ -5,10 +5,11 @@ export const router = createRouter({
   routes: [
     { path: '/', name: 'graph', component: () => import('./views/Explorer.vue') },
     { path: '/entities', name: 'entities', component: () => import('./views/Entities.vue') },
-    // An entity link opens the entity on the canvas. The long form is no longer a page that
-    // exists while you look at it — it is a Report node the user generates and keeps.
-    { path: '/entities/:id', name: 'entity', component: () => import('./views/EntityOpen.vue'), props: true },
+    // A link to a party opens its page: the whole record on one screen, with a button to put
+    // it on the canvas. The canvas card is the glance; these are the detail.
+    { path: '/entities/:id', name: 'entity', component: () => import('./views/EntityReport.vue'), props: true },
     { path: '/people', name: 'people', component: () => import('./views/People.vue') },
+    { path: '/people/:id', name: 'person', component: () => import('./views/PersonReport.vue'), props: true },
     { path: '/risk', name: 'risk', component: () => import('./views/Risk.vue') },
     { path: '/reports', name: 'reports', component: () => import('./views/Reports.vue') },
     { path: '/reports/:id', name: 'report', component: () => import('./views/Reports.vue'), props: true },

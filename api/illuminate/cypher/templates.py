@@ -327,6 +327,12 @@ _RISKY_PEOPLE_ONLY = (
 )
 
 
+# A neighbourhood is walked from an organisation or from a person: a person's page opens
+# them on the canvas the same way an entity's does. Locations, artifacts and claims are
+# never roots — they are reached, not stood on.
+_ROOT = "MATCH (root {id:$id}) WHERE root:Entity OR root:Person\n"
+
+
 def _neighbourhood(p):
     d = _depth(p.get("depth", 2))
     layers = p.get("layers") or {}
@@ -373,7 +379,7 @@ def _neighbourhood(p):
         sweep = _RISK_SWEEP.format(carry="root, blocked", rf=rf, k=MAX_DEPTH,
                                    inside="WHERE none(n IN nodes(back) WHERE n IN blocked)\n")
         cy = (
-            "MATCH (root:Entity {id:$id})\n"
+            f"{_ROOT}"
             "OPTIONAL MATCH (other:Entity) WHERE other.kind = 'program' AND other.id <> $program\n"
             "WITH root, collect(other) AS blocked\n"
             f"CALL apoc.path.subgraphAll(root, {{maxLevel:{d}, relationshipFilter:'{rf_up}', limit:$limit, blacklistNodes:blocked}}) YIELD nodes, relationships\n"
@@ -386,7 +392,7 @@ def _neighbourhood(p):
     # risk set arriving with it is not what they asked for. Unfocused, /graph/all has already sent
     # every entity anyway, and the canvas pins from there.
     cy = (
-        "MATCH (root:Entity {id:$id})\n"
+        f"{_ROOT}"
         f"CALL apoc.path.subgraphAll(root, {{maxLevel:{d}, relationshipFilter:'{rf_out}', limit:$limit}}) YIELD nodes, relationships\n"
         f"{tail}"
         "RETURN nodes, relationships LIMIT 1"

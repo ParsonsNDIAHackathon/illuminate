@@ -105,6 +105,10 @@
       <p v-if="p.summary" class="text-body-2 mt-2" style="opacity:.85">{{ p.summary }}</p>
     </section>
     <div class="d-flex flex-wrap ga-1 mt-2">
+      <!-- The card is the glance; the page is the whole record. -->
+      <v-btn v-if="node.label === 'Entity' || node.label === 'Person'" prepend-icon="mdi-card-account-details-outline"
+             :to="node.label === 'Person' ? `/people/${node.id}` : `/entities/${node.id}`"
+             title="Every seat, screen, tie and finding on one page">Details</v-btn>
       <v-btn v-if="node.label === 'Artifact'" prepend-icon="mdi-text-box-search-outline" @click="rawId = node.id">Contents</v-btn>
       <v-btn v-if="node.label === 'Artifact'" prepend-icon="mdi-eye-outline" @click="viewId = node.id">View</v-btn>
       <template v-if="node.label === 'Report'">

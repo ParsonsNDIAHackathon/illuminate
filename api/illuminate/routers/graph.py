@@ -8,7 +8,7 @@ from ..content import document, summarize
 from ..connectors.http import HttpError, fetch_document
 from ..graphio import subgraph_from_graph
 from ..raw import find_raw
-from ..report import build_report
+from ..report import build_person_report, build_report
 from ..schema import SOURCE_KINDS
 from ..tools.handlers import ToolContext, expand_subgraph, search_entities
 from .deps import user_id
@@ -177,6 +177,15 @@ async def people(q: str | None = None, limit: int = Query(200, le=1000)):
         """,
         params,
     )
+
+
+@router.get("/people/{person_id}")
+async def person(person_id: str):
+    """One person's page: seats held, the standing of each employer, screens and risk."""
+    rep = await build_person_report(person_id)
+    if not rep:
+        raise HTTPException(404, "no such person")
+    return rep
 
 
 @router.get("/artifacts")
