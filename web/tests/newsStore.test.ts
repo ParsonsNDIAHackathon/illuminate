@@ -17,7 +17,7 @@ test('remounting shares in-flight requests, query, results and selection', async
   await remounted.ensureLoaded()
   assert.equal(requests, 1)
   assert.equal(remounted.loading, true)
-  finish(Response.json({ articles: [article], query: 'flood', timespan: '24h' }))
+  finish(Response.json({ articles: [article], query: 'flood', timespan: '7d' }))
   await pending
   remounted.location = 'NP'
   remounted.selectedUrl = article.url
@@ -34,7 +34,7 @@ test('failed searches preserve labelled results and do not retry on remount', as
   let requests = 0
   t.mock.method(globalThis, 'fetch', async () => { requests++; return Response.json({ detail: 'GDELT is rate limiting requests.' }, { status: 503 }) })
   const news = useNews(createPinia())
-  news.result = { articles: [article], query: 'flood', timespan: '24h' }
+  news.result = { articles: [article], query: 'flood', timespan: '7d' }
   news.selectedUrl = article.url
   news.query = 'earthquake'
   await news.search()
@@ -47,7 +47,7 @@ test('failed searches preserve labelled results and do not retry on remount', as
 })
 
 test('replacing results clears a selection that is no longer present', async t => {
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ articles: [], query: 'flood', timespan: '24h' }))
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ articles: [], query: 'flood', timespan: '7d' }))
   const news = useNews(createPinia())
   news.selectedUrl = article.url
   news.location = 'NP'
@@ -63,4 +63,20 @@ test('preview preserves provenance without inventing an artifact id or publicati
   assert.equal('published_at' in preview.artifact, false)
   assert.equal(preview.raw[0].body, article)
   assert.equal(preview.summary.sections[0].fields[1].value, '2026-09-09 12:15 UTC')
+})
+
+test('server cooldown prevents repeated requests until it expires', async t => {
+  let requests = 0
+  t.mock.method(globalThis, 'fetch', async () => {
+    requests++
+    return Response.json({ detail: 'GDELT returned HTTP 429.' }, { status: 503, headers: { 'Retry-After': '60' } })
+  })
+  const news = useNews(createPinia())
+  await news.search()
+  assert.ok(news.retryAt > Date.now())
+  await news.search()
+  assert.equal(requests, 1)
+  news.retryAt = Date.now() - 1
+  await news.search()
+  assert.equal(requests, 2)
 })

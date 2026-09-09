@@ -6,6 +6,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
+from email.utils import parsedate_to_datetime
 import time
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,30 @@ import httpx
 from ..config import settings
 
 _last_call: dict[str, float] = {}
+_throttle_locks: dict[str, asyncio.Lock] = {}
+_gdelt_lock = asyncio.Lock()
+_gdelt_cooldown_until = 0.0
+_gdelt_requests = 0
+_gdelt_last_status: int | None = None
+GDELT_HOST = "api.gdeltproject.org"
+
+
+def gdelt_status() -> dict:
+    """Process-local diagnostics; counts actual JSON requests, excluding cache hits."""
+    return {"requests_since_start": _gdelt_requests, "last_status": _gdelt_last_status,
+            "retry_after": max(0, math.ceil(_gdelt_cooldown_until - time.time()))}
+
+
+def _retry_seconds(value: str | None) -> int:
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        try:
+            seconds = parsedate_to_datetime(value).timestamp() - time.time()
+        except (TypeError, ValueError, OverflowError):
+            seconds = 60
+    return max(60, math.ceil(seconds)) if math.isfinite(seconds) else 60
+
 _delays = {"efts.sec.gov": 0.15, "data.sec.gov": 0.15, "www.sec.gov": 0.15, "api.gdeltproject.org": 5.5, "littlesis.org": 0.5, "api.gleif.org": 0.2, "api.usaspending.gov": 0.2}
 _cache_dir: Path | None = None
 _read_only_cache = False
@@ -57,21 +83,33 @@ async def _throttle(host: str) -> None:
     delay = _delays.get(host, 0.0)
     if not delay:
         return
-    wait = _last_call.get(host, 0) + delay - time.time()
-    if wait > 0:
-        await asyncio.sleep(wait)
-    _last_call[host] = time.time()
+    async with _throttle_locks.setdefault(host, asyncio.Lock()):
+        wait = _last_call.get(host, 0) + delay - time.time()
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _last_call[host] = time.time()
 
 
 class HttpError(Exception):
-    def __init__(self, status: int, url: str, text: str = ""):
+    def __init__(self, status: int, url: str, text: str = "", retry_after: int | None = None):
         super().__init__(f"HTTP {status} for {url}: {text[:200]}")
         self.status = status
+        self.retry_after = retry_after
 
 
-async def fetch_json(method: str, url: str, *, params: dict | None = None, json_body: Any = None, headers: dict | None = None,
+async def fetch_json(method: str, url: str, **kwargs) -> Any:
+    # Map searches and entity enrichment share one gate. Check the cache inside
+    # the gate, so queued identical requests reuse the first successful response.
+    if httpx.URL(url).host == GDELT_HOST:
+        async with _gdelt_lock:
+            return await _fetch_json(method, url, **kwargs)
+    return await _fetch_json(method, url, **kwargs)
+
+
+async def _fetch_json(method: str, url: str, *, params: dict | None = None, json_body: Any = None, headers: dict | None = None,
                      ttl: float = 7 * 86400, timeout: float = 30.0) -> Any:
     """GET/POST returning parsed JSON, with cache. ttl<=0 disables caching."""
+    global _gdelt_cooldown_until, _gdelt_requests, _gdelt_last_status
     req = httpx.Request(method, url, params=params)
     full = str(req.url)
     key = _key(method, full, json_body)
@@ -85,10 +123,22 @@ async def fetch_json(method: str, url: str, *, params: dict | None = None, json_
             pass
     if _read_only_cache:
         raise HttpError(0, full, "not in fixture cache (offline mode)")
+    is_gdelt = req.url.host == GDELT_HOST
+    remaining = gdelt_status()["retry_after"] if is_gdelt else 0
+    if remaining:
+        raise HttpError(429, full, "GDELT cooldown; no upstream request made", retry_after=remaining)
     await _throttle(req.url.host or "")
     hdrs = {"User-Agent": settings.illuminate_user_agent, "Accept": "application/json", **(headers or {})}
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        if is_gdelt:
+            _gdelt_requests += 1
         r = await client.request(method, full, json=json_body, headers=hdrs)
+    if is_gdelt:
+        _gdelt_last_status = r.status_code
+        if r.status_code == 429:
+            delay = _retry_seconds(r.headers.get("Retry-After"))
+            _gdelt_cooldown_until = time.time() + delay
+            raise HttpError(429, full, r.text, retry_after=delay)
     if r.status_code >= 400:
         raise HttpError(r.status_code, full, r.text)
     try:

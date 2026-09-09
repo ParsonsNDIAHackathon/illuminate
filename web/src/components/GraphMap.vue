@@ -8,10 +8,10 @@
       <v-checkbox v-model="news.visible" label="News" density="compact" hide-details class="news-toggle" />
       <v-text-field v-model="news.query" label="News topic" placeholder="Search recent news…" density="compact" variant="outlined" hide-details maxlength="250" class="news-topic" />
       <v-select v-model="news.timespan" :items="timeWindows" label="News time window" density="compact" variant="outlined" hide-details class="news-window" />
-      <v-btn type="submit" size="small" color="primary" variant="tonal" prepend-icon="mdi-magnify" :loading="news.loading" :disabled="news.loading || news.query.trim().length < 2">Search GDELT</v-btn>
+      <v-btn type="submit" size="small" color="primary" variant="tonal" prepend-icon="mdi-magnify" :loading="news.loading" :disabled="news.loading || retrySeconds > 0 || news.query.trim().length < 2">{{ retrySeconds > 0 ? `Retry in ${retrySeconds}s` : 'Search GDELT' }}</v-btn>
     </form>
     <v-alert v-if="news.error" type="warning" variant="tonal" density="compact" class="mb-2 news-error" role="alert">
-      {{ news.error }} <span v-if="news.result">Previous results are still shown below.</span>
+      {{ news.error }} <span v-if="retrySeconds > 0">Searches are paused for {{ retrySeconds }} seconds.</span> <span v-if="news.result">Previous results are still shown below.</span>
     </v-alert>
     <div class="map-stage">
       <svg ref="svg" :viewBox="viewBox" class="world" aria-label="World map. Scroll to zoom, drag to pan, or select a marker to review its entities." @wheel.prevent="wheelZoom" @pointerdown="startPan" @pointermove="movePan" @pointerup="drag = null" @pointercancel="drag = null">
@@ -55,7 +55,7 @@
     <div v-if="news.visible" class="news-details">
       <div class="detail-heading">
         <v-select v-model="news.location" :items="newsLocations" label="News location" density="compact" variant="outlined" hide-details class="location-select" />
-        <span>Coral diamonds: approximate country mentions. <template v-if="news.result">“{{ news.result.query }}” · past {{ news.result.timespan }} · {{ newsData.mapped }} mapped, {{ newsData.unmapped.length }} unplaced.</template></span>
+        <span>Coral diamonds: approximate country mentions. <template v-if="news.result">“{{ news.result.query }}” · past {{ timeWindows.find(window => window.value === news.result.timespan)?.title }} · {{ newsData.mapped }} mapped, {{ newsData.unmapped.length }} unplaced. Up to 250 articles; longer searches sample each 3-month window.</template></span>
       </div>
       <v-progress-linear v-if="news.loading" indeterminate color="primary" aria-label="Searching recent coverage" />
       <p v-if="news.result && !newsArticles.length" class="text-caption pa-2" role="status">No articles found for this selection. Try another topic or a longer time window.</p>
@@ -101,7 +101,12 @@ const props = defineProps<{ locationCode?: string }>()
 const emit = defineEmits<{ select: []; 'select-news': [article: NewsArticle] }>()
 const selectedKey = ref('')
 const news = useNews()
-const timeWindows = [{ title: 'Past 24 hours', value: '24h' }, { title: 'Past 3 days', value: '3d' }, { title: 'Past 7 days', value: '7d' }]
+const now = ref(Date.now())
+const retrySeconds = computed(() => Math.max(0, Math.ceil((news.retryAt - now.value) / 1000)))
+let cooldownTimer: ReturnType<typeof setInterval> | undefined
+onMounted(() => { cooldownTimer = setInterval(() => { now.value = Date.now() }, 1000) })
+onBeforeUnmount(() => { clearInterval(cooldownTimer) })
+const timeWindows = [{ title: '7 days', value: '7d' }, { title: '1 month', value: '1m' }, { title: '3 months', value: '3m' }, { title: '1 year', value: '12m' }]
 const newsData = computed(() => mapNews(news.result?.articles || [], world))
 const newsArticles = computed(() => news.location === 'unplaced' ? newsData.value.unmapped
   : news.location ? newsData.value.places.find(place => place.code === news.location)?.articles || [] : news.result?.articles || [])
@@ -204,7 +209,8 @@ function movePan(event: PointerEvent) {
 .news-toggle { flex:0 0 auto; }
 .news-topic { flex:1 1 180px; }
 .news-window { flex:0 1 170px; min-width:150px; }
-.news-error { flex-shrink:0; }
+/* VAlert defaults to a zero flex basis, which clips its message beside a growing map. */
+.news-error { flex:0 0 auto; }
 .news-marker path { fill:#ff927f; stroke:#102b38; stroke-width:1.5; vector-effect:non-scaling-stroke; }
 .news-marker.active path,.news-marker:focus path { stroke:white; stroke-width:3; }
 .news-details { flex:0 1 170px; min-height:90px; display:flex; flex-direction:column; padding-top:10px; font-size:12px; }

@@ -1,5 +1,15 @@
 const USER = 'local'
 
+export class ApiError extends Error {
+  status: number
+  retryAfter: number
+  constructor(message: string, status: number, retryAfter: number) {
+    super(message)
+    this.status = status
+    this.retryAfter = retryAfter
+  }
+}
+
 async function request<T = any>(method: string, path: string, body?: any): Promise<T> {
   const r = await fetch(path, {
     method,
@@ -9,7 +19,7 @@ async function request<T = any>(method: string, path: string, body?: any): Promi
   if (!r.ok) {
     let detail = r.statusText
     try { detail = (await r.json()).detail ?? detail } catch {}
-    throw new Error(`${method} ${path}: ${detail}`)
+    throw new ApiError(`${method} ${path}: ${detail}`, r.status, Math.max(0, Number(r.headers.get('Retry-After')) || 0))
   }
   return r.json()
 }
