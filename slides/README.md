@@ -18,7 +18,7 @@ container bind-mounts this directory, so editing a slide needs a reload, not a r
 ## The short deck
 
 `short.html` is the same deck cut to six slides — the big picture, the person, risk colouring,
-why it flows, the generated report, and the close. It shares `theme.css`, `deck.js` and
+why it flows, the generated report, and where it goes next. It shares `theme.css`, `deck.js` and
 `vendor/`, so it is served and opened exactly like the full one (`slides/short.html`, or
 <http://localhost:8080/slides/short.html> under `make up`).
 

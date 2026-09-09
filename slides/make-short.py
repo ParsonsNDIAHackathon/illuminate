@@ -17,7 +17,7 @@ import re
 import sys
 from pathlib import Path
 
-PICKS = ['5', '6', '8', '9', '11/2', '13']
+PICKS = ['5', '6', '8', '9', '11/2', '12']
 
 HEAD = '''<!doctype html>
 <html lang="en">
