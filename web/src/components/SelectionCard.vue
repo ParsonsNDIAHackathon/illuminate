@@ -1,5 +1,5 @@
 <template>
-  <v-card v-if="graph.selected || graph.selectedEdge" class="selection-card" :class="{ collapsed }" elevation="8">
+  <v-card v-if="news.selected || graph.selected || graph.selectedEdge" class="selection-card" :class="{ collapsed }" elevation="8">
     <!-- The header stays readable when the body is folded away, so a parked card still says
          what is selected rather than becoming an anonymous strip. -->
     <div class="head" :title="headTitle">
@@ -11,7 +11,8 @@
       <v-btn icon="mdi-close" variant="text" size="x-small" density="comfortable" title="Clear selection" @click="close" />
     </div>
     <div v-if="!collapsed" class="body">
-      <Inspector v-if="graph.selected" @expand="$emit('expand', $event)" />
+      <NewsInspector v-if="news.selected" />
+      <Inspector v-else-if="graph.selected" @expand="$emit('expand', $event)" />
       <EdgeInspector v-else />
     </div>
   </v-card>
@@ -19,18 +20,21 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import Inspector from './Inspector.vue'
+import NewsInspector from './NewsInspector.vue'
+import { useNews } from '../stores/news'
 import EdgeInspector from './EdgeInspector.vue'
 import { useGraph } from '../stores/graph'
 const graph = useGraph()
+const news = useNews()
 defineEmits<{ (e: 'expand', id: string): void }>()
 // Folding is a preference about screen real estate, not about this one node, so it outlives
 // the selection and the reload.
 const STORAGE_KEY = 'illuminate.selection.collapsed'
 const collapsed = ref(localStorage.getItem(STORAGE_KEY) === '1')
 watch(collapsed, v => localStorage.setItem(STORAGE_KEY, v ? '1' : '0'))
-const headIcon = computed(() => graph.selected ? 'mdi-card-text-outline' : 'mdi-vector-polyline')
-const headTitle = computed(() => graph.selected?.name || graph.selectedEdge?.type || '')
-function close() { graph.select(null); graph.selectEdge(null) }
+const headIcon = computed(() => news.selected ? 'mdi-newspaper-variant-outline' : graph.selected ? 'mdi-card-text-outline' : 'mdi-vector-polyline')
+const headTitle = computed(() => news.selected?.title || news.selected?.url || graph.selected?.name || graph.selectedEdge?.type || '')
+function close() { news.selectedUrl = null; graph.select(null); graph.selectEdge(null) }
 </script>
 <style scoped>
 /* Hard against the right edge, which the canvas tool column used to hold, and never tall

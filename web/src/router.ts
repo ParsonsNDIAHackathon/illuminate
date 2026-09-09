@@ -3,7 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', name: 'graph', component: () => import('./views/Explorer.vue') },
+    { path: '/', alias: '/explorer', name: 'graph', component: () => import('./views/Explorer.vue') },
     { path: '/entities', name: 'entities', component: () => import('./views/Entities.vue') },
     // A link to a party opens its page: the whole record on one screen, with a button to put
     // it on the canvas. The canvas card is the glance; these are the detail.

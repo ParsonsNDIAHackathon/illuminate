@@ -4,9 +4,11 @@
       <v-chip size="x-small" variant="tonal">edge · {{ edge.type }}</v-chip>
     </div>
     <div class="ends text-body-2">
-      <a href="#" @click.prevent="graph.select(edge.source)">{{ sourceName }}</a>
+      <LocationMapLink v-if="graph.nodes.get(edge.source)?.label === 'Location' && graph.nodes.get(edge.source)?.props.code" :code="graph.nodes.get(edge.source)!.props.code" :label="sourceName" />
+      <a v-else href="#" @click.prevent="graph.select(edge.source)">{{ sourceName }}</a>
       <span class="arrow">→</span>
-      <a href="#" @click.prevent="graph.select(edge.target)">{{ targetName }}</a>
+      <LocationMapLink v-if="graph.nodes.get(edge.target)?.label === 'Location' && graph.nodes.get(edge.target)?.props.code" :code="graph.nodes.get(edge.target)!.props.code" :label="targetName" />
+      <a v-else href="#" @click.prevent="graph.select(edge.target)">{{ targetName }}</a>
     </div>
     <section v-if="facts.length">
       <h4>Details</h4>
@@ -29,6 +31,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useGraph } from '../stores/graph'
+import LocationMapLink from './LocationMapLink.vue'
 const graph = useGraph()
 const edge = computed(() => graph.selectedEdge)
 const p = computed(() => edge.value?.props || {})

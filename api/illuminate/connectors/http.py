@@ -8,7 +8,7 @@ import hashlib
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -69,8 +69,22 @@ class HttpError(Exception):
         self.status = status
 
 
+def read_cached_json(method: str, url: str, *, params: dict | None = None, json_body: Any = None,
+                     max_age: float = 7 * 86400) -> dict | None:
+    """Read a successful cached response with its original retrieval time."""
+    full = str(httpx.Request(method, url, params=params).url)
+    try:
+        doc = json.loads((cache_dir() / f"{_key(method, full, json_body)}.json").read_text())
+        age = time.time() - float(doc["_ts"])
+        if 0 <= age <= max_age and "body" in doc:
+            return doc
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return None
+
+
 async def fetch_json(method: str, url: str, *, params: dict | None = None, json_body: Any = None, headers: dict | None = None,
-                     ttl: float = 7 * 86400, timeout: float = 30.0) -> Any:
+                     ttl: float = 7 * 86400, timeout: float = 30.0, validate: Callable[[Any], bool] | None = None) -> Any:
     """GET/POST returning parsed JSON, with cache. ttl<=0 disables caching."""
     req = httpx.Request(method, url, params=params)
     full = str(req.url)
@@ -79,7 +93,7 @@ async def fetch_json(method: str, url: str, *, params: dict | None = None, json_
     if ttl > 0 and path.exists():
         try:
             doc = json.loads(path.read_text())
-            if _read_only_cache or time.time() - doc.get("_ts", 0) < ttl:
+            if (_read_only_cache or time.time() - doc.get("_ts", 0) < ttl) and (validate is None or validate(doc["body"])):
                 return doc["body"]
         except Exception:
             pass
@@ -95,6 +109,8 @@ async def fetch_json(method: str, url: str, *, params: dict | None = None, json_
         body = r.json()
     except Exception:
         raise HttpError(r.status_code, full, "non-JSON response")
+    if validate is not None and not validate(body):
+        raise HttpError(r.status_code, full, "invalid JSON response")
     if ttl > 0:
         try:
             path.write_text(json.dumps({"_ts": time.time(), "url": scrub(full), "body": body}))

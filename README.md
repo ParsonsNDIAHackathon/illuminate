@@ -78,3 +78,163 @@ Either way the graph and `api/data/` are replaced with the archive's contents. D
 `BACKUP` in `.env` or it will restore on every start.
 
 `make help` lists all targets.
+
+## Exploring indirect organizations
+
+With **Layers → Indirect orgs** enabled, the graph groups affiliations around the nearest
+organization in a program's supply or ownership chain. Click a dashed group on the canvas,
+or use the **Affiliations** panel, to expand or collapse it. Expansion reveals the original
+relationships and any connecting people, even with the People layer off. The graph fetches
+people as context for this purpose; it does not enable the People display layer.
+
+Groups use recorded organization relationships and person-role paths, classified by the
+first relationship from the anchor. Shared organizations are assigned once to a nearest
+anchor using a stable tie-break. Shared countries, documents and claims do not establish
+an affiliation. Organizations without a path in the loaded graph appear in the searchable
+**Unconnected in this view** list. The list reflects the current scope and data cap, not
+proof that no relationship exists anywhere.
+
+Scores above 20 and their available connecting paths remain visible when groups collapse.
+Selection, search and risk traces also reveal matching records and their paths. Uncheck
+**Group affiliations** for the individual-node layout. Groups are display controls only:
+they do not add graph records, supplier relationships, or change scores.
+
+## Recent news on the map
+
+Successful map-news responses are cached on disk per topic and time window for 15 minutes.
+If GDELT rate limits or fails, the map can use the last successful response for up to
+seven days, labeled with its original retrieval time and a stale-results notice. Failed
+refreshes do not replace a valid cache entry; repeated requests back off for a minute
+after a failed refresh. The cache survives API restarts and browser reloads.
+
+Open the map to load recent coverage. Search a topic and choose the past 24 hours,
+3 days, or 7 days. Coral count badges select source articles mentioning nearby locations.
+Both the map and article list show only coverage within 250 km of a visible entity
+or route (shipping, highway, or rail). Changing entity or route filters updates the
+news scope. Distances use approximate headline location centroids, not verified
+incident coordinates. Articles without recognized locations are hidden.
+The News checkbox hides the overlay without changing entity locations.
+
+The read-only `/api/news?query=flood&timespan=24h` endpoint uses GDELT DOC 2.0, requests
+up to 250 recent articles, and caches responses for 15 minutes. No API key is required.
+When no usable cached result exists, the API retries a rate-limited request once after six
+seconds; persistent outages and rate limits then appear as retryable errors. After code changes, rebuild the running containers with
+`docker compose up -d --build --no-deps api web`. See the
+[GDELT DOC API documentation](https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/).
+
+Map controls use the same Vuetify components as the Explorer. News queries, results,
+location filters, and selection persist while navigating between views during a session.
+Selecting a headline opens the Explorer inspector; **View article details** reuses the
+artifact viewer for metadata and raw GDELT data, and **Open source** uses the shared
+source viewer. News search results are previews and are not automatically saved as
+graph artifacts. Failed searches retain the previous labelled results.
+
+## Shipping, US highways and rail
+
+In **Map**, enable **Shipping** for supplier-linked journeys. **US highways** and
+**US rail** are independent reference layers, available even when no supplier route
+is loaded. Use **US** to fit the contiguous United States; search **Find corridor or
+city**, then select a line or **Inspect US corridor** for its stops, source and notes.
+Blue lines are Interstates; dashed orange lines are freight rail corridors.
+
+The curated reference includes selected stretches of I-5, I-10, I-15, I-20, I-35,
+I-40, I-70, I-75, I-80, I-90 and I-95, plus BNSF Southern Transcon, Union Pacific
+Overland and Norfolk Southern Heartland connections. Geography is a schematic
+sequence of nearby cities, not surveyed road/track centerlines or a complete network.
+Highway coverage is Interstate-only; local streets, port access, drayage and final-mile
+roads are omitted. City/hub markers do not identify actual supplier facilities.
+The reference comes from [FHWA](https://www.fhwa.dot.gov/Planning/national_highway_system/),
+[BNSF](https://www.bnsf.com/ship-with-bnsf/maps-and-shipping-locations/index.page),
+[Union Pacific](https://www.up.com/aboutup/reference/maps/) and
+[Norfolk Southern](https://www.norfolksouthern.com/en/ship-by-rail/our-rail-network).
+No current closure, capacity, operating schedule or guaranteed through service is implied.
+
+### Supplier journeys
+
+Select a square port or circular inland hub to filter dependent route records.
+Select a journey to review its supplier/customer link, cargo, ordered ocean/truck/rail
+legs, corridor names, sources and record date. **Journey transport** selects whole
+journeys containing that mode, preserving connecting legs. **Route evidence** filters
+confirmed, inferred and illustrative records. Counts are journey records and unique
+suppliers/destinations, not shipment volumes. Both entities and their exact directional
+`SUPPLIES` relationship must be present in the loaded graph scope; supplier search
+also matches route modes, corridors and connection areas. Reference layers have their
+own search and are not evidence of supplier use.
+
+The demo has five **hypothetical alternatives**, all attached to the existing SUBARU
+→ V-22 supplier relationship: Nagoya–Los Angeles and Nagoya–Oakland ocean examples;
+a Los Angeles–Barstow–Oklahoma City–Chicago trucking continuation using I-10/I-15,
+I-40 and I-35/I-80; and two rail continuations to Chicago, via Union Pacific from
+Oakland and BNSF from Los Angeles. Neither cargo nor actual use of these lanes by
+SUBARU is verified. Chicago is a logistics connection area, not the V-22 delivery site.
+Connecting service, terminal transfers and final delivery are not modeled.
+
+`GET /api/shipping` serves the supplier catalog. Copy `api/illuminate/shipping_demo.json`
+to `api/data/shipping.json` (or `shipping.json` in `ILLUMINATE_DATA_DIR`), replace its
+contents and click **Refresh** to use your own records. The override replaces the demo;
+an empty catalog disables its examples. Invalid overrides report an error, retaining
+previously loaded UI records with a warning. There is no catalog editor in this version.
+`GET /api/shipping/network` separately serves the bundled US reference; overriding
+supplier records does not replace this reference. Both JSON assets ship in the API package.
+
+Catalog format (old ocean-only catalogs remain compatible):
+
+- `ports`: unique `id`, `name`, two-letter `country`, `latitude`, `longitude`, and optional
+  `kind` (`port`, `hub`, `intermodal`; defaults to `port`). The legacy `ports` key now
+  accommodates inland connection areas as well as seaports.
+- `routes`: unique `id`, `name`, `supplier_id`, `customer_id`, `relationship_id`, `goods`,
+  `status`, `source: {title, reference}`, `updated_at` (ISO date), `notes`, and ordered
+  nonempty `segments`.
+- Segments: `from_port`, `to_port`, optional `waypoints`, `passages`, `mode` (defaults
+  to `ocean`) and `source`. Domestic modes (`truck`, `rail`) require US endpoints,
+  corridor names and a source; truck names must be Interstate designations. Ocean
+  segments must connect ports. Adjacent legs must connect, and Pacific geometry is
+  split at the date line.
+
+Use **confirmed** only with shipment evidence, **inferred** with an explained inference,
+and **illustrative** for scenarios. A corridor reference documents infrastructure,
+not shipment evidence. Status is author supplied, not independently certified by the app.
+Dates are record review dates. The overlays do not create graph assertions or change
+vendor risk scores, and nearby news does not establish disruption of a route.
+
+### Established shipping lanes
+
+**Shipping lanes** is an independent map reference layer, enabled by default. The
+initial coverage is seven selected Los Angeles connections from the Port of Los
+Angeles August 2026 service directory, published August 5, 2026. Select a lane for
+its service identifier and original source. Paths and port positions are schematic;
+this is a dated reference snapshot, not live vessel traffic or supplier shipment evidence.
+The reference stays visible even when the graph is empty or supplier relationships change.
+Search and port filters are separate from graph search. This is partial coverage.
+
+`GET /api/shipping/lanes` validates and serves `shipping_lanes.json` in
+`ILLUMINATE_DATA_DIR`, falling back to the bundled reference file of the same name.
+**Refresh** reloads that catalog; it does not scrape or update the source publication.
+A malformed override reports an error. To extend coverage, add sourced, dated port
+connections to this catalog. The previous hypothetical routes remain under
+**Supplier examples**, disabled by default; US highway and rail references are unchanged.
+
+### Combined internet news search
+
+The map's **Search news** searches GDELT and Google News search RSS in parallel
+through `/api/news/search`. It needs no additional API key. Articles retain their
+publisher, search provider, and publication date (Google) or seen date (GDELT).
+Duplicate URLs and matching headlines from the same publisher are merged. Google
+links open through Google News to the publisher; article bodies are not scraped.
+Headline city/town mentions are resolved against a bundled GeoNames locality lookup.
+State/country context disambiguates duplicate names; unresolved names fall back to
+country and supported state/province centers. Town coordinates are approximate
+event areas, not verified incident points. Locality matches take precedence in
+both marker placement and the 250 km proximity filter.
+Coral count badges group articles at their best available location. Distinctive
+US, Canadian, and Australian region names can stand alone; other region names
+require a matching country in the headline. Only placements within 250 km of visible
+entities or routes appear; unrecognized and distant locations are hidden.
+Use **Show news on map** to restore the world view.
+
+Each provider has a 15-minute cache and independently reports errors or stale data.
+GDELT keeps its persistent cache; Google uses a bounded process-local cache with
+up to seven days of clearly labelled stale fallback. A provider failure still returns
+results from the other; if both fail, the UI retains its previous labelled search.
+Google's public RSS feed has no availability guarantee; its results are not exhaustive.
+The original `/api/news` endpoint remains GDELT-only for existing clients.

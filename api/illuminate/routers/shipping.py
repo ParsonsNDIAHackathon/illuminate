@@ -1,0 +1,41 @@
+"""Read-only catalog; illustrative records never become graph assertions."""
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException
+from pydantic import ValidationError
+
+from ..config import settings
+from ..shipping import ShippingCatalog, TransportNetwork, EstablishedLanes
+
+router = APIRouter(prefix="/api/shipping", tags=["shipping"])
+
+
+@router.get("", response_model=ShippingCatalog)
+async def shipping_catalog():
+    path = settings.data_dir / "shipping.json"
+    if not path.exists():
+        path = Path(__file__).resolve().parents[1] / "shipping_demo.json"
+    try:
+        return ShippingCatalog.model_validate_json(path.read_text())
+    except (OSError, ValidationError) as exc:
+        raise HTTPException(503, "Shipping data could not be loaded. Check the shipping catalog and retry.") from exc
+
+
+@router.get("/network", response_model=TransportNetwork)
+async def transport_network():
+    path = Path(__file__).resolve().parents[1] / "transport_network.json"
+    try:
+        return TransportNetwork.model_validate_json(path.read_text())
+    except (OSError, ValidationError) as exc:
+        raise HTTPException(503, "US transport reference could not be loaded. Try again shortly.") from exc
+
+
+@router.get("/lanes", response_model=EstablishedLanes)
+async def established_lanes():
+    path = settings.data_dir / "shipping_lanes.json"
+    if not path.exists():
+        path = Path(__file__).resolve().parents[1] / "shipping_lanes.json"
+    try:
+        return EstablishedLanes.model_validate_json(path.read_text())
+    except (OSError, ValidationError) as exc:
+        raise HTTPException(503, "Established shipping lanes could not be loaded. Check the reference catalog and retry.") from exc

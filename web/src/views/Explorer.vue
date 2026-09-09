@@ -1,8 +1,12 @@
 <template>
-  <div class="explorer" ref="root" :style="{ gridTemplateColumns: `1fr 6px ${sideW}px` }">
+  <div class="explorer" :class="{ 'map-mode': viewMode === 'map' }" ref="root" :style="{ '--side-width': `${sideW}px` }">
     <div class="canvas" ref="canvasBox">
-      <GraphCanvas ref="canvas" @expand="expand" />
+      <GraphMap v-if="viewMode === 'map'" :location-code="String(route.query.map_location || '')" @select-news="selectNews" />
+      <GraphCanvas v-show="viewMode === 'graph'" :active="viewMode === 'graph'" ref="canvas" @expand="expand" />
       <div class="toolbar">
+        <v-btn-toggle :model-value="viewMode" mandatory density="compact" color="primary" aria-label="Graph visualization" @update:model-value="changeView">
+          <v-btn value="graph" size="small">Graph</v-btn><v-btn value="map" size="small">Map</v-btn>
+        </v-btn-toggle>
         <!-- Both menus follow the pattern on illuminate-map: the controls fold away so the
              canvas keeps its corners, and the properties card gets the right edge. -->
         <v-menu :close-on-content-click="false" location="bottom start">
@@ -12,7 +16,7 @@
           </template>
           <v-card class="pa-3 layers-menu"><LayerToggles @change="reload" /></v-card>
         </v-menu>
-        <v-menu location="bottom start">
+        <v-menu v-if="viewMode === 'graph'" location="bottom start">
           <template #activator="{ props }">
             <v-btn v-bind="props" size="small" prepend-icon="mdi-tune-variant" append-icon="mdi-menu-down"
                    title="Fit, re-lay out and clear the canvas">Canvas</v-btn>
@@ -46,11 +50,11 @@
                   :title="graph.focusId ? 'Showing one program and its supply chain — pick Everything to see them all' : 'Showing every program'"
                   @update:model-value="setFocus" />
       </div>
-      <Legend />
+      <Legend v-if="viewMode === 'graph'" />
       <!-- Properties ride on the canvas beside the node they describe, so the conversation
            below never has to give up its space to them. -->
       <SelectionCard @expand="expand" />
-      <div v-if="!graph.nodes.size && !graph.loading" class="empty">
+      <div v-if="viewMode === 'graph' && !graph.nodes.size && !graph.loading" class="empty">
         <v-btn color="primary" @click="reload">Load graph</v-btn>
       </div>
       <div class="search">
@@ -73,6 +77,10 @@
 </template>
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useNews } from '../stores/news'
+import type { NewsArticle } from '../newsMap'
+import GraphMap from '../components/GraphMap.vue'
 import { api, qs } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
 import SelectionCard from '../components/SelectionCard.vue'
@@ -83,6 +91,24 @@ import CypherBlock from '../components/CypherBlock.vue'
 import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 const graph = useGraph(); const ws = useWorkspace()
+const news = useNews()
+function selectNews(article: NewsArticle) {
+  graph.select(null)
+  graph.selectEdge(null)
+  news.selectedUrl = article.url
+}
+watch([() => graph.selectedId, () => graph.selectedEdgeId], ([node, edge]) => {
+  if (node || edge) news.selectedUrl = null
+})
+const route = useRoute(); const router = useRouter()
+const viewMode = ref(route.query.view === 'map' ? 'map' : 'graph')
+// Fetch role bridges for affiliation groups without enabling the People display layer.
+const graphLayers = computed(() => viewMode.value === 'map'
+  ? { ...ws.ws.layers, countries: true }
+  : { ...ws.ws.layers, people: !!ws.ws.layers.people || ws.ws.layers.indirect_orgs !== false })
+async function changeView(value: string) {
+  await router.replace({ query: { ...route.query, view: value, map_location: undefined } })
+}
 const canvas = ref<InstanceType<typeof GraphCanvas>>()
 const canvasBox = ref<HTMLElement>()
 const q = ref(''); const hits = ref<any[]>([]); const searching = ref(false); const open = ref(false)
@@ -125,18 +151,16 @@ watch(q, (v) => {
 // A search hit is already on the canvas when nothing is filtered out; pull it in only if it isn't.
 async function onPick(id: string) {
   open.value = false; q.value = ''
-  if (!graph.nodes.has(id)) await graph.loadNeighbourhood(id, 1, ws.ws.layers)
+  if (!graph.nodes.has(id)) await graph.loadNeighbourhood(id, 1, graphLayers.value)
   graph.select(id)
 }
 async function setFocus(id: string | null) {
-  if (id) await graph.focus(id, graph.programs.find(p => p.id === id)?.name || null, ws.depth, ws.ws.layers)
-  else await graph.loadAll(ws.ws.layers)
+  await router.replace({ query: { ...route.query, root_id: id || undefined, map_location: undefined } })
 }
 async function reload() {
-  if (graph.focusId) await graph.focus(graph.focusId, graph.focusLabel, ws.depth, ws.ws.layers)
-  else await graph.loadAll(ws.ws.layers)
+  if (graph.focusId) await graph.focus(graph.focusId, graph.focusLabel, ws.depth, graphLayers.value)
+  else await graph.loadAll(graphLayers.value)
 }
-async function expand(id: string) { await graph.loadNeighbourhood(id, 1, ws.ws.layers) }
 // A scheme is a read, so the only failure worth showing is that it did not land; the note it
 // comes back with (how many nodes were unscored, and so left uncoloured) goes to the legend
 // through the ops themselves.
@@ -145,15 +169,25 @@ async function colourBy(name: string) {
   colouring.value = true
   try { await graph.applyScheme(name) } finally { colouring.value = false }
 }
-onMounted(async () => {
-  window.addEventListener('resize', onResize)
-  if (!ws.loaded) await ws.load(); graph.loadPrograms(); graph.loadSchemes(); if (!graph.nodes.size) reload()
-})
+async function expand(id: string) { await graph.loadNeighbourhood(id, 1, graphLayers.value) }
+async function applyRoute() {
+  const previousView = viewMode.value
+  viewMode.value = route.query.view === 'map' ? 'map' : 'graph'
+  if (!ws.loaded) await ws.load()
+  if (route.query.map_location) { q.value = ''; graph.setFilter('') }
+  const root = String(route.query.root_id || '') || null
+  if (root !== graph.focusId) {
+    if (root) await graph.focus(root, graph.programs.find(p => p.id === root)?.name || null, ws.depth, graphLayers.value)
+    else await graph.loadAll(graphLayers.value)
+  } else if (!graph.nodes.size || viewMode.value !== previousView) await reload()
+}
+onMounted(async () => { window.addEventListener('resize', onResize); await applyRoute(); graph.loadPrograms(); graph.loadSchemes() })
+watch(() => route.fullPath, applyRoute)
 onBeforeUnmount(() => window.removeEventListener('resize', onResize))
 // The card is measured rather than assumed: it is only in the DOM once something is
 // selected, so this waits a tick for it before asking where its edge fell.
 watch(() => graph.selectedId, async (id) => {
-  if (!id) return
+  if (!id || viewMode.value !== 'graph') return
   await nextTick()
   const box = canvasBox.value?.getBoundingClientRect()
   const card = canvasBox.value?.querySelector('.selection-card')?.getBoundingClientRect()
@@ -162,11 +196,12 @@ watch(() => graph.selectedId, async (id) => {
 })
 // Depth only shapes a focused view; the whole graph is not walked from a root.
 watch(() => ws.depth, () => { if (graph.focusId) reload() })
+watch(() => ws.ws.layers.indirect_orgs, () => { if (viewMode.value === 'graph' && ws.loaded) reload() })
 </script>
 <style scoped>
-.explorer { display: grid; height: calc(100vh - 48px); }
+.explorer { display: grid; grid-template-columns: minmax(0, 1fr) 6px var(--side-width); height: calc(100vh - 48px); }
 .explorer:has(.gutter.dragging) { user-select: none; cursor: col-resize; }
-.canvas { position: relative; min-width: 0; }
+.canvas { position: relative; min-width: 0; min-height: 0; }
 .gutter { cursor: col-resize; background: rgba(128,128,128,.2); transition: background .12s; user-select: none; touch-action: none; }
 .gutter:hover, .gutter.dragging { background: rgb(var(--v-theme-primary)); }
 .side { min-height: 0; min-width: 0; }
@@ -182,4 +217,16 @@ watch(() => ws.depth, () => { if (graph.focusId) reload() })
 .notes { position: absolute; right: 12px; bottom: 12px; max-width: 520px; font-size: 12px; text-align: right; }
 .notes summary { cursor: pointer; opacity: .6; }
 .warn { color: #f59e0b; }
+@media (max-width: 1100px) {
+  .toolbar { right:12px; flex-wrap:wrap; }
+  .focus { width:100%; }
+  .search { top:100px; width:calc(100% - 24px); }
+  .map-mode :deep(.geo-view) { margin-top:154px; height:calc(100% - 154px); padding-top:0; }
+}
+@media (max-width: 800px) {
+  .gutter { display:none; }
+  .explorer { grid-template-columns:1fr; grid-template-rows:minmax(500px,70dvh) minmax(500px,70dvh); height:auto; }
+  .map-mode.explorer { grid-template-rows:minmax(710px,80dvh) minmax(500px,70dvh); }
+  .map-mode .canvas { min-height:710px; }
+}
 </style>

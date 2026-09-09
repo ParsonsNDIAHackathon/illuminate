@@ -6,6 +6,7 @@
       <v-chip v-if="scorable" size="x-small" variant="tonal" :color="bandChip(rs.band)"
               :title="rs.note || 'Not scored yet'">{{ scoreLabel(rs.score, rs.band) }}</v-chip>
     </div>
+    <p v-if="node.label === 'Location' && p.code"><LocationMapLink :code="p.code" label="View location on map ↗" /></p>
     <div class="ids text-caption">
       <span v-if="p.uei">UEI {{ p.uei }}</span><span v-if="p.cage"> · CAGE {{ p.cage }}</span><span v-if="p.lei"> · LEI {{ p.lei }}</span><span v-if="p.ticker"> · {{ p.ticker }}</span>
     </div>
@@ -27,10 +28,10 @@
       <section>
         <h4>Geography</h4>
         <dl>
-          <dt>Incorporated</dt><dd>{{ detail.incorporated?.code || '—' }}</dd>
-          <dt>Operates</dt><dd>{{ detail.operates?.map((x:any) => x.code).join(', ') || '—' }}</dd>
-          <dt>Manufactures</dt><dd>{{ detail.manufactures?.map((x:any) => x.code).join(', ') || '—' }}</dd>
-          <dt>Parent seat</dt><dd>{{ detail.parent_seat?.code || '—' }}</dd>
+          <dt>Incorporated</dt><dd><LocationMapLink v-if="detail.incorporated?.code" :code="detail.incorporated.code" /><span v-else>—</span></dd>
+          <dt>Operates</dt><dd><template v-for="(location, index) in detail.operates" :key="location.code"><span v-if="index">, </span><LocationMapLink :code="location.code" /></template><span v-if="!detail.operates?.length">—</span></dd>
+          <dt>Manufactures</dt><dd><template v-for="(location, index) in detail.manufactures" :key="location.code"><span v-if="index">, </span><LocationMapLink :code="location.code" /></template><span v-if="!detail.manufactures?.length">—</span></dd>
+          <dt>Parent seat</dt><dd><LocationMapLink v-if="detail.parent_seat?.code" :code="detail.parent_seat.code" /><span v-else>—</span></dd>
         </dl>
       </section>
       <section v-if="detail.ultimate_parents?.length || detail.direct_parents?.length">
@@ -184,6 +185,7 @@ import ArtifactViewer from './ArtifactViewer.vue'
 import SourceFrame from './SourceFrame.vue'
 import SourceLink from './SourceLink.vue'
 import { bandChip, confidenceNote, isThin, scoreLabel, sevColor, sevIcon } from '../styles/risk'
+import LocationMapLink from './LocationMapLink.vue'
 const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace(); const reports = useReports()
 const router = useRouter()
 const rawId = ref<string | null>(null); const viewId = ref<string | null>(null)
