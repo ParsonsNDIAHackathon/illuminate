@@ -1,0 +1,100 @@
+# Publishes slides/ to GitHub Pages: https://parsonsndiahackathon.github.io/illuminate/
+#
+# Two things make this less trivial than a static-file upload:
+#
+#   * The deck's media lives in Git LFS. actions/checkout leaves LFS files as
+#     pointer stubs unless told otherwise, so an unguarded build deploys a
+#     134-byte text file named chat-report.mp4 and the slide renders its
+#     "missing asset" placeholder. We pull LFS explicitly, through a cache, and
+#     assert afterwards that nothing is still a pointer.
+#   * short.html is generated from index.html by make-short.py. Regenerating it
+#     here means the published short deck cannot drift from the long one.
+name: Deploy slides to Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'slides/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it: a half-applied Pages
+# deployment is worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false          # pulled below, via the cache
+
+      # Key the cache on the LFS object ids themselves, so it invalidates when
+      # a video changes and only then. Without this every build spends ~120MB
+      # of the account's monthly LFS bandwidth allowance.
+      - name: Compute LFS cache key
+        run: git lfs ls-files -l | cut -d' ' -f1 | sort > .lfs-assets-id
+
+      - name: Restore LFS cache
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          key: lfs-${{ hashFiles('.lfs-assets-id') }}
+          restore-keys: lfs-
+
+      - name: Fetch LFS objects
+        run: git lfs pull
+
+      - name: Check out LFS working files
+        run: git lfs checkout
+
+      # A pointer stub that reaches Pages fails silently — the slide just shows
+      # a placeholder — so fail the build here instead.
+      - name: Assert no LFS pointers survived
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            if head -c 42 "$f" | grep -q 'version https://git-lfs'; then
+              echo "::error file=$f::still an LFS pointer, not real content"
+              fail=1
+            fi
+          done < <(git lfs ls-files -n)
+          exit $fail
+
+      - name: Regenerate the short deck
+        run: |
+          python3 slides/make-short.py
+          if ! git diff --quiet -- slides/short.html; then
+            echo "::warning::slides/short.html was stale in git; publishing the regenerated version. Run 'python3 slides/make-short.py' and commit."
+          fi
+
+      - name: Report payload size
+        run: |
+          du -sh slides
+          echo "Pages sites are capped at 1GB."
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: slides
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
