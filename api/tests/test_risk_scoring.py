@@ -32,6 +32,11 @@ def screen(predicate: str, result: str, **over) -> dict:
             "retrieved_at": "2026-09-01T00:00:00Z", "url": None, **over}
 
 
+def screens(*rows: dict) -> dict[tuple[str, str], dict]:
+    """Screens keyed the way the graph hands them over: one entry per list per source."""
+    return {(r["predicate"], r["source"]): r for r in rows}
+
+
 # --- no data is not a zero ---------------------------------------------------------
 
 def test_a_dimension_with_nothing_to_go_on_says_so_instead_of_scoring_clear():
@@ -58,7 +63,7 @@ def test_an_unscreened_unplaced_private_entity_gets_no_score_at_all():
 
 
 def test_the_composite_ignores_absent_dimensions_rather_than_averaging_them_in():
-    designated = risk._designation(entity(), {"sanctions_screen": screen("sanctions_screen", "hit")})
+    designated = risk._designation(entity(), screens(screen("sanctions_screen", "hit")))
     quiet = risk._regional(entity())
     assert quiet["no_data"] is True
     # One dimension answered, and it answered "high": the score is high, not diluted to a
@@ -77,10 +82,10 @@ def test_a_node_with_no_data_anywhere_has_no_score():
 # --- designation -------------------------------------------------------------------
 
 def test_a_screen_hit_is_the_finding_and_names_its_lists():
-    comp = risk._designation(entity(), {
-        "sanctions_screen": screen("sanctions_screen", "hit", source="OFAC"),
-        "restricted_list_screen": screen("restricted_list_screen", "hit", source="U.S. Department of Defense"),
-    })
+    comp = risk._designation(entity(), screens(
+        screen("sanctions_screen", "hit", source="OFAC"),
+        screen("restricted_list_screen", "hit", source="U.S. Department of Defense"),
+    ))
     assert comp["severity"] == "high"
     assert "OFAC" in comp["label"] and "Department of Defense" in comp["label"]
 
@@ -90,11 +95,23 @@ def test_a_node_flagged_without_a_screen_behind_it_still_counts_as_designated():
     assert comp["severity"] == "high" and "cyber-threat" in comp["detail"]
 
 
+def test_two_lists_under_one_predicate_are_two_findings_not_one():
+    # OFAC and the UN both designate under `sanctions_screen`. Keeping only one per
+    # predicate would name one list and drop the other from the finding entirely.
+    comp = risk._designation(entity(), screens(
+        screen("sanctions_screen", "hit", source="OFAC", detail="SDN designation"),
+        screen("sanctions_screen", "hit", source="UN Security Council", detail="on the Consolidated List"),
+    ))
+    assert comp["severity"] == "high"
+    assert "OFAC" in comp["label"] and "UN Security Council" in comp["label"]
+    assert "SDN designation" in comp["detail"] and "Consolidated List" in comp["detail"]
+
+
 def test_screens_that_ran_and_found_nothing_grade_clear_and_say_how_many_ran():
-    comp = risk._designation(entity(), {
-        "sanctions_screen": screen("sanctions_screen", "clear"),
-        "exclusion_screen": screen("exclusion_screen", "clear", source="SAM.gov"),
-    })
+    comp = risk._designation(entity(), screens(
+        screen("sanctions_screen", "clear"),
+        screen("exclusion_screen", "clear", source="SAM.gov"),
+    ))
     assert comp["severity"] == "clear" and "2 lists" in comp["label"]
 
 
@@ -296,7 +313,7 @@ def test_being_a_sole_source_adds_nothing_to_the_suppliers_own_score():
     assert "concentration" not in risk.DIMENSIONS
     supplier = entity(id="ent_sole", name="Only Option")
     comps = [
-        risk._designation(supplier, {"sanctions_screen": screen("sanctions_screen", "clear")}),
+        risk._designation(supplier, screens(screen("sanctions_screen", "clear"))),
         risk._proximity_component(supplier, None),
         risk._dependency(supplier, [], {}),
     ]
@@ -447,7 +464,7 @@ def test_designation_outweighs_the_softer_dimensions_it_competes_with():
         risk._dependency(entity(), [], {}),
     ])[0]
     hazardous = risk.composite([
-        risk._designation(entity(), {"sanctions_screen": screen("sanctions_screen", "clear")}),
+        risk._designation(entity(), screens(screen("sanctions_screen", "clear"))),
         risk._regional(entity(manufactures=["PH"])),
         risk._dependency(entity(), [], {}),
     ])[0]
@@ -481,10 +498,10 @@ def test_a_thin_score_is_still_reported_but_the_note_says_not_to_act_on_it_yet()
 def test_full_coverage_does_not_carry_the_act_with_caution_warning():
     row = entity(registration_status="Active", incorporated=["US"], operates=["US-VT"], manufactures=["US-VT"])
     scored = risk._score([
-        risk._designation(row, {"sanctions_screen": screen("sanctions_screen", "clear")}),
+        risk._designation(row, screens(screen("sanctions_screen", "clear"))),
         risk._proximity_component(row, None), risk._foreign(row, []), risk._financial(row, {}, TODAY),
         risk._regional(row), risk._dependency(row, [(supply_edge('ent_a', 'Alpha'), 1.0)], {'ent_a': 0}),
-        risk._media({"adverse_media_screen": screen("adverse_media_screen", "clear")}),
+        risk._media(screens(screen("adverse_media_screen", "clear"))),
     ], row, "Entity")
     assert scored["confidence"] == 100 and "raise the confidence" not in scored["note"]
 

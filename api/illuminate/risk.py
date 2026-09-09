@@ -204,8 +204,15 @@ async def _people(ids: list[str] | None) -> list[dict]:
     )
 
 
-async def _screens(ids: list[str] | None) -> dict[str, dict[str, dict]]:
-    """Latest committed screen per node per predicate."""
+async def _screens(ids: list[str] | None) -> dict[str, dict[tuple[str, str], dict]]:
+    """Latest committed screen per node, per predicate *and source*.
+
+    Keyed by source as well as predicate because two lists are two findings: a node can be
+    designated by OFAC and by the UN Security Council under one `sanctions_screen`
+    predicate, and collapsing them would report one of the two and silently drop the other.
+    Re-running the same screen against the same source still supersedes, which is what the
+    dedupe is for.
+    """
     rows = await db.read(
         f"""
         MATCH (c:Claim)-[:ASSERTS]->(n)
@@ -217,10 +224,19 @@ async def _screens(ids: list[str] | None) -> dict[str, dict[str, dict]]:
         """,
         {"ids": ids},
     )
-    out: dict[str, dict[str, dict]] = {}
+    out: dict[str, dict[tuple[str, str], dict]] = {}
     for row in rows:
-        out.setdefault(row["id"], {}).setdefault(row["predicate"], row)
+        out.setdefault(row["id"], {}).setdefault((row["predicate"], row["source"] or ""), row)
     return out
+
+
+def _latest(screens: dict[tuple[str, str], dict], predicate: str) -> dict | None:
+    """The most recent screen under one predicate, whichever source ran it.
+
+    For the dimensions that read a single verdict rather than a roster of lists.
+    """
+    rows = [s for (p, _), s in screens.items() if p == predicate]
+    return max(rows, key=lambda s: s.get("retrieved_at") or "", default=None)
 
 
 async def _ultimate_parents(ids: list[str] | None) -> dict[str, list[dict]]:
@@ -341,14 +357,22 @@ async def _designated_ids() -> list[str]:
 
 # --- Dimensions -------------------------------------------------------------------
 
-def _designation(row: dict, screens: dict[str, dict]) -> dict:
-    hits = [s for p, s in screens.items() if p in DESIGNATION_SCREENS and s["result"] == "hit"]
-    ran = [s for p, s in screens.items() if p in DESIGNATION_SCREENS]
+def _designation(row: dict, screens: dict[tuple[str, str], dict]) -> dict:
+    """Every designation list that ran on the node itself, named one by one.
+
+    A party on two lists is on two lists: both sources are named and both findings are
+    carried in the detail, because "designated by OFAC" and "designated by OFAC and the UN"
+    are different facts to the analyst deciding what to do next.
+    """
+    hits = sorted((s for (p, _), s in screens.items() if p in DESIGNATION_SCREENS and s["result"] == "hit"),
+                  key=lambda s: s.get("source") or "")
+    ran = [s for (p, _), s in screens.items() if p in DESIGNATION_SCREENS]
     if hits:
-        first = hits[0]
         sources = " · ".join(sorted({h["source"] for h in hits if h.get("source")}))
+        details = list(dict.fromkeys(h["detail"] for h in hits if h.get("detail")))
         return component("designation", f"Designated — {sources or 'listed'}", "high", source=sources or None,
-                         detail=first.get("detail"), url=first.get("url"), ids=[row["id"]])
+                         detail="; ".join(details) or None,
+                         url=next((h["url"] for h in hits if h.get("url")), None), ids=[row["id"]])
     if row.get("flagged"):
         # Flagged without a screen behind it: something asserted the designation directly.
         return component("designation", "Flagged in the graph", "high", source="graph",
@@ -467,7 +491,7 @@ def _regional(row: dict) -> dict:
                      ids=[row["id"]])
 
 
-def _financial(row: dict, screens: dict[str, dict], today: date) -> dict:
+def _financial(row: dict, screens: dict[tuple[str, str], dict], today: date) -> dict:
     """Distress signals, each of which is a reason someone stops delivering.
 
     A private company with no filings and no registration record produces no signal at all,
@@ -508,7 +532,7 @@ def _financial(row: dict, screens: dict[str, dict], today: date) -> dict:
         elif change <= -25:
             findings.append(("medium", f"Market value down {abs(change):.0f}% over 12 months"))
 
-    fin = screens.get("financial_screen")
+    fin = _latest(screens, "financial_screen")
     if fin and fin["result"] in SEVERITY_WEIGHT and fin["result"] != "clear":
         findings.append((fin["result"], fin.get("detail") or "financial screen"))
 
@@ -611,8 +635,8 @@ def _dependency(row: dict, weighted: list[tuple[dict, float]], scores: dict[str,
                      detail=" · ".join(parts), ids=list(dict.fromkeys(ids)))
 
 
-def _media(screens: dict[str, dict]) -> dict:
-    adv = screens.get("adverse_media_screen")
+def _media(screens: dict[tuple[str, str], dict]) -> dict:
+    adv = _latest(screens, "adverse_media_screen")
     if not adv:
         return component("media", "Adverse media", None, detail="No media screen has run")
     severity = adv["result"] if adv["result"] in SEVERITY_WEIGHT else "low"
