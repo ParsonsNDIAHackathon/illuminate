@@ -53,6 +53,20 @@ coordinates — the numbers in the address bar as you page through the full deck
 `'8'` and `#/11/2` is `'11/2'`. A sub-slide pulled out of a vertical stack becomes an ordinary
 slide in the short deck.
 
+`SHORT_MEDIA`, just below it, lets the short deck point a slot at a different file — the slide is
+still lifted whole, only the `data-slot` is rewritten. It is there for recordings that are too
+long for the short cut: `chat-report.mp4` runs 2m42s of asking, generating and reading, and the
+short deck joins it at 2:20 as `chat-report-short.mp4`, 22 seconds of the report actually being
+produced. To re-cut it after re-recording:
+
+```bash
+ffmpeg -ss 140 -i slides/media/chat-report.mp4 -c:v libx264 -crf 23 -preset slow \
+       -pix_fmt yuv420p -movflags +faststart -an slides/media/chat-report-short.mp4
+```
+
+Re-encoding rather than `-c copy` is deliberate: keyframes sit about 8s apart, so a stream copy
+cannot start on 2:20. `-an` drops a silent audio track.
+
 | Key | |
 | --- | --- |
 | `→` / `space` | next step — walks vertical stacks too |
@@ -94,7 +108,8 @@ adds a scrubber; `data-once` stops the loop.
 | `media/risk-path.*` | Clicking a dimension lights its path up | ⬜ empty — optional slide, cut it if short |
 | `media/chat-ask.png` | Chat: a template answer on the canvas | from `docs/screenshots/02-chat-sole-source.png` |
 | `media/chat-styles.png` | Chat: goods purple, services yellow | from `docs/screenshots/03-chat-goods-services.png` |
-| `media/chat-report.*` | **Chat: generate a report** | ⬜ empty — mp4 preferred |
+| `media/chat-report.*` | **Chat: generate a report** | **your recording**, 2m42s — full deck |
+| `media/chat-report-short.mp4` | same slide in the short deck | generated from the above, from 2:20 |
 | `media/report-risk.png` | The report's risk section | from `docs/screenshots/06-report-risk.png` |
 | `media/chat-add-program.png` | **Chat: add a new program** | **your capture** |
 | `media/permission-dialog.png` | Ask before writing | from `docs/screenshots/04-permission-dialog.png` |
