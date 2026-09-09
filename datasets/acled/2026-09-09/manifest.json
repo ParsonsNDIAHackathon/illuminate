@@ -1,0 +1,95 @@
+{
+  "source_id": "acled",
+  "source_title": "ACLED",
+  "source_page": "https://acleddata.com/conflict-data/download-data-files",
+  "stored_at": "2026-09-09T12:10:29.557498+00:00",
+  "data_type": "aggregated",
+  "file_count": 12,
+  "total_bytes": 44317182,
+  "files": [
+    {
+      "filename": "Africa_aggregated_data_up_to_week_of-2026-08-29.xlsx",
+      "bytes": 12409896,
+      "sha256": "d8cafc791d55281a46c62114638205eb57b2f555cc68894b3dfb9889454ffba8",
+      "origin": "User-downloaded ACLED file in ~/Downloads",
+      "source_title": "ACLED"
+    },
+    {
+      "filename": "Asia-Pacific_aggregated_data_up_to_week_of-2026-08-15_0.xlsx",
+      "bytes": 9670151,
+      "sha256": "85097b8641ab65df9deb2ce050c3b71619465e12a3187f4f7cf72f1a007478ad",
+      "origin": "User-downloaded ACLED file in ~/Downloads",
+      "source_title": "ACLED"
+    },
+    {
+      "filename": "Middle-East_aggregated_data_up_to_week_of-2026-08-29.xlsx",
+      "bytes": 6755581,
+      "sha256": "f9626c21ee023b451e72fe0a9a291575189f5c80bc7a497d18c5fc1ab5df2fad",
+      "origin": "User-downloaded ACLED file in ~/Downloads",
+      "source_title": "ACLED"
+    },
+    {
+      "filename": "Latin-America-the-Caribbean_aggregated_data_up_to_week_of-2026-08-29.xlsx",
+      "bytes": 8173864,
+      "sha256": "37bf793ad8586806c2eddb3cb0dfc1735333646fea94becf002f04dde38c3155",
+      "origin": "User-downloaded ACLED file in ~/Downloads",
+      "source_title": "ACLED"
+    },
+    {
+      "filename": "US-and-Canada_aggregated_data_up_to_week_of-2026-08-15.xlsx",
+      "bytes": 1078276,
+      "sha256": "2b10b9f0333bb3ecabf1a1afcc6a4c689fea59a677d2561dd0c45885612ea5da",
+      "origin": "User-downloaded ACLED file in ~/Downloads",
+      "source_title": "ACLED"
+    },
+    {
+      "filename": "Europe-Central-Asia_aggregated_data_up_to_week_of-2026-08-15.xlsx",
+      "bytes": 5522199,
+      "sha256": "b77ab53a5e582e422c5feee80ea1cf7d061f7eba1de23661adfd073aee701e65",
+      "origin": "User-downloaded ACLED file in ~/Downloads",
+      "source_title": "ACLED"
+    },
+    {
+      "filename": "number_of_reported_civilian_fatalities_by_country-year_as-of-21Aug2026.xlsx",
+      "bytes": 45712,
+      "sha256": "4c6e9ea64983e2743f5a2c991e810276d18c49a749884eac6d73e9a4e7d96f14",
+      "origin": "User-downloaded ACLED file in ~/Downloads",
+      "source_title": "ACLED"
+    },
+    {
+      "filename": "number_of_reported_fatalities_by_country-year_as-of-21Aug2026.xlsx",
+      "bytes": 49417,
+      "sha256": "a0d4b939a976837bee629eda4b5d69186377ebda1ee7efb66d036bfcb71de667",
+      "origin": "User-downloaded ACLED file in ~/Downloads",
+      "source_title": "ACLED"
+    },
+    {
+      "filename": "number_of_events_targeting_civilians_by_country-year_as-of-21Aug2026.xlsx",
+      "bytes": 45926,
+      "sha256": "48c1f40ceb2d30ebe8ee23bdd3f9f090473ef6264a80edb808b17faabc0400d1",
+      "origin": "User-downloaded ACLED file in ~/Downloads",
+      "source_title": "ACLED"
+    },
+    {
+      "filename": "number_of_demonstration_events_by_country-year_as-of-21Aug2026.xlsx",
+      "bytes": 48945,
+      "sha256": "76128e085c234c1f238aa395cc60dd1045207ce1beb8665747ca3d081749c90e",
+      "origin": "User-downloaded ACLED file in ~/Downloads",
+      "source_title": "ACLED"
+    },
+    {
+      "filename": "number_of_political_violence_events_by_country-month-year_as-of-21Aug2026.xlsx",
+      "bytes": 470561,
+      "sha256": "a3201b7350cd4a11064614f98f130e1bc97ba6cd073927ddbd90f4b5968b6949",
+      "origin": "User-downloaded ACLED file in ~/Downloads",
+      "source_title": "ACLED"
+    },
+    {
+      "filename": "number_of_political_violence_events_by_country-year_as-of-21Aug2026.xlsx",
+      "bytes": 46654,
+      "sha256": "febdaf5130f7c5ac460f359ef05687248bca52a5921c4dbaa6be6a9ef689b06a",
+      "origin": "User-downloaded ACLED file in ~/Downloads",
+      "source_title": "ACLED"
+    }
+  ]
+}
