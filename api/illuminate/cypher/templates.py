@@ -293,12 +293,33 @@ def _as_of_board(p):
     return cy, {"id": p["entity_id"], "date": p["date"]}
 
 
+# Appended to the program-focused walk. The depth control says how much context to draw; it does
+# not get to say that a scored node is out of sight. Depth 2 around the V-22 program stops one hop
+# short of the director scored 100 inside a second-tier supplier, and three short of the metals
+# group at the bottom of that chain — exactly the nodes the whole tool exists to surface. So after
+# the depth-bounded walk, every node over the pin floor is brought in on its shortest path back to
+# the root (config.RISK_PIN_FLOOR, mirrored by RISK_PIN_FLOOR in graphLayers.ts, which decides what
+# is actually drawn). The path comes with it: a risky node with no way back to the chain is one the
+# canvas cannot pin and would draw as a lone dot. `{inside}` keeps the sweep inside this program,
+# the way blacklistNodes keeps the walk there.
+_RISK_SWEEP = (
+    "WITH {carry}, nodes AS base, relationships AS rels\n"
+    "OPTIONAL MATCH (hot) WHERE (hot:Entity OR hot:Person) AND coalesce(hot.risk_score, 0) > $risk_floor AND NOT hot IN base\n"
+    "WITH {carry}, base, rels, collect(hot) AS hot\n"
+    "UNWIND (CASE WHEN hot = [] THEN [NULL] ELSE hot END) AS one\n"
+    "OPTIONAL MATCH back = shortestPath((root)-[:{rf}*1..{k}]-(one))\n"
+    "{inside}"
+    "WITH root, base, rels, collect(back) AS paths\n"
+    "WITH root, base + apoc.coll.flatten([q IN paths | nodes(q)]) AS nodes,\n"
+    "     rels + apoc.coll.flatten([q IN paths | relationships(q)]) AS relationships\n"
+)
+
 # Appended when the people layer is off. The walk crosses HELD_ROLE and BENEFICIAL_OWNER_OF either
 # way; this drops every person it met who is not scored over the pin floor, so a designated director
-# stays on the canvas whatever the layer says (config.RISK_PIN_FLOOR, mirrored in graphLayers.ts),
-# and so does a risky company on the far side of one. The last line then drops whatever an ordinary
-# director was the only route to: those companies would otherwise arrive with no edges at all, and
-# an edgeless organization is one the canvas keeps — turning people off would add nodes.
+# stays on the canvas whatever the layer says, and so does a risky company on the far side of one.
+# The last line then drops whatever an ordinary director was the only route to: those companies
+# would otherwise arrive with no edges at all, and an edgeless organization is one the canvas keeps
+# — turning people off would add nodes.
 _RISKY_PEOPLE_ONLY = (
     "WITH root, [n IN nodes WHERE NOT n:Person OR coalesce(n.risk_score, 0) > $risk_floor] AS kept, relationships\n"
     "WITH root, kept, [r IN relationships WHERE startNode(r) IN kept AND endNode(r) IN kept] AS relationships\n"
@@ -326,26 +347,29 @@ def _neighbourhood(p):
         rel_filter += ["ASSERTS", "TARGETS", "EVIDENCES"]
     rel_filter = list(dict.fromkeys(rel_filter))
     rf = "|".join(rel_filter)
-    bound = {"id": p["entity_id"], "limit": int(p.get("limit", 400))}
-    tail = ""
-    if not layers.get("people", True):
-        tail = _RISKY_PEOPLE_ONLY
-        bound["risk_floor"] = RISK_PIN_FLOOR
+    bound = {"id": p["entity_id"], "limit": int(p.get("limit", 400)), "risk_floor": RISK_PIN_FLOOR}
+    tail = _RISKY_PEOPLE_ONLY if not layers.get("people", True) else ""
     if p.get("program_id"):
         # Keep the walk inside one program. Suppliers sell to several programs, so an
         # unconstrained walk hops supplier -> another program -> that program's own
         # suppliers, and the single-program view quietly becomes the whole graph again.
         # Blacklisting every other program cuts those paths at the crossing point.
         bound["program"] = p["program_id"]
+        sweep = _RISK_SWEEP.format(carry="root, blocked", rf=rf, k=MAX_DEPTH,
+                                   inside="WHERE none(n IN nodes(back) WHERE n IN blocked)\n")
         cy = (
             "MATCH (root:Entity {id:$id})\n"
             "OPTIONAL MATCH (other:Entity) WHERE other.kind = 'program' AND other.id <> $program\n"
             "WITH root, collect(other) AS blocked\n"
             f"CALL apoc.path.subgraphAll(root, {{maxLevel:{d}, relationshipFilter:'{rf}', limit:$limit, blacklistNodes:blocked}}) YIELD nodes, relationships\n"
+            f"{sweep}"
             f"{tail}"
             "RETURN nodes, relationships LIMIT 1"
         )
         return cy, bound
+    # No sweep off a bare entity: that walk is someone expanding one node, and the whole graph's
+    # risk set arriving with it is not what they asked for. Unfocused, /graph/all has already sent
+    # every entity anyway, and the canvas pins from there.
     cy = (
         "MATCH (root:Entity {id:$id})\n"
         f"CALL apoc.path.subgraphAll(root, {{maxLevel:{d}, relationshipFilter:'{rf}', limit:$limit}}) YIELD nodes, relationships\n"
