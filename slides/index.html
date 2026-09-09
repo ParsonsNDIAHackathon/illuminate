@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Illuminate — one graph, any consumer</title>
+  <link rel="stylesheet" href="vendor/reveal.min.css">
+  <link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<!-- ==================================================================== 1 -->
+<section class="s title">
+  <p class="kicker">NDIA Global Defense Hackathon · Washington DC</p>
+  <h1>Illuminate</h1>
+  <div class="rule"></div>
+  <p class="lead wide" style="font-size:36px;color:var(--ink);max-width:22ch">
+    Supplier-network intelligence.<br><em>One graph, any consumer.</em>
+  </p>
+  <div class="spacer"></div>
+  <p class="meta">UC-7 Supply Chain Illumination · UC-11 Automated Vendor Risk Assessment</p>
+  <aside class="notes">
+    Thirty seconds of framing: this is one system that answers both use cases, because both
+    are the same question asked from different roots.
+  </aside>
+</section>
+
+<!-- ==================================================================== 2 -->
+<section class="s">
+  <p class="kicker">The problem</p>
+  <h2>A program office can name its primes.</h2>
+  <p class="lead wide" style="max-width:30ch">It cannot name what its primes depend on.</p>
+  <div class="spacer"></div>
+  <ul style="font-size:28px">
+    <li>Tier 1 is contract data. Tier 2 is a footnote. Tier 3 is a phone call.</li>
+    <li>Risk rarely sits at tier 1. It arrives from three hops away — an ownership chain
+      through two intermediaries, a shared director, a sole-source casting house.
+      <span class="sub">Screen the vendor and you find nothing. The exposure is in the relationship, not the record.</span></li>
+    <li>The useful question is never <em>“is this vendor bad?”</em><br>
+      It is <em>“what reaches my program, and by what route?”</em></li>
+  </ul>
+  <aside class="notes">
+    The pitch in one line: document review is per-vendor, and the risk is between vendors.
+  </aside>
+</section>
+
+<!-- ==================================================================== 3 -->
+<section class="s">
+  <p class="kicker">What it does</p>
+  <h2>Model the dependency graph. Attach evidence to every edge. Ask it questions.</h2>
+  <p class="small" style="max-width:74ch">
+    Illuminate does not know it is about defense. Point it at a DoD program and it answers one
+    use case; point it at the government as a buying organisation and it answers the other.
+    Same graph, same scorer, different root.
+  </p>
+  <div class="grid-2" style="margin-top:14px">
+    <div class="card">
+      <span class="tag">UC-7 · root = a program</span>
+      <h3>Supply chain illumination</h3>
+      <p>Walk suppliers tier by tier. Surface foreign control, sole-source chokepoints and
+         shared people — then show what flows back up to the program.</p>
+    </div>
+    <div class="card uc11">
+      <span class="tag">UC-11 · root = the buyer</span>
+      <h3>Vendor risk assessment</h3>
+      <p>One vendor report: identity, geography, control, people, affiliations and a scored
+         risk profile with citations — carried on every organisation and person, not just the one on screen.</p>
+    </div>
+  </div>
+  <aside class="notes">
+    Emphasise: the risk score is a property of every node in the graph, computed in one bulk
+    pass, so the canvas, the lists, the report and Cypher all read one number.
+  </aside>
+</section>
+
+<!-- ==================================================================== 4 -->
+<section class="s">
+  <p class="kicker">The premise</p>
+  <h2>The graph is the product.</h2>
+  <div class="pipe" style="margin:8px 0 4px">
+    <div class="box"><b>Ask</b>plain language</div><span class="arr">→</span>
+    <div class="box"><b>Resolve</b>named template<br>or validated Cypher</div><span class="arr">→</span>
+    <div class="box"><b>Store</b>Neo4j returns<br>nodes + edges</div><span class="arr">→</span>
+    <div class="box"><b>Draw</b>the canvas renders<br>exactly what came back</div>
+  </div>
+  <ul style="font-size:26px;margin-top:10px" class="compact">
+    <li><strong>Every answer is a subgraph.</strong> The executed query is always shown, so a reader can check the work.</li>
+    <li><strong>Nothing is asserted without a record.</strong> Facts arrive as <em>claims</em>, each pointing at the artifact
+      that evidences it. Authoritative sources commit; open-source facts stay staged until a human or a second
+      independent source agrees.</li>
+    <li><strong>It flags; it does not accuse.</strong> An interlock is a lead, not a finding, and every fuzzy match
+      records its method and confidence.</li>
+  </ul>
+  <aside class="notes">
+    D1–D8 in the proposal map onto modules. The one to say out loud: the same tool contract
+    serves the in-app model and any external agent over MCP, so the permission gate covers both.
+  </aside>
+</section>
+
+<!-- ==================================================================== 5 -->
+<section class="s">
+  <p class="kicker">Evidence</p>
+  <h2>Nine public sources, cached and reproducible.</h2>
+  <div class="grid-2" style="gap:26px;margin-top:6px">
+    <ul class="compact" style="font-size:23px">
+      <li><strong>USAspending</strong> — prime awards and reported sub-awardees<span class="sub">the only source that proposes SUPPLIES</span></li>
+      <li><strong>GLEIF</strong> — LEI, jurisdiction, direct and ultimate parents</li>
+      <li><strong>LittleSis</strong> — officers, directors and their other seats</li>
+      <li><strong>SEC EDGAR</strong> — tickers, CIKs, filings</li>
+      <li><strong>SAM.gov Entity</strong> — registration, CAGE, NAICS</li>
+    </ul>
+    <ul class="compact" style="font-size:23px">
+      <li><strong>OFAC SDN</strong> — sanctions screen on every entity <em>and</em> person</li>
+      <li><strong>UN Consolidated List</strong> — the multilateral counterpart</li>
+      <li><strong>SAM.gov Exclusions</strong> — 33,861 debarment records, screened locally</li>
+      <li><strong>DoD §1260H</strong> — Chinese military companies<span class="sub">from June 2026 the bar extends to anything that supplies a listed firm</span></li>
+    </ul>
+  </div>
+  <p class="small" style="margin-top:10px">
+    The seed builds the program from live sources and caches every response as a fixture —
+    <strong>253 cached calls</strong> — so the graph rebuilds offline in about a minute. Jurisdiction, conflict
+    and hazard tables are a committed snapshot with a stated date, for the same reason.
+  </p>
+  <aside class="notes">
+    If asked why fixtures: a demo that silently depended on a live third-party index would be
+    unreproducible, and a score you cannot reproduce is not a score.
+  </aside>
+</section>
+
+<!-- ==================================================================== 6 -->
+<section class="s pad-sm tight">
+  <p class="kicker">The big picture</p>
+  <h2 style="font-size:44px">One complex program, end to end.</h2>
+  <figure class="shot" data-slot="media/program-overview" data-try="png,jpg,mp4"
+          data-note="Explorer canvas: the whole V-22 program graph">
+    <figcaption><b>V-22 Osprey Program (PMA-275).</b> The program at the centre; suppliers by tier,
+      people as teal diamonds, categories as violet hexagons. Orange edges are the labelled simulated tie.</figcaption>
+  </figure>
+  <div class="stats" style="margin-top:2px">
+    <div class="stat"><div class="n">811</div><div class="l">nodes</div></div>
+    <div class="stat"><div class="n">1,714</div><div class="l">relationships</div></div>
+    <div class="stat"><div class="n">66</div><div class="l">entities</div></div>
+    <div class="stat"><div class="n">45</div><div class="l">people</div></div>
+    <div class="stat"><div class="n">467</div><div class="l">claims</div></div>
+    <div class="stat sim"><div class="n">7</div><div class="l">simulated, badged</div></div>
+  </div>
+  <aside class="notes">
+    Claims outnumber entities seven to one because every screen, ownership link and role is a
+    reified assertion with its own evidence. Eight tier-1 suppliers resolve to a foreign
+    ultimate parent — that is a real finding from real data, not the scenario.
+  </aside>
+</section>
+
+<!-- ==================================================================== 7 -->
+<section class="s">
+  <p class="kicker">Now zoom all the way in</p>
+  <h2>An employee of a sub-contractor.</h2>
+  <div class="split media-left">
+    <figure class="shot" data-slot="media/employee-risk" data-try="png,jpg"
+            data-note="Person report — the risk tab for R. Ostrowski">
+    </figure>
+    <div>
+      <p class="lead" style="max-width:24ch;margin-bottom:22px">
+        Not a vendor. Not designated. Screens clear on every list.
+      </p>
+      <p style="font-size:25px;line-height:1.5">
+        <span class="band"><span class="dot high"></span> 67 / 100 · High</span> — because he is
+        <strong>one hop from a designated party</strong>.
+      </p>
+      <p class="small" style="margin-top:18px">
+        A Network Operations Engineer at a tier-2 sub-contractor, holding administrative access to
+        production and supplier-facing systems. He is also a named affiliate of a designated group.
+        The company screens clean. The person screens clean. <em>Only the graph finds it.</em>
+      </p>
+      <p class="small" style="margin-top:16px">
+        <strong>69% of the model answered</strong> (2 of 4 dimensions) — stated next to the score, never hidden.
+      </p>
+    </div>
+  </div>
+  <aside class="notes">
+    This is the shape a document review misses, and it is the whole argument for a graph.
+    Both threads in the demo are simulated and badged as such — disclosed once in the app bar.
+    Also note: people are scored only on what a person can be scored on. The graph records no
+    nationality, and guessing one is how a screening tool becomes a discrimination engine.
+  </aside>
+</section>
+
+<!-- ==================================================================== 8 -->
+<section class="s pad-sm">
+  <p class="kicker">The two routes in</p>
+  <h2 style="font-size:44px">Neither one is written down anywhere.</h2>
+  <div class="grid-2" style="flex:1;min-height:0;align-items:start;margin-top:8px">
+    <div class="card" style="height:100%">
+      <span class="tag">Thread 1 · ownership</span>
+      <h3 style="font-size:24px">Sole-source castings, three hops from a state group</h3>
+      <p style="font-size:20px;line-height:1.55">
+        A tier-3 <strong>sole-source</strong> supplier of investment castings, incorporated in
+        <strong>Delaware</strong> and manufacturing in <strong>China</strong> →
+        owned 100% by a <strong>Hong Kong</strong> holding company →
+        owned 100% by a <strong>state-owned provincial metals group</strong>.
+      </p>
+      <p class="small" style="font-size:19px">
+        Nothing in the data says “ultimate parent.” That is what walking the ownership chain to its
+        root <em>discovers</em>. Country is four different edges — incorporated, operates,
+        manufactures, parent-seated — so a Delaware shell that manufactures abroad is
+        representable without a lie.
+      </p>
+    </div>
+    <div class="card" style="height:100%">
+      <span class="tag">Thread 2 · people</span>
+      <h3 style="font-size:24px">Supplier → employee → designated group</h3>
+      <p style="font-size:20px;line-height:1.55">
+        The vendor is clean. The employee is clean. The tie is a
+        <strong>role edge</strong> to a designated cyber-threat group with an OFAC and a UN listing
+        against it.
+      </p>
+      <p class="small" style="font-size:19px">
+        Reachable only by walking the association. A former director of the host company now sits on the
+        castings supplier's board too — a revolving-door lead that needs no second supplier in the graph.
+      </p>
+    </div>
+  </div>
+  <p class="small" style="font-size:18px;color:var(--yellow)">
+    Both threads are simulated, as the brief allows. Every synthetic node, edge and claim carries
+    <code>simulated: true</code> and the UI discloses it — 7 nodes, 14 edges.
+  </p>
+  <aside class="notes">
+    Keep this slide quick if time is short — it is the setup for the risk-flow slide.
+  </aside>
+</section>
+
+<!-- ==================================================================== 9 -->
+<section class="s pad-sm tight">
+  <p class="kicker">The point of the whole thing</p>
+  <h2 style="font-size:44px">Colour the graph by risk, and watch it flow.</h2>
+  <figure class="shot" data-slot="media/risk-graph" data-try="png,mp4,jpg,gif"
+          data-note="Explorer canvas coloured by risk band — red at the edge, and the path inward">
+    <figcaption>
+      <span class="band"><span class="dot severe"></span> Severe 75+</span> &nbsp;
+      <span class="band"><span class="dot high"></span> High 50+</span> &nbsp;
+      <span class="band"><span class="dot elevated"></span> Elevated 25+</span> &nbsp;
+      <span class="band"><span class="dot low"></span> Low</span> &nbsp;
+      <span class="band"><span class="dot unscored"></span> Unscored — never painted as safe</span>
+    </figcaption>
+  </figure>
+  <p class="small">
+    Same canvas, one encoding change. The hot nodes sit at the <em>edge</em> of the network, and the
+    colour walks inward along the edges that carry the exposure — three hops, then two, then the prime,
+    then the program.
+  </p>
+  <aside class="notes">
+    Say the sentence: risk is not a property of a vendor, it is a property of a path. Proximity is
+    the dimension only a graph can compute, and it is the one that catches a vendor whose own
+    record is spotless.
+  </aside>
+</section>
+
+<!-- =================================================================== 10 -->
+<section class="s">
+  <p class="kicker">Why it flows</p>
+  <h2>Risk is a property of the node — computed over the whole graph.</h2>
+  <table class="dims">
+    <tr><th>Dimension</th><th style="width:84px">Weight</th><th>What it reads</th></tr>
+    <tr class="lead-dim"><td class="n">Designation</td><td class="w">×3.0</td>
+      <td class="d">The node's own screens: OFAC, UN, SAM exclusions, DoD §1260H. A hit here is the finding.</td></tr>
+    <tr class="graph-dim"><td class="n">Proximity</td><td class="w">×2.0</td>
+      <td class="d">Degrees of separation from a designated party, walked up to three hops over ownership,
+        personnel and commercial edges. <strong>The dimension only a graph can compute.</strong>
+        Asymmetric on supply edges — buying from a designated party puts its problem inside your product.</td></tr>
+    <tr><td class="n">Dependency</td><td class="w">×2.0</td>
+      <td class="d">What a consumer inherits from suppliers it cannot replace. Sole sources are graded on the
+        worst, never summed — a long list of unremarkable ones must not manufacture a severe finding.</td></tr>
+    <tr><td class="n">Foreign control</td><td class="w">×1.5</td>
+      <td class="d">Incorporation, ultimate-parent seat, operations, manufacture — read separately, worst wins.</td></tr>
+    <tr><td class="n">Financial distress</td><td class="w">×1.5</td>
+      <td class="d">Filing <em>behaviour</em>: lapsed SAM registration, late-filing notices, a listed company that stopped filing.</td></tr>
+    <tr><td class="n">Regional exposure</td><td class="w">×1.0</td>
+      <td class="d">Conflict and natural hazard where the entity physically operates — blind to incorporation,
+        since a hurricane does not read the paperwork.</td></tr>
+    <tr><td class="n">Adverse media</td><td class="w">×0.75</td><td class="d">The GDELT screen, where one has run.</td></tr>
+  </table>
+  <p class="small">
+    <strong>A signal that returned no data is not a zero.</strong> A dimension with nothing to go on abstains, so every
+    node also carries <em>risk_confidence</em> — the share of the model's weight that answered — drawn next to the
+    score everywhere. And nothing is scored that cannot be shown: every dimension carries the ids of the nodes and
+    edges it was computed from. Click one, and the route lights up on the canvas.
+  </p>
+  <aside class="notes">
+    Sole-source status is scored on the customer, not the supplier — being a sole source says
+    nothing about whether that company will fail. The exposure belongs to whoever depends on it.
+  </aside>
+</section>
+
+<!-- =================================================================== 11 -->
+<section class="s pad-sm tight">
+  <p class="kicker">Trace it back</p>
+  <h2 style="font-size:44px">A score you cannot walk back to its evidence is just an assertion.</h2>
+  <figure class="shot" data-slot="media/risk-path" data-try="png,mp4,gif"
+          data-note="Clicking a risk dimension lights its path up on the canvas">
+    <figcaption>Every dimension records the nodes and edges it was computed from. Click the finding in the
+      inspector and the route it came from is highlighted on the graph.</figcaption>
+  </figure>
+  <aside class="notes">
+    Optional slide — cut it if running long, since the risk-flow slide has made the point.
+  </aside>
+</section>
+
+<!-- =================================================================== 12 -->
+<section>
+
+  <!-- 12a -->
+  <section class="s">
+    <p class="kicker">The chat interface</p>
+    <h2>Ask it in plain language. Get a subgraph and the query that produced it.</h2>
+    <div class="split media-left" style="margin-top:6px">
+      <figure class="shot" data-slot="media/chat-ask" data-try="png,jpg"
+              data-note="Chat rail: a template answer rendered on the canvas"></figure>
+      <div>
+        <div class="ask sm"><span class="caret">›</span> show sole-source suppliers</div>
+        <div class="ask sm"><span class="caret">›</span> which suppliers have a foreign ultimate parent?</div>
+        <div class="ask sm"><span class="caret">›</span> which vendors are within two hops of a designated party?</div>
+        <p class="small" style="margin-top:20px">
+          The model picks between <strong>named templates</strong> and <strong>generated Cypher</strong>. Generated statements are
+          classified and validated — label and relationship allowlist, hops capped at six, <code>LIMIT</code> clamped,
+          <code>CALL db.*</code> and <code>LOAD CSV</code> rejected — and the executed query is always shown.
+        </p>
+        <p class="small" style="margin-top:14px">
+          Without a model key, typed questions match to templates by intent. <em>The app degrades; it does not fail.</em>
+        </p>
+      </div>
+    </div>
+    <aside class="notes">
+      Text-to-Cypher fails in ways that look like answers. That is why templates are the default
+      and the query is on screen every time.
+    </aside>
+  </section>
+
+  <!-- 12b -->
+  <section class="s">
+    <p class="kicker">The chat interface</p>
+    <h2>Encoding is data, too.</h2>
+    <div class="split media-left" style="margin-top:6px">
+      <figure class="shot" data-slot="media/chat-styles" data-try="png,jpg"
+              data-note="Goods highlighted purple, services yellow, legend derived from the operations"></figure>
+      <div>
+        <div class="ask"><span class="caret">›</span> for all of the program's vendors, highlight goods in purple and services in yellow</div>
+        <p class="small" style="margin-top:22px">
+          That becomes <strong>style operations on element ids</strong>. Fill and stroke are palette <em>names</em>, never hex,
+          resolved to theme-tested tokens at the client; an unknown name falls back to neutral with a warning.
+        </p>
+        <p class="small" style="margin-top:14px">
+          The legend is <strong>derived</strong> from the operations rather than written by hand — so the key on screen
+          cannot drift from what was actually drawn.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12c -->
+  <section class="s pad-sm tight">
+    <p class="kicker">The chat interface · generate a report</p>
+    <h2 style="font-size:44px">“Write me the risk assessment for this program.”</h2>
+    <div class="ask" style="flex:none"><span class="caret">›</span> generate a supply-chain risk assessment for the V-22 program</div>
+    <figure class="shot" data-slot="media/chat-report" data-try="mp4,webm,gif,png" data-kind="video" data-controls
+            data-note="Screen recording: asking for a report and watching it generate">
+      <figcaption>Every path into the program that carries significant risk, the goods and services on that path,
+        where the risk comes from, and what to do about it — each line carrying its source.</figcaption>
+    </figure>
+    <aside class="notes">
+      Demo beat. If the recording is not in, talk over the static report slide that follows.
+    </aside>
+  </section>
+
+  <!-- 12d -->
+  <section class="s">
+    <p class="kicker">The chat interface · generate a report</p>
+    <h2>A report is a node too.</h2>
+    <div class="split media-left" style="margin-top:6px">
+      <figure class="shot" data-slot="media/report-risk" data-try="png,jpg"
+              data-note="The report's risk section: seven scored dimensions with weights and citations"></figure>
+      <div>
+        <ul class="compact" style="font-size:23px">
+          <li>Writes a <code>Report</code> node holding the finished document, joined to its subject by
+            <code>REPORTS_ON</code> and to everything it names by <code>CITES</code>.</li>
+          <li>It draws on its own canvas layer, and every finding traces back to the nodes it was computed from.</li>
+          <li>Regenerating <strong>rewrites that same node</strong> from current data — no drift of near-identical documents.</li>
+          <li>Honest <em>no data</em> rows where a source was not available, and the score is stated with how much
+            of the model stood behind it.</li>
+        </ul>
+        <p class="small">Narrative families — interlocks, government ties, political exposure — appear
+          separately as <strong>context</strong>. They explain a score; they do not move it.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12e -->
+  <section class="s pad-sm tight">
+    <p class="kicker">The chat interface · add a program</p>
+    <h2 style="font-size:44px">Point it at something new, and it goes and gets it.</h2>
+    <div class="ask" style="flex:none"><span class="caret">›</span> add the KC-46 program and discover its tier-1 suppliers</div>
+    <figure class="shot" data-slot="media/chat-add-program" data-try="mp4,webm,gif,png" data-kind="video" data-controls
+            data-note="Screen recording: adding a new program and enriching it from live sources">
+      <figcaption>The same keyword award search that built the demo runs on demand for any program, through the
+        <code>discover_suppliers</code> tool — then GLEIF, LittleSis and the screens enrich what it found.</figcaption>
+    </figure>
+    <aside class="notes">
+      The demo graph is V-22, but nothing about the system is V-22. This is the slide that says so.
+    </aside>
+  </section>
+
+  <!-- 12f -->
+  <section class="s">
+    <p class="kicker">The chat interface · writes</p>
+    <h2>It asks before it writes.</h2>
+    <div class="split media-left" style="margin-top:6px">
+      <figure class="shot" data-slot="media/permission-dialog" data-try="png,jpg"
+              data-note="Permission dialog with a real impact count"></figure>
+      <div>
+        <div class="ask sm"><span class="caret">›</span> add Acme Castings as a tier-3 supplier to AVIAN, LLC</div>
+        <p class="small" style="margin-top:20px">
+          A write executes inside a transaction that is <strong>rolled back to obtain real counters</strong>, then held for you:
+          approve once, approve this shape for the session, edit, or refuse.
+        </p>
+        <p class="small" style="margin-top:14px">
+          Destructive statements require the affected count to be acknowledged and <strong>never auto-approve</strong>.
+          A refusal goes back to the model as a tool result.
+        </p>
+        <p class="small" style="margin-top:14px">
+          The same gate sits in front of <strong>external agents over MCP</strong> — one tool contract, two transports,
+          one dispatch. Claude Desktop or Claude Code can drive it, under the same rules.
+        </p>
+      </div>
+    </div>
+    <aside class="notes">
+      D1 and D4 together. The impact count is real because the transaction really ran — that is
+      the detail people ask about.
+    </aside>
+  </section>
+
+</section>
+
+<!-- =================================================================== 13 -->
+<section class="s">
+  <p class="kicker">Candour</p>
+  <h2>Honest limits.</h2>
+  <ul class="compact" style="font-size:24px;margin-top:8px">
+    <li><strong>Entity resolution is the whole game.</strong> UEI, CAGE and LEI carry it; the residue is name matching,
+      tuned to refuse the subset trap, and every fuzzy merge records its method and confidence.</li>
+    <li><strong>Sub-award coverage is uneven</strong>, so tier depth varies by program. People are harder to resolve than
+      companies, and coverage skews to large listed firms.</li>
+    <li><strong>The risk score is a triage instrument, not an adjudication.</strong> Financial distress is read from filing
+      behaviour, never from the statements themselves — and a private sub-tier vendor with no filings produces no
+      signal at all, which is the common case.</li>
+    <li><strong>A clear result is not a clearance.</strong> The §1260H roster is an excerpt of the published annex, and
+      every result says so — including the clear ones.</li>
+    <li><strong>SAM.gov's personal-key tier allows about ten Entity calls a day</strong>, so registration details fill in
+      slowly. The exclusion screen does not depend on it — it runs against the public daily extract.</li>
+  </ul>
+  <aside class="notes">
+    Do not skip this slide. Judges trust a team that names its own failure modes more than one
+    that does not have any.
+  </aside>
+</section>
+
+<!-- =================================================================== 14 -->
+<section class="s pad-sm">
+  <p class="kicker">What's next</p>
+  <h2 style="font-size:44px">Cut for the three days — and where it goes.</h2>
+  <div class="grid-2" style="flex:1;min-height:0;align-items:start;margin-top:6px;gap:26px">
+    <div class="card next" style="height:100%">
+      <span class="tag">Cut on purpose, scoped and understood</span>
+      <ul class="compact" style="font-size:20px;margin-top:4px">
+        <li>A <strong>vector index over filings</strong>, so “who else mentions this supplier?” is answerable from
+          10-K and 10-Q text rather than structured fields alone.</li>
+        <li><strong>Multi-tenant auth.</strong> Today: one workspace, one set of encrypted keys.</li>
+        <li><strong>Live feeds behind the conflict and hazard tables</strong> — a committed snapshot with a stated
+          date stands in, deliberately.</li>
+        <li><strong>Full-text financial-statement analysis</strong>, beyond filing behaviour.</li>
+        <li><strong>Market data</strong> — wired, keyed off.</li>
+      </ul>
+    </div>
+    <div class="card" style="height:100%">
+      <span class="tag">Where it goes next</span>
+      <ul class="compact" style="font-size:20px;margin-top:4px">
+        <li><strong>Monitoring, not snapshots.</strong> Re-run the graph on a schedule and alert on the delta —
+          a new designation, a lapsed registration, an ownership change. Claims are already timestamped and
+          evidenced, so diffing them is the natural next step.</li>
+        <li><strong>Deeper than tier 2.</strong> Sub-award reporting runs out; customs and bill-of-lading data,
+          plus supplier-submitted BOMs, would carry the walk further down.</li>
+        <li><strong>Portfolio view.</strong> Run one risk pass across many programs and rank them — the scorer is
+          already graph-wide, so this is mostly a question of UI.</li>
+        <li><strong>What-if.</strong> “If this supplier fails, what stops?” The dependency dimension computes it;
+          it just needs to be exposed as a simulation.</li>
+        <li><strong>Into the acquisition workflow.</strong> MCP already exposes the tools, so a contracting
+          officer's own agent could call this pre-award. Air-gapped is the same stack with a local model.</li>
+        <li><strong>Entity resolution as a service</strong>, with human-in-the-loop merge review.</li>
+      </ul>
+    </div>
+  </div>
+  <aside class="notes">
+    The honest framing: nothing in the left column was hard to see coming, we just chose the graph
+    and the evidence model first. The right column is what the architecture was built to allow.
+  </aside>
+</section>
+
+<!-- =================================================================== 15 -->
+<section class="s title">
+  <p class="kicker">Illuminate</p>
+  <h1 style="font-size:66px">One graph, any consumer.</h1>
+  <div class="rule"></div>
+  <p class="lead wide" style="max-width:40ch">
+    Every answer is a subgraph. Every fact has an artifact behind it.<br>
+    Every score can be walked back to the edges it came from.
+  </p>
+  <div class="spacer"></div>
+  <div class="chips">
+    <span class="chip on"><code>make up</code></span>
+    <span class="chip on"><code>make seed</code></span>
+    <span class="chip">web · localhost:8080</span>
+    <span class="chip">API + docs · localhost:8000/docs</span>
+    <span class="chip">MCP · stdio or streamable HTTP</span>
+  </div>
+  <p class="meta" style="margin-top:20px">NDIA Global Defense Hackathon · Washington DC · 8–10 September 2026</p>
+  <aside class="notes">
+    Offer the live demo and the MCP hookup — plugging it into Claude Desktop in front of a judge
+    lands better than another slide.
+  </aside>
+</section>
+
+</div>
+</div>
+
+<script src="vendor/reveal.min.js"></script>
+<script src="vendor/plugin/notes/notes.min.js"></script>
+<script src="deck.js"></script>
+</body>
+</html>
