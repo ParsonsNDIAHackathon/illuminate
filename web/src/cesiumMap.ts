@@ -6,6 +6,7 @@ export interface GlobeMarker {
   color: string
   text?: string
   selected?: boolean
+  inspected?: boolean
   news?: boolean
 }
 export interface GlobeRoute {

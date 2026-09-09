@@ -180,9 +180,10 @@ watch(visiblePlaces, value => { if (!value.some(p => p.key === selectedKey.value
 const globeMarkers = computed<GlobeMarker[]>(() => [
   ...places.value.map(place => ({ id: `entity:${place.key}`, longitude: place.longitude, latitude: place.latitude,
     name: place.name, text: String(entityCount(place)), color: place.precise ? '#79dac7' : place.region ? '#99bfff' : '#f3c97c',
-    selected: selectedKey.value === place.key || traced(place) })),
+    selected: selectedKey.value === place.key || traced(place),
+    inspected: !news.selected && !!graph.selected && place.entries.some(entry => entry.node.id === graph.selectedId) })),
   ...(news.visible ? newsData.value.places.map(place => ({ id: `news:${place.code}`, longitude: place.longitude, latitude: place.latitude,
-    name: `${place.name} · news`, text: String(place.articles.length), color: '#ff927f', selected: news.location === place.code, news: true })) : []),
+    name: `${place.name} · news`, text: String(place.articles.length), color: '#ff927f', selected: news.location === place.code, inspected: !!news.selected && place.articles.some(article => article.url === news.selectedUrl), news: true })) : []),
   ...(lanes.enabled ? lanes.ports.map(port => ({ ...port, id: `lane-port:${port.id}`, color: '#65dfcf', selected: lanes.port === port.id })) : []),
   ...(shipping.visible ? shipping.ports.map(port => ({ ...port, id: `shipping-port:${port.id}`, color: '#c7a7ff', selected: shipping.port === port.id })) : []),
 ])

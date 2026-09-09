@@ -15,6 +15,8 @@ import {
 } from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { visibleMarkerIds } from '../mapVisibility'
+import activeNewsMarker from '../assets/news-marker-active.svg'
+import markerHighlight from '../assets/marker-highlight.svg'
 import newsMarker from '../assets/news-marker.svg'
 import regions from '../data/mapRegions.json'
 import type { GlobeMarker, GlobeRoute } from '../cesiumMap'
@@ -51,8 +53,9 @@ defineExpose({ focus, reset, zoomIn, zoomOut })
 function draw() {
   if (!viewer) return
   const entities = overlay.entities
-  entities.suspendEvents()
+  // Publish removals before reusing IDs so Cesium rebinds each visualizer.
   entities.removeAll()
+  entities.suspendEvents()
   for (const route of props.routes) {
     if (route.points.length < 2) continue
     const color = Color.fromCssColorString(route.selected ? '#ffffff' : route.color)
@@ -66,18 +69,22 @@ function draw() {
     entities.add({ id: marker.id, name: marker.name,
       position: Cartesian3.fromDegrees(marker.longitude, marker.latitude, 1500),
       billboard: marker.news ? {
-        image: newsMarker, width: 28, height: 28, scale: marker.selected ? 1.2 : 1,
+        image: marker.inspected ? activeNewsMarker : newsMarker,
+        width: marker.inspected ? 44 : 28, height: marker.inspected ? 44 : 28,
+        scale: !marker.inspected && marker.selected ? 1.2 : 1,
         pixelOffset: new Cartesian2(0, -26), eyeOffset: new Cartesian3(0, 0, -10000),
+      } : marker.inspected ? {
+        image: markerHighlight, width: 48, height: 48, eyeOffset: new Cartesian3(0, 0, -10000),
       } : undefined,
-      point: marker.news ? undefined : { pixelSize: marker.text ? 25 : 10, color: Color.fromCssColorString(marker.color),
+      point: marker.news ? undefined : { pixelSize: marker.inspected ? 30 : marker.text ? 25 : 10, color: Color.fromCssColorString(marker.color),
         outlineColor: marker.selected ? Color.WHITE : Color.fromCssColorString('#102b38'), outlineWidth: marker.selected ? 3 : 2,
       },
-      label: { show: !marker.news || !!marker.selected,
+      label: { show: !marker.news || !!marker.selected || !!marker.inspected,
         text: marker.news ? `${marker.text} ${marker.text === '1' ? 'article' : 'articles'}` : marker.text || marker.name,
         font: 'bold 12px sans-serif', eyeOffset: new Cartesian3(0, 0, -10000), fillColor: marker.text && !marker.news ? Color.fromCssColorString('#102b38') : Color.WHITE,
         style: marker.text && !marker.news ? LabelStyle.FILL : LabelStyle.FILL_AND_OUTLINE,
         outlineColor: Color.fromCssColorString('#102b38'), outlineWidth: 3,
-        pixelOffset: new Cartesian2(0, marker.news ? -53 : marker.text ? 0 : -19),
+        pixelOffset: new Cartesian2(0, marker.news ? (marker.inspected ? -61 : -53) : marker.text ? 0 : -19),
         showBackground: !!marker.news, backgroundColor: Color.fromCssColorString('#183440'),
         distanceDisplayCondition: new DistanceDisplayCondition(0, marker.text || marker.selected ? 1e9 : 8e6),
       },

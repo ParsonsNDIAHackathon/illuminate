@@ -15,7 +15,7 @@ export function visibleMarkerIds(markers: GlobeMarker[], camera: {
     if (clip.w <= 0 || clip.z < -clip.w || clip.z > clip.w) return false
     const x = (clip.x / clip.w + 1) * width / 2
     const y = (1 - clip.y / clip.w) * height / 2 - (marker.news ? 26 : 0)
-    const radius = marker.news ? 14 * (marker.selected ? 1.2 : 1) : marker.text ? 12.5 : 5
+    const radius = marker.inspected ? (marker.news ? 22 : 24) : marker.news ? 14 * (marker.selected ? 1.2 : 1) : marker.text ? 12.5 : 5
     return x + radius >= 0 && x - radius <= width && y + radius >= 0 && y - radius <= height
   }).map(marker => marker.id)
 }
