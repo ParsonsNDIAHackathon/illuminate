@@ -33,9 +33,9 @@ const headTitle = computed(() => graph.selected?.name || graph.selectedEdge?.typ
 function close() { graph.select(null); graph.selectEdge(null) }
 </script>
 <style scoped>
-/* Right of the canvas and clear of the zoom column, starting below the toolbar so the layer
-   chips keep their full width, and never tall enough to reach the notes line. */
-.selection-card { position: absolute; top: 52px; right: 52px; width: 340px; max-height: calc(100% - 116px); z-index: 6; display: flex; flex-direction: column; border-radius: 8px; }
+/* Hard against the right edge, which the canvas tool column used to hold, and never tall
+   enough to reach the notes line below it. */
+.selection-card { position: absolute; top: 8px; right: 12px; width: 340px; max-height: calc(100% - 72px); z-index: 6; display: flex; flex-direction: column; border-radius: 8px; }
 .selection-card.collapsed { max-height: none; }
 .head { display: flex; align-items: flex-start; gap: 6px; padding: 7px 4px 7px 10px; border-bottom: 1px solid rgba(128,128,128,.2); flex: 0 0 auto; }
 .selection-card.collapsed .head { border-bottom: none; }
