@@ -2,12 +2,6 @@
   <div class="canvas-wrap">
     <div ref="el" class="cy"></div>
     <div v-if="graph.loading" class="loading"><v-progress-circular indeterminate size="28" /></div>
-    <div class="canvas-tools">
-      <v-btn icon="mdi-fit-to-screen" variant="text" title="Fit" @click="fit" />
-      <v-btn icon="mdi-graph-outline" variant="text" title="Re-layout" @click="layout" />
-      <v-btn icon="mdi-format-color-fill" variant="text" title="Clear styles" @click="graph.clearStyleOps()" />
-      <v-btn icon="mdi-broom" variant="text" title="Clear canvas" @click="graph.clear()" />
-    </div>
   </div>
 </template>
 
@@ -325,5 +319,4 @@ defineExpose({ fit, layout })
 .canvas-wrap { position: relative; width: 100%; height: 100%; }
 .cy { position: absolute; inset: 0; }
 .loading { position: absolute; top: 12px; left: 12px; }
-.canvas-tools { position: absolute; right: 8px; top: 8px; display: flex; flex-direction: column; gap: 2px; opacity: .85; }
 </style>

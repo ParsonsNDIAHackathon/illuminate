@@ -3,7 +3,29 @@
     <div class="canvas">
       <GraphCanvas ref="canvas" @expand="expand" />
       <div class="toolbar">
-        <LayerToggles @change="reload" />
+        <!-- Both menus follow the pattern on illuminate-map: the controls fold away so the
+             canvas keeps its corners, and the properties card gets the right edge. -->
+        <v-menu :close-on-content-click="false" location="bottom start">
+          <template #activator="{ props }">
+            <v-btn v-bind="props" size="small" prepend-icon="mdi-layers-outline" append-icon="mdi-menu-down"
+                   title="Which kinds of node the canvas draws">Layers</v-btn>
+          </template>
+          <v-card class="pa-3 layers-menu"><LayerToggles @change="reload" /></v-card>
+        </v-menu>
+        <v-menu location="bottom start">
+          <template #activator="{ props }">
+            <v-btn v-bind="props" size="small" prepend-icon="mdi-tune-variant" append-icon="mdi-menu-down"
+                   title="Fit, re-lay out and clear the canvas">Canvas</v-btn>
+          </template>
+          <v-list density="compact" class="canvas-menu">
+            <v-list-item prepend-icon="mdi-fit-to-screen" title="Fit to screen" @click="canvas?.fit()" />
+            <v-list-item prepend-icon="mdi-graph-outline" title="Re-layout" @click="canvas?.layout()" />
+            <v-list-item prepend-icon="mdi-format-color-fill" title="Clear styles"
+                         subtitle="Drop the highlights the chat applied" @click="graph.clearStyleOps()" />
+            <v-list-item prepend-icon="mdi-broom" title="Clear canvas"
+                         subtitle="Take every node off the view" @click="graph.clear()" />
+          </v-list>
+        </v-menu>
         <v-select class="focus" :model-value="graph.focusId" :items="focusItems" item-title="name" item-value="id"
                   density="compact" variant="solo" flat hide-details prepend-inner-icon="mdi-target"
                   :title="graph.focusId ? 'Showing one program and its supply chain — pick Everything to see them all' : 'Showing every program'"
@@ -46,6 +68,7 @@ import CypherBlock from '../components/CypherBlock.vue'
 import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 const graph = useGraph(); const ws = useWorkspace()
+const canvas = ref<InstanceType<typeof GraphCanvas>>()
 const q = ref(''); const hits = ref<any[]>([]); const searching = ref(false); const open = ref(false)
 // The chat is the main way to work the graph, so it gets a panel wide enough to read a
 // paragraph in — and a handle, because how much canvas a question needs is the user's call.
@@ -115,10 +138,12 @@ watch(() => ws.depth, () => { if (graph.focusId) reload() })
 .side { min-height: 0; min-width: 0; }
 .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: .8; }
 .toolbar { position: absolute; top: 8px; left: 12px; z-index: 5; display: flex; align-items: center; gap: 8px; }
+.layers-menu { max-width: 340px; }
+.canvas-menu { min-width: 260px; }
 .focus { width: 230px; }
 .search { position: absolute; top: 52px; left: 12px; width: 360px; z-index: 5; }
 .hits { position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; max-height: 320px; overflow: auto; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
-.notes { position: absolute; right: 56px; bottom: 12px; max-width: 520px; font-size: 12px; text-align: right; }
+.notes { position: absolute; right: 12px; bottom: 12px; max-width: 520px; font-size: 12px; text-align: right; }
 .notes summary { cursor: pointer; opacity: .6; }
 .warn { color: #f59e0b; }
 </style>
