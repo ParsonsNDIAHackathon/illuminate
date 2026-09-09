@@ -1,7 +1,7 @@
 <template>
   <div class="explorer" :class="{ 'map-mode': viewMode === 'map' }">
     <div class="canvas">
-      <GraphMap v-if="viewMode === 'map'" :location-code="String(route.query.map_location || '')" />
+      <GraphMap v-if="viewMode === 'map'" :location-code="String(route.query.map_location || '')" @select-news="selectNews" />
       <GraphCanvas v-show="viewMode === 'graph'" :active="viewMode === 'graph'" ref="canvas" @expand="expand" />
       <div class="toolbar">
         <v-btn-toggle :model-value="viewMode" mandatory density="compact" color="primary" aria-label="Graph visualization" @update:model-value="changeView">
@@ -31,7 +31,8 @@
     </div>
     <div class="side">
       <div class="inspector-pane">
-        <Inspector v-if="graph.selected" @expand="expand" />
+        <NewsInspector v-if="news.selected" />
+        <Inspector v-else-if="graph.selected" @expand="expand" />
         <EdgeInspector v-else-if="graph.selectedEdge" />
         <div v-else class="hint">Select a node or an edge to inspect it. Double-click a node to expand.</div>
       </div>
@@ -42,6 +43,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import NewsInspector from '../components/NewsInspector.vue'
+import { useNews } from '../stores/news'
+import type { NewsArticle } from '../newsMap'
 import GraphMap from '../components/GraphMap.vue'
 import { api, qs } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
@@ -54,6 +58,15 @@ import CypherBlock from '../components/CypherBlock.vue'
 import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 const graph = useGraph(); const ws = useWorkspace()
+const news = useNews()
+function selectNews(article: NewsArticle) {
+  graph.select(null)
+  graph.selectEdge(null)
+  news.selectedUrl = article.url
+}
+watch([() => graph.selectedId, () => graph.selectedEdgeId], ([node, edge]) => {
+  if (node || edge) news.selectedUrl = null
+})
 const route = useRoute(); const router = useRouter()
 const viewMode = ref(route.query.view === 'map' ? 'map' : 'graph')
 const graphLayers = computed(() => viewMode.value === 'map' ? { ...ws.ws.layers, countries: true } : ws.ws.layers)
@@ -105,7 +118,7 @@ watch(() => ws.depth, () => { if (graph.focusId) reload() })
 <style scoped>
 .explorer { display: grid; grid-template-columns: minmax(0,1fr) 380px; height: calc(100vh - 48px); }
 .canvas { position: relative; min-width:0; min-height:0; }
-.side { display: grid; grid-template-rows: minmax(120px, 42%) 1fr; border-left: 1px solid rgba(128,128,128,.2); min-height: 0; }
+.side { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(120px, 42%) 1fr; border-left: 1px solid rgba(128,128,128,.2); min-height: 0; }
 .inspector-pane { border-bottom: 1px solid rgba(128,128,128,.2); overflow: auto; min-height: 0; }
 .chat-pane { min-height: 0; }
 .hint { padding: 12px; opacity: .6; font-size: 13px; }

@@ -4,14 +4,15 @@
       <div><span class="eyebrow">GEOGRAPHIC EXPOSURE</span><h2>{{ graph.focusLabel || 'Across the graph' }}</h2></div>
       <div class="counts"><strong>{{ data.mappedCount }}</strong> entities placed <span>·</span> <strong>{{ data.unmappedCount }}</strong> not placed</div>
     </div>
-    <form class="news-search" @submit.prevent="loadNews">
-      <label><input v-model="showNews" type="checkbox" /> News</label>
-      <input v-model="newsQuery" aria-label="News topic" placeholder="Search recent news…" minlength="2" maxlength="250" required />
-      <select v-model="newsTimespan" aria-label="News time window"><option value="24h">Past 24 hours</option><option value="3d">Past 3 days</option><option value="7d">Past 7 days</option></select>
-      <button type="submit" :disabled="newsLoading">{{ newsLoading ? 'Searching…' : 'Search GDELT' }}</button>
-      <span v-if="newsResult" role="status">{{ newsData.mapped }} mapped · {{ newsData.unmapped.length }} unplaced · {{ newsResult.articles.length }} articles (up to 250)</span>
+    <form class="news-search" @submit.prevent="news.search()">
+      <v-checkbox v-model="news.visible" label="News" density="compact" hide-details class="news-toggle" />
+      <v-text-field v-model="news.query" label="News topic" placeholder="Search recent news…" density="compact" variant="outlined" hide-details maxlength="250" class="news-topic" />
+      <v-select v-model="news.timespan" :items="timeWindows" label="News time window" density="compact" variant="outlined" hide-details class="news-window" />
+      <v-btn type="submit" size="small" color="primary" variant="tonal" prepend-icon="mdi-magnify" :loading="news.loading" :disabled="news.loading || news.query.trim().length < 2">Search GDELT</v-btn>
     </form>
-    <p v-if="newsError" class="news-error" role="alert">{{ newsError }}</p>
+    <v-alert v-if="news.error" type="warning" variant="tonal" density="compact" class="mb-2 news-error" role="alert">
+      {{ news.error }} <span v-if="news.result">Previous results are still shown below.</span>
+    </v-alert>
     <div class="map-stage">
       <svg ref="svg" :viewBox="viewBox" class="world" aria-label="World map. Scroll to zoom, drag to pan, or select a marker to review its entities." @wheel.prevent="wheelZoom" @pointerdown="startPan" @pointermove="movePan" @pointerup="drag = null" @pointercancel="drag = null">
         <rect x="0" y="0" width="1080" height="540" class="ocean" />
@@ -30,53 +31,63 @@
           <circle :r="(selectedKey === place.key ? 13 : 10) / (zoom * mapScale)" />
           <text :font-size="11 / (zoom * mapScale)" text-anchor="middle" dominant-baseline="central">{{ entityCount(place) }}</text>
         </g>
-        <g v-for="place in showNews ? newsData.places : []" :key="`news:${place.code}`"
+        <g v-for="place in news.visible ? newsData.places : []" :key="`news:${place.code}`"
            :transform="`translate(${(place.longitude + 180) * 3},${(90 - place.latitude) * 3})`"
-           class="marker news-marker" :class="{ active: newsLocation === place.code }" tabindex="0" role="button"
+           class="marker news-marker" :class="{ active: news.location === place.code }" tabindex="0" role="button"
            :aria-label="`${place.name}: ${place.articles.length} news articles; approximate country mention`"
-           @pointerdown.stop @click.stop="newsLocation = place.code" @keydown.enter.prevent="newsLocation = place.code" @keydown.space.prevent="newsLocation = place.code">
+           @pointerdown.stop @click.stop="news.location = place.code" @keydown.enter.prevent="news.location = place.code" @keydown.space.prevent="news.location = place.code">
           <title>{{ place.name }} · {{ place.articles.length }} news articles · Country mentioned in headline</title>
           <path :d="`M0,${-25 / (zoom * mapScale)} l${7 / (zoom * mapScale)},${7 / (zoom * mapScale)} l${-7 / (zoom * mapScale)},${7 / (zoom * mapScale)} l${-7 / (zoom * mapScale)},${-7 / (zoom * mapScale)} Z`" />
         </g>
       </svg>
-      <label class="detail-toggle"><input v-model="showRegions" type="checkbox" /> States &amp; provinces <small v-if="showRegions && zoom < 2">Zoom in to see boundaries</small></label>
-      <div class="zoom-tools" aria-label="Map zoom controls">
-        <button aria-label="Zoom in" :disabled="zoom >= 20" @click="zoom = Math.min(20, zoom + .5)">+</button>
-        <button aria-label="Zoom out" :disabled="zoom <= 1" @click="zoom = Math.max(1, zoom - .5)">−</button>
-        <button @click="zoom = 1; center = [540, 270]">Reset</button>
-      </div>
-      <p v-if="!places.length && !(showNews && newsData.places.length)" class="map-empty" role="status">{{ graph.loading ? 'Loading locations…' : graph.filter ? 'No mapped entities match your search.' : 'No geographic locations in this graph scope. Try a deeper traversal or another program.' }}</p>
+      <v-sheet class="detail-toggle" rounded>
+        <v-checkbox v-model="showRegions" label="States & provinces" density="compact" hide-details />
+        <div v-if="showRegions && zoom < 2" class="text-caption">Zoom in to see boundaries</div>
+      </v-sheet>
+      <v-btn-group class="zoom-tools" density="compact" aria-label="Map zoom controls">
+        <v-btn icon="mdi-plus" aria-label="Zoom in" size="small" :disabled="zoom >= 20" @click="zoom = Math.min(20, zoom + .5)" />
+        <v-btn icon="mdi-minus" aria-label="Zoom out" size="small" :disabled="zoom <= 1" @click="zoom = Math.max(1, zoom - .5)" />
+        <v-btn size="small" @click="zoom = 1; center = [540, 270]">Reset</v-btn>
+      </v-btn-group>
+      <p v-if="!places.length && !(news.visible && newsData.places.length)" class="map-empty" role="status">{{ graph.loading ? 'Loading locations…' : graph.filter ? 'No mapped entities match your search.' : 'No geographic locations in this graph scope. Try a deeper traversal or another program.' }}</p>
       <a class="attribution" href="https://www.naturalearthdata.com/about/terms-of-use/" target="_blank" rel="noopener">Natural Earth · illustrative boundaries</a>
     </div>
-    <div v-if="showNews" class="news-details">
+    <div v-if="news.visible" class="news-details">
       <div class="detail-heading">
-        <label>News location <select v-model="newsLocation" aria-label="News location"><option value="">All news</option><option value="unplaced">Unplaced ({{ newsData.unmapped.length }})</option><option v-for="place in newsData.places" :key="place.code" :value="place.code">{{ place.name }} ({{ place.articles.length }})</option></select></label>
-        <span>Coral diamonds: countries mentioned in headlines, approximate placement. <template v-if="newsResult">Results for “{{ newsResult.query }}”, past {{ newsResult.timespan }}.</template></span>
+        <v-select v-model="news.location" :items="newsLocations" label="News location" density="compact" variant="outlined" hide-details class="location-select" />
+        <span>Coral diamonds: approximate country mentions. <template v-if="news.result">“{{ news.result.query }}” · past {{ news.result.timespan }} · {{ newsData.mapped }} mapped, {{ newsData.unmapped.length }} unplaced.</template></span>
       </div>
-      <p v-if="newsLoading" role="status">Searching recent coverage…</p>
-      <p v-else-if="newsResult && !newsArticles.length" role="status">No articles found for this selection. Try another topic or a longer time window.</p>
-      <div class="entry-list">
-        <a v-for="article in newsArticles" :key="article.url" class="news-article" :href="article.url" target="_blank" rel="noopener noreferrer"><strong>{{ article.title || article.url }} ↗</strong><small>{{ article.domain }} · Seen {{ newsDate(article.seendate) || 'date unavailable' }}</small></a>
-      </div>
+      <v-progress-linear v-if="news.loading" indeterminate color="primary" aria-label="Searching recent coverage" />
+      <p v-if="news.result && !newsArticles.length" class="text-caption pa-2" role="status">No articles found for this selection. Try another topic or a longer time window.</p>
+      <v-list class="entry-list" density="compact" aria-label="News articles">
+        <v-list-item v-for="article in newsArticles" :key="article.url" class="news-article" :active="news.selectedUrl === article.url" color="primary"
+                     :title="article.title || article.url" :subtitle="`${article.domain} · Seen ${newsDate(article.seendate) || 'date unavailable'}`"
+                     @click="emit('select-news', article)">
+          <template #append><v-icon icon="mdi-chevron-right" size="small" /></template>
+        </v-list-item>
+      </v-list>
     </div>
     <div class="map-details">
       <div class="detail-heading">
-        <label>Location <select v-model="selectedKey" aria-label="Map location"><option value="">All locations ({{ places.length }})</option><option v-for="place in places" :key="place.key" :value="place.key">{{ place.name }} ({{ entityCount(place) }})</option></select></label>
+        <v-select v-model="selectedKey" :items="entityLocations" label="Map location" density="compact" variant="outlined" hide-details class="location-select" />
         <span>Gold: country · Blue: state/province · Teal: coordinates. Area markers are approximate.</span>
       </div>
-      <div class="entry-list">
-        <div v-for="{ entry, place } in entries" :key="`${place.key}:${entry.node.id}:${entry.edge?.id || ''}`" class="entry" :class="{ selected: graph.selectedId === entry.node.id }">
-          <button class="entity-button" @click="inspect(entry.node.id)"><strong>{{ entry.node.name }}</strong><small>{{ place.name }} · {{ entry.location?.props.code || (place.precise ? 'Supplied coordinates' : 'Country-level') }}<span v-if="entry.node.props.simulated || entry.edge?.props.simulated"> · Simulated</span></small></button>
-          <button v-if="entry.edge" class="relation-button" @click="graph.selectEdge(entry.edge.id); emit('select')">{{ entry.edge.type.replaceAll('_', ' ').toLowerCase() }} ↗</button>
-        </div>
-      </div>
+      <v-list class="entry-list" density="compact" aria-label="Mapped entities">
+        <v-list-item v-for="{ entry, place } in entries" :key="`${place.key}:${entry.node.id}:${entry.edge?.id || ''}`" :active="graph.selectedId === entry.node.id"
+                     :title="entry.node.name" :subtitle="`${place.name} · ${entry.location?.props.code || (place.precise ? 'Supplied coordinates' : 'Country-level')}${entry.node.props.simulated || entry.edge?.props.simulated ? ' · Simulated' : ''}`"
+                     @click="inspect(entry.node.id)">
+          <template #append>
+            <v-btn v-if="entry.edge" size="x-small" variant="text" @click.stop="graph.selectEdge(entry.edge.id); emit('select')">{{ entry.edge.type.replaceAll('_', ' ').toLowerCase() }} ↗</v-btn>
+          </template>
+        </v-list-item>
+      </v-list>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
-import { api, qs } from '../api/client'
+import { useNews } from '../stores/news'
 import { mapNews, newsDate, type NewsArticle } from '../newsMap'
 import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
@@ -87,38 +98,16 @@ import regions from '../data/mapRegions.json'
 const graph = useGraph()
 const workspace = useWorkspace()
 const props = defineProps<{ locationCode?: string }>()
-const emit = defineEmits<{ select: [] }>()
+const emit = defineEmits<{ select: []; 'select-news': [article: NewsArticle] }>()
 const selectedKey = ref('')
-const showNews = ref(true)
-const newsQuery = ref('(conflict OR earthquake OR flood OR protest)')
-const newsTimespan = ref('24h')
-const newsLoading = ref(false)
-const newsError = ref('')
-const newsLocation = ref('')
-const newsResult = ref<{ articles: NewsArticle[]; query: string; timespan: string }>()
-const newsData = computed(() => mapNews(newsResult.value?.articles || [], world))
-const newsArticles = computed(() => newsLocation.value === 'unplaced' ? newsData.value.unmapped
-  : newsLocation.value ? newsData.value.places.find(place => place.code === newsLocation.value)?.articles || [] : newsResult.value?.articles || [])
-let newsRequest = 0
-async function loadNews() {
-  if (newsQuery.value.trim().length < 2 || newsLoading.value) return
-  const request = ++newsRequest
-  newsLoading.value = true
-  newsError.value = ''
-  newsResult.value = undefined
-  newsLocation.value = ''
-  showNews.value = true
-  try {
-    const result = await api.get<{ articles: NewsArticle[]; query: string; timespan: string }>(`/api/news?${qs({ query: newsQuery.value.trim(), timespan: newsTimespan.value })}`)
-    if (request === newsRequest) newsResult.value = result
-  } catch (error) {
-    if (request === newsRequest) newsError.value = error instanceof Error ? error.message.split(': ').slice(1).join(': ') || error.message : 'Unable to load GDELT news.'
-  } finally {
-    if (request === newsRequest) newsLoading.value = false
-  }
-}
-onMounted(loadNews)
-onBeforeUnmount(() => { newsRequest++ })
+const news = useNews()
+const timeWindows = [{ title: 'Past 24 hours', value: '24h' }, { title: 'Past 3 days', value: '3d' }, { title: 'Past 7 days', value: '7d' }]
+const newsData = computed(() => mapNews(news.result?.articles || [], world))
+const newsArticles = computed(() => news.location === 'unplaced' ? newsData.value.unmapped
+  : news.location ? newsData.value.places.find(place => place.code === news.location)?.articles || [] : news.result?.articles || [])
+const newsLocations = computed(() => [{ title: 'All news', value: '' }, { title: `Unplaced (${newsData.value.unmapped.length})`, value: 'unplaced' },
+  ...newsData.value.places.map(place => ({ title: `${place.name} (${place.articles.length})`, value: place.code }))])
+onMounted(() => news.ensureLoaded())
 const zoom = ref(1)
 const showRegions = ref(true)
 const center = ref<[number, number]>([540, 270])
@@ -139,6 +128,7 @@ const data = computed(() => {
   return buildMapPlaces(graph.nodeList.filter(node => !hidden.has(node.id)), graph.edgeList, world, regions)
 })
 const places = computed(() => data.value.places.map(place => ({ ...place, entries: place.entries.filter(entry => matchesMapEntry(entry, graph.filter)) })).filter(place => place.entries.length))
+const entityLocations = computed(() => [{ title: `All locations (${places.value.length})`, value: '' }, ...places.value.map(place => ({ title: `${place.name} (${entityCount(place)})`, value: place.key }))])
 const occupied = computed(() => new Set(places.value.filter(p => p.key.startsWith('country:')).map(p => p.key.slice(8))))
 const occupiedRegions = computed(() => new Set(places.value.filter(p => p.region).map(p => p.key.slice(7))))
 const visibleRegions = computed(() => regions.filter(region => {
@@ -210,19 +200,15 @@ function movePan(event: PointerEvent) {
 </script>
 
 <style scoped>
-.news-search { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:8px; font-size:12px; }
-.news-search > input { flex:1; min-width:180px; }
-.news-search > input,.news-search select,.news-search button { border:1px solid #8886; border-radius:4px; padding:6px 8px; color:inherit; }
-.news-search button { background:rgba(var(--v-theme-primary),.15); }
-.news-search button:disabled { opacity:.6; }
-.news-search span { font-size:11px; }
-.news-error { color:rgb(var(--v-theme-error)); font-size:12px; margin-bottom:8px; }
+.news-search { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:8px; }
+.news-toggle { flex:0 0 auto; }
+.news-topic { flex:1 1 180px; }
+.news-window { flex:0 1 170px; min-width:150px; }
+.news-error { flex-shrink:0; }
 .news-marker path { fill:#ff927f; stroke:#102b38; stroke-width:1.5; vector-effect:non-scaling-stroke; }
 .news-marker.active path,.news-marker:focus path { stroke:white; stroke-width:3; }
 .news-details { flex:0 1 170px; min-height:90px; display:flex; flex-direction:column; padding-top:10px; font-size:12px; }
-.news-article { display:block; padding:6px; border-top:1px solid #8883; text-decoration:none; color:inherit; }
-.news-article:hover { background:rgba(var(--v-theme-primary),.1); }
-.news-article small { display:block; opacity:.7; }
+.news-article :deep(.v-list-item-title) { white-space:normal; font-size:12px; }
 .geo-view { height:100%; padding:112px 16px 12px; display:flex; flex-direction:column; background:rgb(var(--v-theme-background)); }
 .map-summary { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 4px 12px; flex-wrap:wrap; }
 .eyebrow { font-size:10px; letter-spacing:.14em; color:rgb(var(--v-theme-primary)); font-weight:800; }
@@ -234,13 +220,14 @@ h2 { font-size:20px; font-weight:600; }.counts { font-size:12px; opacity:.85; }.
 .region { fill:transparent; stroke:#94afbb; stroke-width:.65; vector-effect:non-scaling-stroke; }
 .region.occupied { fill:#5f8eaa44; }
 .region-label { fill:#d8e5ed; text-anchor:middle; pointer-events:none; paint-order:stroke; stroke:#102b38; stroke-width:2px; vector-effect:non-scaling-stroke; }
-.detail-toggle { position:absolute; left:8px; top:8px; padding:5px 7px; background:#102b38e8; color:#edf5f7; font-size:11px; border-radius:4px; }
-.detail-toggle input { vertical-align:middle; margin-right:4px; accent-color:#99bfff; }
-.detail-toggle small { display:block; padding-left:17px; color:#b5ccd6; }
-.zoom-tools { position:absolute; right:10px; top:10px; display:flex; gap:2px; }.zoom-tools button { padding:5px 10px; background:#f5f6ef; color:#183943; border-radius:3px; font-weight:700; }.zoom-tools button:disabled { opacity:.45; }
+.detail-toggle { position:absolute; left:8px; top:8px; padding:0 8px; max-width:230px; }
+.detail-toggle .text-caption { padding:0 8px 6px; }
+.zoom-tools { position:absolute; right:10px; top:10px; }
 .attribution { position:absolute; bottom:4px; right:8px; font-size:9px; color:#d6e4e8; }.map-empty { position:absolute; left:15%; right:15%; top:40%; padding:15px; background:#102b38e8; color:#fff; text-align:center; font-size:13px; }
-.map-details { flex:0 1 210px; min-height:100px; display:flex; flex-direction:column; padding-top:12px; }.detail-heading { display:flex; align-items:center; gap:16px; padding-bottom:8px; }.detail-heading label { font-size:12px; font-weight:700; white-space:nowrap; }.detail-heading select { margin-left:6px; padding:5px; border:1px solid #8886; border-radius:4px; color:inherit; max-width:220px; }.detail-heading option { color:#172f35; background:#fff; }.detail-heading span { font-size:10px; opacity:.7; }
-.entry-list { overflow:auto; }.entry { display:flex; justify-content:space-between; align-items:center; border-top:1px solid #8883; gap:10px; }.entry.selected { background:rgba(var(--v-theme-primary),.12); }.entity-button { padding:8px 6px; text-align:left; flex:1; min-width:0; }.entity-button strong { display:block; font-size:12px; }.entity-button small { display:block; font-size:10px; opacity:.7; }.relation-button { font-size:10px; color:rgb(var(--v-theme-primary)); text-align:right; padding:8px; }
-button:focus-visible,select:focus-visible { outline:2px solid rgb(var(--v-theme-primary)); outline-offset:2px; }
+.map-details { flex:0 1 180px; min-height:100px; display:flex; flex-direction:column; padding-top:12px; }
+.detail-heading { display:flex; align-items:center; gap:12px; padding-bottom:8px; }
+.location-select { flex:0 0 230px; max-width:100%; }
+.detail-heading span { font-size:10px; opacity:.7; }
+.entry-list { overflow:auto; min-height:0; padding:0; }
 @media(max-width:900px) { .geo-view { padding-top:212px; min-height:710px; }.detail-heading { flex-wrap:wrap; gap:4px; }.map-summary { padding-bottom:4px; } h2 { font-size:16px; } .map-details { flex-basis:150px; } }
 </style>

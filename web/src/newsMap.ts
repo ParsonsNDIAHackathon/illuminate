@@ -22,3 +22,17 @@ export function mapNews(articles: NewsArticle[], countries: Country[]) {
 export function newsDate(value: string) {
   return /^\d{8}T\d{6}Z$/.test(value) ? `${value.slice(0,4)}-${value.slice(4,6)}-${value.slice(6,8)} ${value.slice(9,11)}:${value.slice(11,13)} UTC` : value
 }
+
+/** Preview uses the artifact viewer without asserting a stored graph artifact. */
+export function newsPreview(article: NewsArticle, locations: string[]) {
+  return {
+    artifact: { title: article.title, url: article.url, kind: 'news', source: 'GDELT' },
+    summary: { sections: [{ title: 'News coverage', fields: [
+      { label: 'Publisher', value: article.domain || 'Unknown' },
+      { label: 'Seen by GDELT', value: newsDate(article.seendate) || 'Unknown' },
+      { label: 'Language', value: article.language || 'Unknown' },
+      { label: 'Headline locations', value: locations.join(', ') || 'Unplaced' },
+    ], note: 'Locations are approximate country mentions in the headline. This search result has not been saved to the graph.' }] },
+    raw: [{ match: 'GDELT search result', url: article.url, body: article }],
+  }
+}

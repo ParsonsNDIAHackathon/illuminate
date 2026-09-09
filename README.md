@@ -94,3 +94,10 @@ The API retries a rate-limited request once after six seconds; persistent outage
 limits appear as retryable errors. After code changes, rebuild the running containers with
 `docker compose up -d --build --no-deps api web`. See the
 [GDELT DOC API documentation](https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/).
+
+Map controls use the same Vuetify components as the Explorer. News queries, results,
+location filters, and selection persist while navigating between views during a session.
+Selecting a headline opens the Explorer inspector; **View article details** reuses the
+artifact viewer for metadata and raw GDELT data, and **Open source** uses the shared
+source viewer. News search results are previews and are not automatically saved as
+graph artifacts. Failed searches retain the previous labelled results.
