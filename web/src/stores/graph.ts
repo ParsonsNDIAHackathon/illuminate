@@ -1,13 +1,28 @@
 import { defineStore } from 'pinia'
-import { api, qs } from '../api/client'
+import { api, qs } from '../api/client.ts'
 import type { StyleOp, LegendItem } from '../styles/styleOps'
-import { deriveLegend } from '../styles/styleOps'
+import { deriveLegend } from '../styles/styleOps.ts'
 
 export interface GNode { id: string; label: string; labels?: string[]; layer?: string | null; name: string; props: Record<string, any> }
 export interface GEdge { id: string; source: string; target: string; type: string; props: Record<string, any> }
 
 /** How long an arriving node stays marked as new on the canvas. */
 const FRESH_MS = 6000
+/** Style ops accumulate across chat turns and are replayed in full on every canvas sync,
+ *  so the list is bounded: past this many the oldest are dropped, which costs the earliest
+ *  encoding of a very long session but keeps the replay off the frame budget. A full clear
+ *  prunes everything before it, so the cap is only reached by styling that never resets. */
+const MAX_STYLE_OPS = 200
+
+/** Everything before the last full clear is dead weight — it is replayed only to be
+ *  wiped — so drop it, then hold the list to the cap. */
+function pruneStyleOps(ops: StyleOp[]): StyleOp[] {
+  let last = -1
+  ops.forEach((o, i) => { if (o.op === 'clear' && (!o.scope || o.scope === 'all')) last = i })
+  const kept = last > 0 ? ops.slice(last) : ops
+  return kept.length > MAX_STYLE_OPS ? kept.slice(kept.length - MAX_STYLE_OPS) : kept
+}
+
 /** The layer toggles the graph endpoints take. Entities are always fetched. */
 export const LAYER_KEYS = ['people', 'countries', 'categories', 'artifacts', 'sources', 'claims'] as const
 function layerParams(layers: Record<string, boolean>) {
@@ -23,6 +38,10 @@ export const useGraph = defineStore('graph', {
     selectedId: null as string | null,
     selectedEdgeId: null as string | null,
     styleOps: [] as StyleOp[],
+    // Where the in-flight chat turn's ops begin. Its ops arrive twice — one tool_result at
+    // a time, then the whole turn again with the answer — so the answer rewrites from here
+    // rather than appending a second copy.
+    styleTurnBase: 0,
     legend: [] as LegendItem[],
     lastCypher: null as { statement: string; params?: any } | null,
     loading: false,
@@ -69,11 +88,24 @@ export const useGraph = defineStore('graph', {
      *  and this is what lights them up. Passing nothing clears the trace. */
     trace(ids: string[] | null) { this.highlightIds = ids || []; this.styleVersion++ },
     applyStyleOps(ops: StyleOp[], append = false) {
-      this.styleOps = append ? [...this.styleOps, ...ops] : ops
+      this.styleOps = pruneStyleOps(append ? [...this.styleOps, ...ops] : ops)
       this.legend = deriveLegend(this.styleOps)
       this.styleVersion++
     },
-    clearStyleOps() { this.styleOps = [{ op: 'clear', scope: 'all' }]; this.legend = []; this.styleVersion++ },
+    /** Chat styling is cumulative. A turn adds an encoding to the ones already on the
+     *  canvas instead of replacing them, so "mute everything, then highlight the paths
+     *  into Germany" is still muted and still highlighted when the next sentence asks for
+     *  people at one supplier in pink. Only an explicit clear resets it — from the user
+     *  asking, or from the legend's clear control. */
+    beginStyleTurn() { this.styleTurnBase = this.styleOps.length },
+    appendStyleOps(ops: StyleOp[]) { this.applyStyleOps(ops, true) },
+    /** The turn's ops, whole, replacing whatever its tool results had already contributed. */
+    setTurnStyleOps(ops: StyleOp[]) {
+      const base = Math.min(this.styleTurnBase, this.styleOps.length)
+      this.applyStyleOps([...this.styleOps.slice(0, base), ...ops])
+      this.styleTurnBase = this.styleOps.length
+    },
+    clearStyleOps() { this.styleOps = [{ op: 'clear', scope: 'all' }]; this.styleTurnBase = 1; this.legend = []; this.styleVersion++ },
 
     /** A change committed on the server — a new entity, an enrichment fact, an approved claim.
      *  Merge it and flag what is genuinely new so the canvas can place and reveal it. */

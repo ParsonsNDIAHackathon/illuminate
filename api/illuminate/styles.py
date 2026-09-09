@@ -97,5 +97,13 @@ def style_contract_prompt() -> str:
         "op ∈ {clear, set, dim, highlight, hide}. 'set'/'highlight' take ids (element ids returned by a query) and a style "
         "{fill, stroke, badge, size, shape, dashed}. fill/stroke are palette NAMES only: "
         + ", ".join(SWATCHES)
-        + ". Never emit hex or CSS. Give each 'set' a short label — the legend is derived from your ops."
+        + ". Never emit hex or CSS. Give each 'set' a short label — the legend is derived from your ops.\n"
+        "STYLING IS CUMULATIVE and persists across turns. Your ops are added to the encodings already on the "
+        "canvas; they do not replace them. So send only what this turn adds — never restate an encoding from an "
+        "earlier turn, and never open with 'clear' to make room. Emit 'clear' only when the user actually asks to "
+        "reset or start over. If the user muted the graph two turns ago and now asks to colour something, send just "
+        "the colour: the mute is still there, and painting an element lifts the mute off that element.\n"
+        "'dim' and 'hide' may give a scope {all, nodes, edges} with no ids, which addresses everything in that "
+        "scope — that is how 'mute everything' or 'dim the graph' is expressed, and it does not need a query first. "
+        "'set' and 'highlight' always need ids."
     )

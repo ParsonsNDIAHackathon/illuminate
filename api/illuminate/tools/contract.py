@@ -107,7 +107,10 @@ TOOLS: list[dict] = [
     },
     {
         "name": "set_styles",
-        "description": "Change how elements are drawn. Ordered ops; fill/stroke are palette names only (" + ", ".join(SWATCHES) + "). The legend is derived from the ops' labels.",
+        "description": "Change how elements are drawn. Ordered ops; fill/stroke are palette names only ("
+                       + ", ".join(SWATCHES)
+                       + "). The legend is derived from the ops' labels. Styling accumulates across turns: send only what this "
+                         "turn adds, never an earlier turn's ops, and only emit 'clear' when the user asks to reset.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -118,7 +121,7 @@ TOOLS: list[dict] = [
                         "properties": {
                             "op": {"type": "string", "enum": ["clear", "set", "dim", "highlight", "hide"]},
                             "ids": {"type": "array", "items": {"type": "string"}},
-                            "scope": {"type": "string", "enum": ["all", "nodes", "edges"]},
+                            "scope": {"type": "string", "enum": ["all", "nodes", "edges"], "description": "for clear, and for dim/hide with no ids: the whole canvas, or all nodes/edges"},
                             "style": {
                                 "type": "object",
                                 "properties": {
