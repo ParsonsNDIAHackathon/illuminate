@@ -1,13 +1,13 @@
 <template>
-  <v-container fluid>
-    <div class="d-flex align-center ga-2 mb-2">
-      <h2 class="text-h6">Entities</h2>
+  <v-container fluid :class="embedded ? 'pa-0' : undefined">
+    <v-toolbar color="transparent" density="compact" class="mb-2">
+      <v-toolbar-title v-if="!embedded" class="text-h6">Entities</v-toolbar-title>
       <v-text-field v-model="q" placeholder="filter by name" hide-details style="max-width: 280px" prepend-inner-icon="mdi-magnify" clearable />
       <v-select v-model="kind" :items="['', 'organization', 'program', 'agency']" label="kind" hide-details style="max-width: 160px" />
       <v-checkbox v-model="flagged" label="flagged only" hide-details density="compact" />
       <v-select v-model="band" :items="bandItems" label="risk band" hide-details style="max-width: 150px" />
-      <v-spacer /><span class="text-caption">{{ total }} entities</span>
-    </div>
+      <v-spacer /><v-chip size="small" variant="text">{{ total }} entities</v-chip>
+    </v-toolbar>
     <RiskUnscoredHint :items="items" @scored="load" />
     <v-data-table class="entities-table" :items="items" :headers="headers" density="compact" :items-per-page="50" :loading="loading" hover @click:row="(_: any, r: any) => router.push(`/entities/${r.item.id}`)">
       <template #item.risk_score="{ item }">
@@ -31,6 +31,7 @@ import { api, qs } from '../api/client'
 import RiskUnscoredHint from '../components/RiskUnscoredHint.vue'
 import { bandChip, bandLabel, confidenceNote, isThin, RISK_BANDS } from '../styles/risk'
 import { useOpenOnCanvas } from '../composables/openOnCanvas'
+defineProps<{ embedded?: boolean }>()
 const router = useRouter(); const { openOnCanvas } = useOpenOnCanvas()
 const q = ref(''); const kind = ref(''); const flagged = ref(false); const band = ref('')
 const items = ref<any[]>([]); const total = ref(0); const loading = ref(false)

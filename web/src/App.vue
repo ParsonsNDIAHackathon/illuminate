@@ -25,9 +25,13 @@
     </v-app-bar>
     <v-navigation-drawer rail permanent border>
       <v-list density="compact" nav>
-        <v-list-item v-for="n in nav" :key="n.to" :to="n.to" :prepend-icon="n.icon" :title="n.title" :value="n.to">
-          <template #append v-if="n.badge"><v-badge :content="n.badge" color="warning" inline /></template>
-        </v-list-item>
+        <v-tooltip v-for="n in nav" :key="n.to" :text="n.title" location="right">
+          <template #activator="{ props }">
+            <v-list-item v-bind="props" :to="n.to" :prepend-icon="n.icon" :title="n.title" :value="n.to">
+              <template #append v-if="n.badge"><v-badge :content="n.badge" color="warning" inline /></template>
+            </v-list-item>
+          </template>
+        </v-tooltip>
       </v-list>
       <!-- The deck is a separate static page, not a route: leave the app where it is and open it
            beside itself, so a demo can cut back to a live canvas without reloading anything. -->
@@ -64,13 +68,8 @@ const ws = useWorkspace(); const graph = useGraph(); const chat = useChat(); con
 const staged = ref(0); const snack = ref(false); const snackText = ref(''); const help = ref(false)
 const nav = computed(() => [
   { to: '/', icon: 'mdi-graph', title: 'Graph' },
-  { to: '/entities', icon: 'mdi-domain', title: 'Entities' },
-  { to: '/people', icon: 'mdi-account-tie', title: 'People' },
-  { to: '/risk', icon: 'mdi-shield-alert-outline', title: 'Risk' },
   { to: '/reports', icon: 'mdi-file-chart-outline', title: 'Reports' },
-  { to: '/artifacts', icon: 'mdi-file-document-multiple', title: 'Artifacts' },
-  { to: '/claims', icon: 'mdi-check-decagram', title: 'Claims', badge: staged.value || undefined },
-  { to: '/connectors', icon: 'mdi-power-plug', title: 'Connectors' },
+  { to: '/data', icon: 'mdi-database-outline', title: 'Data', badge: staged.value || undefined },
   { to: '/settings', icon: 'mdi-cog', title: 'Settings' },
 ])
 async function refreshStaged() { try { staged.value = (await api.get('/api/claims?status=staged&limit=500')).length } catch {} }

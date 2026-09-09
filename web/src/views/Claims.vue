@@ -1,10 +1,10 @@
 <template>
-  <v-container fluid>
-    <div class="d-flex align-center ga-2 mb-2">
-      <h2 class="text-h6">Claims</h2>
+  <v-container fluid :class="embedded ? 'pa-0' : undefined">
+    <v-toolbar color="transparent" density="compact" class="mb-2">
+      <v-toolbar-title v-if="!embedded" class="text-h6">Claims</v-toolbar-title>
       <v-btn-toggle v-model="status" mandatory density="compact" variant="outlined"><v-btn value="staged">Staged</v-btn><v-btn value="committed">Committed</v-btn><v-btn value="rejected">Rejected</v-btn></v-btn-toggle>
-      <v-spacer /><span class="text-caption">{{ items.length }} · authoritative connectors auto-commit; open-web facts wait here for a human or a second source</span>
-    </div>
+      <v-spacer /><v-chip size="small" variant="text">{{ items.length }} · authoritative connectors auto-commit; open-web facts wait here for a human or a second source</v-chip>
+    </v-toolbar>
     <v-data-table :items="items" :headers="headers" density="compact" :items-per-page="50" :loading="loading">
       <template #item.assertion="{ item }">
         <span>{{ item.subject }}</span> <b class="mono">{{ item.claim.predicate }}</b> <span>{{ item.object || item.claim.object_value }}</span>
@@ -28,6 +28,7 @@ import { onMounted, ref, watch } from 'vue'
 import { api } from '../api/client'
 import ArtifactViewer from '../components/ArtifactViewer.vue'
 import SourceLink from '../components/SourceLink.vue'
+defineProps<{ embedded?: boolean }>()
 const status = ref('staged'); const items = ref<any[]>([]); const loading = ref(false); const rawId = ref<string | null>(null)
 const headers = [{ title: 'Assertion', key: 'assertion' }, { title: 'Source', key: 'source', width: 200 }, { title: 'Evidence', key: 'artifacts', width: 120 }, { title: 'When', key: 'claim.retrieved_at', width: 120 }, { title: '', key: 'actions', width: 160 }]
 async function load() { loading.value = true; try { items.value = await api.get(`/api/claims?status=${status.value}&limit=500`) } finally { loading.value = false } }
