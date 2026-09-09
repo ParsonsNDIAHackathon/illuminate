@@ -1,0 +1,207 @@
+/* Illuminate deck theme. Palette mirrors web/src/styles/palette.ts and risk.ts,
+   so a risk colour on a slide means what it means in the app. */
+
+:root {
+  --bg:      #0b0d10;
+  --panel:   #14181e;
+  --panel-2: #1b212a;
+  --ink:     #e8edf3;
+  --muted:   #93a0b0;
+  --line:    rgba(255,255,255,.10);
+  --line-2:  rgba(255,255,255,.18);
+
+  --teal:    #2dd4bf;
+  --purple:  #a78bfa;
+  --yellow:  #facc15;
+  --orange:  #fb923c;
+  --red:     #f87171;
+  --green:   #4ade80;
+  --blue:    #60a5fa;
+  --neutral: #9ca3af;
+
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+html, body { background: var(--bg); }
+.reveal { font-family: var(--sans); color: var(--ink); font-size: 26px; font-weight: 400; }
+.reveal ::selection { background: var(--teal); color: #06231f; }
+
+/* ---- slide frame ------------------------------------------------------- */
+/* center:false in the config; every slide manages its own vertical rhythm.
+   The flex column lives on an inner .wrap, not on the <section>: Reveal sets
+   display:block *inline* on the slide it is showing, which beats any stylesheet
+   rule, so a flex <section> silently falls back to block flow and tall media
+   overflows the frame. deck.js injects the wrap. */
+.reveal .slides { text-align: left; }
+.reveal .slides section.s {
+  height: 900px;
+  box-sizing: border-box;
+  padding: 64px 88px 72px;
+}
+.reveal .slides section.s > .wrap {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 22px;
+}
+.reveal .slides section.s.tight > .wrap { gap: 14px; }
+.reveal .slides section.s.pad-sm { padding: 44px 60px 60px; }
+
+/* ---- type -------------------------------------------------------------- */
+.reveal h1, .reveal h2, .reveal h3, .reveal h4 {
+  font-family: var(--sans); color: var(--ink); text-transform: none;
+  letter-spacing: -.02em; line-height: 1.1; margin: 0; text-shadow: none; font-weight: 600;
+}
+.reveal h1 { font-size: 84px; letter-spacing: -.035em; }
+.reveal h2 { font-size: 54px; }
+.reveal h3 { font-size: 34px; }
+.reveal p  { margin: 0; line-height: 1.5; }
+
+.kicker {
+  font-size: 19px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--teal); margin: 0 0 -6px;
+}
+.kicker.dim { color: var(--muted); }
+.lead { font-size: 31px; color: var(--muted); line-height: 1.45; max-width: 26ch; }
+.lead.wide { max-width: none; }
+.reveal strong { color: var(--ink); font-weight: 600; }
+.reveal em { color: var(--teal); font-style: normal; font-weight: 500; }
+.small { font-size: 21px; color: var(--muted); line-height: 1.5; }
+.reveal code { font-family: var(--mono); font-size: .86em; color: var(--teal);
+  background: rgba(45,212,191,.09); padding: .12em .38em; border-radius: 5px; }
+
+/* ---- lists ------------------------------------------------------------- */
+.reveal ul { list-style: none; margin: 0; padding: 0; }
+.reveal ul li { position: relative; padding-left: 34px; margin: 0 0 20px; line-height: 1.45; }
+.reveal ul li::before {
+  content: ""; position: absolute; left: 6px; top: .58em;
+  width: 9px; height: 9px; border-radius: 2px; background: var(--teal); transform: rotate(45deg);
+}
+.reveal ul.plain li { padding-left: 0; }
+.reveal ul.plain li::before { display: none; }
+.reveal ul li .sub { display: block; color: var(--muted); font-size: .8em; margin-top: 4px; }
+.reveal ul.compact li { margin-bottom: 13px; }
+
+/* ---- layout helpers ---------------------------------------------------- */
+.row { display: flex; gap: 28px; align-items: stretch; }
+.row.top { align-items: flex-start; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 22px; }
+.split { display: grid; grid-template-columns: 1fr 1.15fr; gap: 44px; align-items: center; flex: 1; min-height: 0; }
+.split.media-left { grid-template-columns: 1.15fr 1fr; }
+.grow { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.spacer { flex: 1; }
+
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 24px 26px; display: flex; flex-direction: column; gap: 10px;
+  /* border-box or a card told to fill its row overflows it by exactly its padding */
+  box-sizing: border-box;
+}
+.card h3 { font-size: 26px; }
+.card p { font-size: 21px; color: var(--muted); }
+.card .tag { font-size: 16px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--teal); }
+.card.uc11 .tag { color: var(--purple); }
+.card.next .tag { color: var(--yellow); }
+
+/* ---- stats ------------------------------------------------------------- */
+.stats { display: flex; gap: 46px; flex-wrap: wrap; }
+.stat .n { font-size: 46px; font-weight: 600; letter-spacing: -.03em; line-height: 1; }
+.stat .l { font-size: 17px; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; margin-top: 7px; }
+.stat.sim .n { color: var(--yellow); }
+
+/* ---- media slots ------------------------------------------------------- */
+figure.shot { margin: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+figure.shot .frame {
+  flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+  border-radius: 12px; overflow: hidden;
+}
+figure.shot img, figure.shot video {
+  max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain;
+  border-radius: 12px; border: 1px solid var(--line-2);
+  box-shadow: 0 24px 70px rgba(0,0,0,.6);
+  background: var(--panel);
+}
+figure.shot figcaption { font-size: 19px; color: var(--muted); line-height: 1.4; flex: none; }
+figure.shot figcaption b { color: var(--ink); font-weight: 600; }
+
+/* the empty state: says exactly which file to drop in */
+.ph {
+  width: 100%; height: 100%; min-height: 240px; box-sizing: border-box;
+  border: 2px dashed var(--line-2); border-radius: 12px;
+  background:
+    repeating-linear-gradient(45deg, rgba(255,255,255,.016) 0 12px, transparent 12px 24px),
+    var(--panel);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; padding: 34px; text-align: center;
+}
+.ph .ph-icon { font-size: 40px; color: var(--line-2); line-height: 1; }
+.ph .ph-kind { font-size: 15px; letter-spacing: .18em; text-transform: uppercase; color: var(--teal); font-weight: 600; }
+.ph .ph-title { font-size: 25px; color: var(--ink); max-width: 30ch; line-height: 1.35; }
+.ph .ph-slot { font-family: var(--mono); font-size: 17px; color: var(--muted); }
+.ph .ph-slot b { color: var(--ink); font-weight: 600; }
+
+/* ---- risk vocabulary --------------------------------------------------- */
+.band { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.dot { width: 13px; height: 13px; border-radius: 50%; display: inline-block; flex: none; }
+.dot.severe { background: var(--red); }
+.dot.high { background: var(--orange); }
+.dot.elevated { background: var(--yellow); }
+.dot.low { background: var(--neutral); }
+.dot.unscored { background: transparent; border: 2px dashed var(--line-2); }
+
+table.dims { width: 100%; border-collapse: collapse; font-size: 22px; }
+table.dims th {
+  text-align: left; font-size: 15px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600; padding: 0 0 12px; border-bottom: 1px solid var(--line);
+}
+table.dims td { padding: 12px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.dims td.w { font-family: var(--mono); color: var(--teal); white-space: nowrap; width: 84px; }
+table.dims td.d { color: var(--muted); font-size: 20px; }
+table.dims td.n { font-weight: 600; white-space: nowrap; padding-right: 26px; }
+table.dims tr.lead-dim td.n { color: var(--red); }
+table.dims tr.graph-dim td.n { color: var(--teal); }
+
+.chips { display: flex; gap: 10px; flex-wrap: wrap; }
+.chip {
+  font-size: 18px; padding: 7px 14px; border-radius: 999px;
+  border: 1px solid var(--line-2); color: var(--muted); background: var(--panel);
+}
+.chip.on { color: var(--ink); border-color: var(--teal); background: rgba(45,212,191,.10); }
+
+/* ---- quoted question --------------------------------------------------- */
+.ask {
+  font-family: var(--mono); font-size: 24px; color: var(--ink);
+  background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--teal);
+  border-radius: 10px; padding: 16px 20px; line-height: 1.45;
+}
+.ask.sm { font-size: 20px; padding: 13px 16px; }
+.ask .caret { color: var(--teal); }
+.ask + .ask { margin-top: 12px; }
+
+/* ---- pipeline diagram -------------------------------------------------- */
+.pipe { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.pipe .box {
+  border: 1px solid var(--line-2); border-radius: 10px; padding: 14px 18px;
+  background: var(--panel); font-size: 20px; line-height: 1.3;
+}
+.pipe .box b { display: block; font-size: 15px; letter-spacing: .1em; text-transform: uppercase; color: var(--teal); margin-bottom: 5px; font-weight: 600; }
+.pipe .arr { color: var(--line-2); font-size: 26px; }
+
+/* ---- title slide ------------------------------------------------------- */
+section.title > .wrap { justify-content: center; }
+section.title h1 { margin-bottom: 10px; }
+section.title .rule { width: 92px; height: 4px; background: var(--teal); border-radius: 2px; margin: 26px 0; }
+section.title .meta { font-size: 21px; color: var(--muted); letter-spacing: .04em; }
+
+/* ---- chrome ------------------------------------------------------------ */
+.reveal .progress { color: var(--teal); height: 3px; }
+.reveal .slide-number { background: transparent; color: var(--muted); font-size: 16px; font-family: var(--mono); right: 26px; bottom: 18px; }
+.reveal .controls { color: var(--muted); }
+.reveal .backgrounds { background: var(--bg); }
+.corner {
+  position: absolute; left: 88px; bottom: 26px;
+  font-size: 15px; letter-spacing: .16em; text-transform: uppercase; color: rgba(147,160,176,.55);
+}

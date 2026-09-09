@@ -24,7 +24,15 @@
             <span v-if="t.summary" class="sum">— {{ t.summary }}</span>
             <span v-if="t.permission" class="sum perm">· {{ t.permission.status }}</span>
           </div>
-          <div class="text" v-html="render(m.text)"></div>
+          <!-- One delegated handler for the whole message: a link the model wrote inside a
+               sentence navigates without reloading the app, which would cost the canvas. -->
+          <div class="text" v-html="render(m.text)" @click="onTextClick"></div>
+          <!-- What this turn produced, as doors. The report it just wrote is one click away
+               instead of "it is on the Reports tab". -->
+          <div v-if="usableLinks(m.links).length" class="links">
+            <v-btn v-for="l in usableLinks(m.links)" :key="l.href" size="small" variant="tonal" color="primary"
+                   :prepend-icon="linkIcon(l.kind)" :title="l.description" @click="follow(l.href)">{{ l.label }}</v-btn>
+          </div>
           <div v-if="m.error" class="error-text">{{ m.error }}</div>
           <v-progress-linear v-if="m.streaming" indeterminate height="2" class="mt-1" />
           <details v-if="m.cypher?.length" class="cy-details">
@@ -42,11 +50,15 @@
 </template>
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useChat } from '../stores/chat'
 import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
+import { useOpenOnCanvas } from '../composables/openOnCanvas'
+import { linkIcon, renderChatText, resolveChatLink, usableLinks } from '../chat/markup'
 import CypherBlock from './CypherBlock.vue'
 const chat = useChat(); const graph = useGraph(); const ws = useWorkspace()
+const router = useRouter(); const { openOnCanvas } = useOpenOnCanvas()
 const draft = ref('')
 const scroller = ref<HTMLElement>()
 const suggestions = [
@@ -63,9 +75,22 @@ function submit() {
   chat.send(t, [...graph.nodes.keys()], ws.ws.layers, graph.focusId, graph.focusLabel)
   draft.value = ''
 }
-function esc(s: string) { return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' } as any)[c]) }
-function render(t: string) {
-  return esc(t || '').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>')
+const render = renderChatText
+/** Follow a link the answer offered — a route, or a node to put on the canvas. */
+async function follow(href: string) {
+  const link = resolveChatLink(href)
+  if (!link) return
+  if (link.type === 'route') router.push(link.to)
+  else if (link.type === 'canvas') await openOnCanvas(link.id)
+  else window.open(link.url, '_blank', 'noopener')
+}
+/** Links inside the message text are plain anchors until they are clicked; internal ones are
+ *  turned into navigation here so the page — and the canvas under it — survives the trip. */
+function onTextClick(e: MouseEvent) {
+  const a = (e.target as HTMLElement)?.closest?.('a[data-route], a[data-canvas]') as HTMLAnchorElement | null
+  if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return   // let the browser have modified clicks
+  e.preventDefault()
+  follow(a.dataset.route || `canvas:${a.dataset.canvas}`)
 }
 watch(() => chat.messages.map(m => m.text.length + (m.tools?.length || 0)).join(','), () => nextTick(() => { if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight }))
 </script>
@@ -88,6 +113,10 @@ watch(() => chat.messages.map(m => m.text.length + (m.tools?.length || 0)).join(
 .sum { opacity: .7; }
 .perm { color: #f59e0b; }
 .text :deep(code) { font-family: ui-monospace, monospace; font-size: 12px; background: rgba(128,128,128,.15); padding: 0 3px; border-radius: 3px; }
+.text :deep(a.chat-link) { color: rgb(var(--v-theme-primary)); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.links :deep(.v-btn) { text-transform: none; letter-spacing: 0; max-width: 100%; }
+.links :deep(.v-btn__content) { overflow: hidden; text-overflow: ellipsis; }
 .error-text { color: #f87171; font-size: 12px; }
 .cy-details { margin-top: 6px; font-size: 12px; }
 .cy-details summary { cursor: pointer; opacity: .7; }

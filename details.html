@@ -394,6 +394,7 @@
       <p>People are graded on the dimensions that mean something for a person — designation, proximity and the jurisdictions of the seats they hold. A person's exposure comes from where they sit, never from their name: the graph records no nationality for most people, and guessing one is how a screening tool becomes a discrimination engine.</p>
       <h3>A signal that returned no data is not a zero</h3>
       <p>The score is the weighted mean over the dimensions that <em>answered</em>. A dimension with nothing to go on abstains, and a country absent from the reference tables scores as no-data rather than as safe. That keeps the model honest but makes the raw number ambiguous on its own: an unscreened vendor one hop from a designated party, seated in a covered nation, scores 100 on two dimensions and outranks a party that is itself designated but graded on six. Both orderings are defensible — all we know about the first one is bad — so every node also carries <code>risk_confidence</code>, the share of the model's weight that answered, and it is drawn next to the score everywhere: in the table, on the canvas badge, in the inspector and at the top of the report.</p>
+      <p>The canvas does not volunteer any of this. <b>Settings › Canvas › mark risk on the canvas</b> is off by default, so a supply chain opens the way everyone already sees one: a few hundred identical discs, with nothing saying which is the problem. Turn it on — or ask the chat to colour by risk — and the same graph rearranges itself into a finding. That contrast is the demonstration, so the default is deliberate rather than shy.</p>
       <div class="callout">Nothing is scored that cannot be shown. Every dimension carries the ids of the nodes and edges it was computed from; clicking one in the inspector lights the route up on the canvas. A score you cannot walk back to its evidence is just an assertion.</div>
       <p>The report keeps its narrative families — interlocks, government ties, affiliations, political exposure, and the vendor's own sole-source position — but shows them separately as <em>context</em>. They are leads, not findings, by this report's own long-standing account, so they explain a score rather than move it. The sharpest of them, an officer sitting inside a designated entity, is already scored: it is a two-hop proximity finding through a <code>HELD_ROLE</code> edge.</p>
       <div class="callout">Being a sole source is not a risk the supplier carries. It says nothing about whether that company will fail or be designated, so it moves none of its own score — it is a fact about the award, reported as context. The exposure belongs to the customer, and the scorer puts it there.</div>
@@ -402,7 +403,7 @@
 
     <section id="api">
       <div class="sec-head"><div class="eyebrow">Surface</div><h2>API and MCP</h2></div>
-      <p>REST under <code>/api</code> with OpenAPI at <code>/docs</code>: graph, search and subgraph; entities and their report (the UC-11 profile); people; risk (the graph ranked by score, one node's breakdown, and rescore); artifacts; claims with commit and reject; query (cypher, template, validate, styles); permissions with approve and refuse; connectors and credentials; enrichment jobs; workspace settings.</p>
+      <p>REST under <code>/api</code> with OpenAPI at <code>/docs</code>: graph, search and subgraph; entities and their report (the UC-11 profile); people; risk (the graph ranked by score, one node's breakdown, and rescore); artifacts; claims with commit and reject; query (cypher, template, validate, styles); styles (the preset colour schemes — <code>GET /api/styles/schemes</code> lists them, <code>POST /api/styles/schemes/risk</code> returns the ops and the legend for a red-to-green risk ramp); permissions with approve and refuse; connectors and credentials; enrichment jobs; workspace settings.</p>
       <p>Chat runs over a websocket at <code>/ws/chat</code>; permission requests and job updates are broadcast on the same socket. MCP is served at <code>POST /mcp/</code> as stateless streamable HTTP, and as <code>illuminate-mcp</code> over stdio, for Claude Desktop or Claude Code:</p>
       <pre><code>{ "mcpServers": { "illuminate": { "command": "/path/to/api/.venv/bin/illuminate-mcp" } } }</code></pre>
     </section>
@@ -414,6 +415,8 @@
         <div>highlight all entities that rely on manufacturing in CN, include tier 2 and below</div>
         <div>which suppliers have a foreign ultimate parent?</div>
         <div>which vendors are within two hops of a designated party? <span>→ proximity, the dimension only a graph can answer</span></div>
+        <div>colour the graph by risk <span>→ a preset scheme, red through green; unscored nodes are outlined, never painted the safe colour</span></div>
+        <div>write a risk assessment for this program <span>→ the answer comes back with a button that opens the document</span></div>
         <div>show sole-source suppliers</div>
         <div>shared directors across suppliers</div>
         <div>add Acme Castings as a tier-3 supplier to AVIAN, LLC <span>→ permission dialog with a real impact count</span></div>

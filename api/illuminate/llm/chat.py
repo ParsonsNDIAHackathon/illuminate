@@ -51,6 +51,7 @@ class TurnAccumulator:
     style_ops: list[dict] = field(default_factory=list)
     permissions: list[dict] = field(default_factory=list)
     tool_calls: list[dict] = field(default_factory=list)
+    links: list[dict] = field(default_factory=list)
 
     def absorb(self, name: str, args: dict, r: ToolResult) -> None:
         self.tool_calls.append({"name": name, "args": args, "ok": r.ok})
@@ -62,6 +63,11 @@ class TurnAccumulator:
             self.style_ops.extend(r.style_ops)
         if r.permission:
             self.permissions.append(r.permission)
+        # A turn's links are collected whole and de-duplicated by destination: asking for the
+        # same report twice in one turn should still leave one button under the answer.
+        for link in r.links:
+            if link["href"] not in {l["href"] for l in self.links}:
+                self.links.append(link)
 
     def final(self, answer: str) -> dict:
         ops = validate_ops(self.style_ops) if self.style_ops else []
@@ -72,6 +78,7 @@ class TurnAccumulator:
             "subgraph": self.subgraph,
             "style_ops": [o.model_dump(exclude_none=True) for o in ops],
             "legend": [l.model_dump() for l in derive_legend(ops)],
+            "links": self.links,
             "permissions": self.permissions,
             "tool_calls": self.tool_calls,
         }
@@ -145,7 +152,7 @@ async def run_turn(conv: Conversation, text: str, ctx: ToolContext, emit: Emit, 
             await emit({
                 "type": "tool_result", "name": c["name"], "ok": result.ok, "cypher": result.cypher, "params": result.params,
                 "summary": _summarise(result), "permission": result.permission, "notes": result.notes,
-                "subgraph": result.subgraph, "style_ops": result.style_ops, "legend": result.legend,
+                "subgraph": result.subgraph, "style_ops": result.style_ops, "legend": result.legend, "links": result.links,
             })
             conv.messages.append({"role": "tool", "tool_call_id": c["id"] or f"call_{i}", "content": result.for_model()})
 
@@ -169,6 +176,8 @@ def _summarise(r: ToolResult) -> str:
         return f"created {c.get('nodes_created',0)} node(s), {c.get('relationships_created',0)} rel(s)"
     if "applied" in d:
         return f"{d['applied']} style op(s)"
+    if "scheme" in d:
+        return f"{d['node_count']} node(s) coloured by {d['scheme']}"
     if "job_id" in d:
         return f"enrichment queued ({d['job_id']})"
     if "nodes" in d:
@@ -183,12 +192,17 @@ _ENTITY_HINT = re.compile(r"\b(?:of|for|owns?|about)\s+([A-Z][\w&.'-]*(?:\s+[A-Z
 _REPORT_INTENT = re.compile(r"\b(risk assessment|vendor profile|entity profile|"
                             r"(?:generate|write|make|produce|give me|create)\s+(?:me\s+)?(?:an?\s+)?report)\b", re.I)
 _PROFILE_INTENT = re.compile(r"\b(vendor|entity|company|supplier)\s+profile\b", re.I)
+# Colouring by a preset needs no model either — the scheme is the mapping, and without a key
+# it is the only way to get the encoding at all, so it is worth matching on.
+_SCHEME_INTENT = re.compile(r"\b(colou?r|shade|paint)\b[^.]{0,30}\bby\s+risk\b|\brisk\s+(?:gradient|heat\s?map)\b", re.I)
 
 
 async def _template_only_turn(conv: Conversation, text: str, ctx: ToolContext, emit: Emit, acc: TurnAccumulator) -> dict:
     """No model key: degrade to template queries matched by intent, not an error."""
     if _REPORT_INTENT.search(text):
         return await _report_turn(conv, text, ctx, emit, acc)
+    if _SCHEME_INTENT.search(text):
+        return await _scheme_turn(conv, text, ctx, emit, acc)
     name = match_intent(text)
     if not name:
         msg = ("No OpenAI key is configured, so I can only run saved templates and write reports. Try: 'show sole-source suppliers', "
@@ -243,7 +257,8 @@ async def _report_turn(conv: Conversation, text: str, ctx: ToolContext, emit: Em
     r = await dispatch(ctx, "generate_report", args)
     acc.absorb("generate_report", args, r)
     await emit({"type": "tool_result", "name": "generate_report", "ok": r.ok, "cypher": r.cypher, "params": r.params,
-                "summary": _summarise(r), "subgraph": r.subgraph, "style_ops": r.style_ops, "legend": r.legend, "notes": r.notes})
+                "summary": _summarise(r), "subgraph": r.subgraph, "style_ops": r.style_ops, "legend": r.legend,
+                "links": r.links, "notes": r.notes})
     if r.ok:
         d = r.data
         msg = (f"Wrote **{d['title']}** — {d.get('finding_count', 0)} finding(s), generated {d['generated_at']}. "
@@ -251,6 +266,22 @@ async def _report_turn(conv: Conversation, text: str, ctx: ToolContext, emit: Em
                "has moved on. (No model key, so the report carries its computed summary rather than a written one.)")
     else:
         msg = f"Could not write that report: {r.data.get('error')}"
+    conv.messages.append({"role": "assistant", "content": msg})
+    final = acc.final(msg)
+    await emit(final)
+    return final
+
+
+async def _scheme_turn(conv: Conversation, text: str, ctx: ToolContext, emit: Emit, acc: TurnAccumulator) -> dict:
+    """Apply a preset colour scheme with no model key. The scheme *is* the reasoning, so
+    nothing is lost here — the encoding is identical to the one a model would have asked for."""
+    args = {"scheme": "risk"}
+    await emit({"type": "tool_call", "name": "apply_color_scheme", "args": args})
+    r = await dispatch(ctx, "apply_color_scheme", args)
+    acc.absorb("apply_color_scheme", args, r)
+    await emit({"type": "tool_result", "name": "apply_color_scheme", "ok": r.ok, "summary": _summarise(r),
+                "style_ops": r.style_ops, "legend": r.legend, "links": r.links, "notes": r.notes})
+    msg = f"Coloured the canvas by risk — {r.data['note']}" if r.ok else f"Could not colour by risk: {r.data.get('error')}"
     conv.messages.append({"role": "assistant", "content": msg})
     final = acc.final(msg)
     await emit(final)

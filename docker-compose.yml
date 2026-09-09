@@ -77,6 +77,10 @@ services:
     container_name: illuminate-web
     depends_on:
       - api
+    volumes:
+      # The pitch deck has no build step and is not part of the Vue bundle, so nginx serves it
+      # straight from the repo at /slides/ — edit a slide and reload, no rebuild.
+      - ./slides:/usr/share/nginx/html/slides:ro
     ports:
       - "8080:80"
 

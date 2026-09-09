@@ -62,10 +62,15 @@ settings = Settings()
 # edges (lobbying, memberships, donations) do not carry that chain, and ownership carries it only
 # pointing in, so the owner of a supplier is drawn and that owner's other subsidiaries are not. A
 # node scored over 20 that reaches a supplier is drawn either way (web/src/stores/graphLayers.ts).
-# "reports" is on by default: a report exists because someone asked for it, and there are a handful
-# of them at most, so hiding the thing the user just generated would be the surprising default.
-LAYER_DEFAULTS = {"entities": True, "indirect_orgs": True, "people": True, "countries": False, "categories": False, "artifacts": False, "sources": False, "claims": False,
-                  "reports": True}
+#
+# Everything optional is off. The canvas opens on the program and the chain of contracts and
+# ownership around it, and each layer over that is a deliberate "show me this too" — a prime's
+# affiliation network alone is hundreds of organizations that no award touches. A browser keeps its
+# own choices in localStorage (web/src/stores/workspace.ts); this map is what the workspace file
+# starts from and what a caller without a browser — an agent tool call carrying no layers — falls
+# back on, so the two say the same thing.
+LAYER_DEFAULTS = {"entities": True, "indirect_orgs": False, "people": False, "countries": False, "categories": False, "artifacts": False, "sources": False, "claims": False,
+                  "reports": False}
 
 # Risk score above which a node is drawn whatever the filters say, mirrored by RISK_PIN_FLOOR in
 # web/src/stores/graphLayers.ts. The canvas can only pin what it was sent, so the graph queries

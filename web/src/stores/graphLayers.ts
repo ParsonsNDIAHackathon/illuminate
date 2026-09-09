@@ -18,8 +18,9 @@ export type GraphLayer =
 
 /** Workspace layer key for organizations no chain of contracts or ownership joins to a program —
  *  they reach the canvas through a person, a place, a document, a claim, or through another
- *  company they merely lobby or share a trade association with. On (the default) draws them; off
- *  hides them however the other layers are set, except for the risky ones (RISK_PIN_FLOOR). */
+ *  company they merely lobby or share a trade association with. On draws them; off (the default,
+ *  with every other layer) hides them however the other layers are set, except for the risky ones
+ *  (RISK_PIN_FLOOR). */
 export const INDIRECT_ORGS = 'indirect_orgs'
 
 /** Relationship types that carry a program's chain from one organization to the next: it supplies
@@ -56,16 +57,18 @@ const LAYER_OF: Record<string, GraphLayer> = {
   Claim: 'claims',
   Report: 'reports',
 }
+/** What an unset layer draws: nothing. The canvas opens on the program and the chain around it,
+ *  and every layer over that is asked for — see LAYERS_OFF in stores/workspace.ts, which is where
+ *  a browser's actual choices live. Reports are off with the rest; opening one from the reports
+ *  view turns its layer on, so the canvas still draws what the user just asked to see. */
 const LAYER_DEFAULT: Record<GraphLayer, boolean> = {
-  people: true,
+  people: false,
   countries: false,
   categories: false,
   artifacts: false,
   sources: false,
   claims: false,
-  // On, unlike every other optional layer: a report is on the canvas because the user asked for
-  // it by name, and there are a handful of them, not a thousand.
-  reports: true,
+  reports: false,
 }
 
 export function layerOf(node: LayerNode): GraphLayer | null {
@@ -89,7 +92,7 @@ export function layerVisible(
 }
 
 export function indirectOrgsVisible(enabled: Record<string, boolean>): boolean {
-  return enabled[INDIRECT_ORGS] ?? true
+  return enabled[INDIRECT_ORGS] ?? false
 }
 
 /** An entity that is not a program: a company, group, agency or other organization. */

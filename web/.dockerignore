@@ -1,0 +1,5 @@
+# The image installs its own dependencies and runs its own build; copying the host's
+# versions of either wastes the context and breaks outright when node_modules is a symlink
+# into another checkout, which is how a worktree borrows one.
+node_modules
+dist

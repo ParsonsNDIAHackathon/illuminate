@@ -28,6 +28,8 @@ async def _call_tool(ctx, params: types.CallToolRequestParams) -> types.CallTool
     if r.style_ops:
         payload["style_ops"] = r.style_ops
         payload["legend"] = r.legend
+    if r.links:
+        payload["links"] = r.links
     if r.subgraph:
         payload["subgraph"] = {"nodes": len(r.subgraph["nodes"]), "edges": len(r.subgraph["edges"])}
     return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(payload, default=str))], isError=not r.ok)

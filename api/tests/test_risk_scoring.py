@@ -79,6 +79,62 @@ def test_a_node_with_no_data_anywhere_has_no_score():
     assert risk.band(None) is None
 
 
+# --- a clear result is weaker evidence than a finding --------------------------------
+
+def test_clearing_the_lists_does_not_cancel_out_a_finding_beside_it():
+    # The insider shape: personally clear on two sanctions lists, one hop from a designated
+    # group. At equal weight the two clear screens contributed nothing to the numerator
+    # while taking their full share of the ceiling, halving the score of the one thing
+    # actually known about him. The finding has to survive the clean screen.
+    near = {"seed": "Obsidian Lantern", "hops": 1, "chain": ["Obsidian Lantern", "Person"],
+            "node_ids": ["ent_group"], "rel_ids": ["rel_1"], "reachable": 1}
+    comps = [
+        risk._designation(entity(), screens(screen("sanctions_screen", "clear"),
+                                            screen("sanctions_screen", "clear", source="UN Security Council"))),
+        risk._proximity_component(entity(), near),
+    ]
+    value, _ = risk.composite(comps)
+    assert risk.band(value) == "high"
+    # The old arithmetic — clear at full weight — put this at 40, an "elevated".
+    assert value > 60
+
+
+def test_a_designated_party_still_outranks_the_people_one_hop_from_it():
+    designated, _ = risk.composite([
+        risk._designation(entity(), screens(screen("sanctions_screen", "hit"))),
+        risk._proximity_component(entity(), None),
+    ])
+    near = {"seed": "Group", "hops": 1, "chain": ["Group", "Person"], "node_ids": ["ent_group"],
+            "rel_ids": ["rel_1"], "reachable": 1}
+    associate, _ = risk.composite([
+        risk._designation(entity(), screens(screen("sanctions_screen", "clear"))),
+        risk._proximity_component(entity(), near),
+    ])
+    assert designated > associate
+
+
+def test_a_node_that_is_clear_on_everything_still_scores_zero():
+    # Discounting clear evidence must not invent risk where every answer was clean.
+    comps = [
+        risk._designation(entity(), screens(screen("sanctions_screen", "clear"))),
+        risk._proximity_component(entity(), None),
+    ]
+    value, _ = risk.composite(comps)
+    assert value == 0 and risk.band(value) == "low"
+
+
+def test_coverage_is_unmoved_by_the_evidence_discount():
+    # A screened-clear node answered its screen. Confidence reports coverage, not risk.
+    comps = [
+        risk._designation(entity(), screens(screen("sanctions_screen", "clear"))),
+        risk._proximity_component(entity(), None),
+        risk._foreign(entity(), []),
+    ]
+    scored = [c for c in comps if not c["no_data"]]
+    expected = round(100 * sum(c["weight"] for c in scored) / sum(c["weight"] for c in comps))
+    assert risk.confidence(comps) == expected
+
+
 # --- designation -------------------------------------------------------------------
 
 def test_a_screen_hit_is_the_finding_and_names_its_lists():
