@@ -1,6 +1,6 @@
 # Illuminate — pitch deck
 
-A [reveal.js](https://revealjs.com) deck, 21 slides. No build step and no network: reveal is
+A [reveal.js](https://revealjs.com) deck, 19 slides. No build step and no network: reveal is
 vendored in `vendor/`, so `slides/index.html` opens straight from disk.
 
 ```bash
@@ -14,6 +14,24 @@ The running app also serves the deck at `/slides/` — <http://localhost:8080/sl
 `make up`, <http://localhost:5173/slides/> under `make dev` — and the **Deck** button at the
 bottom of the app's left rail opens it in a new tab, so a demo can cut between the two. The
 container bind-mounts this directory, so editing a slide needs a reload, not a rebuild.
+
+## The short deck
+
+`short.html` is the same deck cut to six slides — the big picture, the person, risk colouring,
+why it flows, the generated report, and where it goes next. It shares `theme.css`, `deck.js` and
+`vendor/`, so it is served and opened exactly like the full one (`slides/short.html`, or
+<http://localhost:8080/slides/short.html> under `make up`).
+
+It is **generated, not hand-edited**. Change a slide in `index.html`, then:
+
+```bash
+python3 slides/make-short.py
+```
+
+The list of slides it keeps is `PICKS` at the top of that script, written in reveal's own hash
+coordinates — the numbers in the address bar as you page through the full deck, so `#/8` is
+`'8'` and `#/11/2` is `'11/2'`. A sub-slide pulled out of a vertical stack becomes an ordinary
+slide in the short deck.
 
 | Key | |
 | --- | --- |
@@ -50,16 +68,15 @@ adds a scrubber; `data-once` stops the loop.
 
 | File | Slide | Status |
 | --- | --- | --- |
-| `media/program-overview.png` | The big picture — whole program graph | placeholder art from `docs/screenshots/01-explorer.png` |
-| `media/birdsnest.png` | Nobody holds this in their head — the same graph unfiltered | **your capture** (V-22, every layer, no depth limit) |
+| `media/birdsnest.png` | The big picture — whole program graph | **your capture** (V-22, every layer, no depth limit) |
 | `media/employee-risk.png` | Employee of a sub-contractor — person risk tab | **your capture** (R. Ostrowski) |
-| `media/risk-graph.*` | **Canvas coloured by risk** — the money slide | ⬜ empty — png or a short mp4 |
+| `media/risk-graph.*` | **Canvas coloured by risk** — the money slide | **your capture** — swap in an mp4 under the same name if you want it moving |
 | `media/risk-path.*` | Clicking a dimension lights its path up | ⬜ empty — optional slide, cut it if short |
 | `media/chat-ask.png` | Chat: a template answer on the canvas | from `docs/screenshots/02-chat-sole-source.png` |
 | `media/chat-styles.png` | Chat: goods purple, services yellow | from `docs/screenshots/03-chat-goods-services.png` |
 | `media/chat-report.*` | **Chat: generate a report** | ⬜ empty — mp4 preferred |
 | `media/report-risk.png` | The report's risk section | from `docs/screenshots/06-report-risk.png` |
-| `media/chat-add-program.*` | **Chat: add a new program** | ⬜ empty — mp4 preferred |
+| `media/chat-add-program.png` | **Chat: add a new program** | **your capture** |
 | `media/permission-dialog.png` | Ask before writing | from `docs/screenshots/04-permission-dialog.png` |
 
 The rows marked *from `docs/screenshots/`* are stand-ins — overwrite any of them with a fresher
