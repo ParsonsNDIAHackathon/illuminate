@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from ..config import settings
+from ..config import RISK_PIN_FLOOR, settings
 
 MAX_DEPTH = settings.cypher_max_hops
 
@@ -293,6 +293,19 @@ def _as_of_board(p):
     return cy, {"id": p["entity_id"], "date": p["date"]}
 
 
+# Appended when the people layer is off. The walk crosses HELD_ROLE and BENEFICIAL_OWNER_OF either
+# way; this drops every person it met who is not scored over the pin floor, so a designated director
+# stays on the canvas whatever the layer says (config.RISK_PIN_FLOOR, mirrored in graphLayers.ts),
+# and so does a risky company on the far side of one. The last line then drops whatever an ordinary
+# director was the only route to: those companies would otherwise arrive with no edges at all, and
+# an edgeless organization is one the canvas keeps — turning people off would add nodes.
+_RISKY_PEOPLE_ONLY = (
+    "WITH root, [n IN nodes WHERE NOT n:Person OR coalesce(n.risk_score, 0) > $risk_floor] AS kept, relationships\n"
+    "WITH root, kept, [r IN relationships WHERE startNode(r) IN kept AND endNode(r) IN kept] AS relationships\n"
+    "WITH [n IN kept WHERE n = root OR any(r IN relationships WHERE startNode(r) = n OR endNode(r) = n)] AS nodes, relationships\n"
+)
+
+
 def _neighbourhood(p):
     d = _depth(p.get("depth", 2))
     layers = p.get("layers") or {}
@@ -301,8 +314,9 @@ def _neighbourhood(p):
     rel_filter = ["SUPPLIES", "OWNS", "ULTIMATE_PARENT_OF", "MEMBER_OF", "TRANSACTS_WITH", "LOBBIES", "DONATED_TO"]
     if layers.get("categories", False):
         rel_filter += ["PROVIDES", "SUBCATEGORY_OF"]
-    if layers.get("people", True):
-        rel_filter += ["HELD_ROLE", "BENEFICIAL_OWNER_OF"]
+    # Personnel edges are walked either way; with the layer off, _RISKY_PEOPLE_ONLY cuts the
+    # ordinary people back out of the result and leaves the risky ones.
+    rel_filter += ["HELD_ROLE", "BENEFICIAL_OWNER_OF"]
     if layers.get("countries", False):
         rel_filter += ["INCORPORATED_IN", "OPERATES_IN", "MANUFACTURES_IN", "PARENT_SEATED_IN"]
     # Artifacts and sources share a label and its edges; the canvas hides whichever kind is off.
@@ -313,6 +327,10 @@ def _neighbourhood(p):
     rel_filter = list(dict.fromkeys(rel_filter))
     rf = "|".join(rel_filter)
     bound = {"id": p["entity_id"], "limit": int(p.get("limit", 400))}
+    tail = ""
+    if not layers.get("people", True):
+        tail = _RISKY_PEOPLE_ONLY
+        bound["risk_floor"] = RISK_PIN_FLOOR
     if p.get("program_id"):
         # Keep the walk inside one program. Suppliers sell to several programs, so an
         # unconstrained walk hops supplier -> another program -> that program's own
@@ -324,12 +342,14 @@ def _neighbourhood(p):
             "OPTIONAL MATCH (other:Entity) WHERE other.kind = 'program' AND other.id <> $program\n"
             "WITH root, collect(other) AS blocked\n"
             f"CALL apoc.path.subgraphAll(root, {{maxLevel:{d}, relationshipFilter:'{rf}', limit:$limit, blacklistNodes:blocked}}) YIELD nodes, relationships\n"
+            f"{tail}"
             "RETURN nodes, relationships LIMIT 1"
         )
         return cy, bound
     cy = (
         "MATCH (root:Entity {id:$id})\n"
         f"CALL apoc.path.subgraphAll(root, {{maxLevel:{d}, relationshipFilter:'{rf}', limit:$limit}}) YIELD nodes, relationships\n"
+        f"{tail}"
         "RETURN nodes, relationships LIMIT 1"
     )
     return cy, bound

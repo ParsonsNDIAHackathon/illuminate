@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import cytoscape from 'cytoscape'
 
-import { hiddenNodeIds, indirectOrganizations, layerData, layerVisible, orphanedOrganizations, riskPinnedOrganizations } from '../src/stores/graphLayers.ts'
+import { hiddenNodeIds, indirectOrganizations, layerData, layerVisible, orphanedOrganizations, riskPinnedNodes } from '../src/stores/graphLayers.ts'
 
 const claim = { id: 'claim-a', label: 'Claim', props: {} }
 const source = { id: 'source-a', label: 'Artifact', props: { kind: 'record' } }
@@ -147,8 +147,10 @@ test('the indirect walk starts from the root too, and from nothing when the canv
 })
 
 // The same shape with risk on it: a donor to the trade council, a quiet peer beside it, an offshore
-// company that shares only a country with the supplier, and a risky company nothing points at.
+// company that shares only a country with the supplier, a risky company nothing points at, and a
+// designated insider inside the supplier who also sits on a shell company and one ordinary board.
 const risky = (id: string, score: number) => ({ id, label: 'Entity', layer: null, props: { kind: 'organization', risk_score: score } })
+const person = (id: string, score?: number) => ({ id, label: 'Person', layer: 'people', props: score == null ? {} : { risk_score: score } })
 const scored = {
   nodes: [
     ...network.nodes,
@@ -156,6 +158,9 @@ const scored = {
     risky('quiet-donor', 12),
     risky('offshore', 70),
     risky('unattached', 90),
+    person('insider', 100),
+    risky('shell', 80),
+    org('insider-board'),
   ],
   edges: [
     ...network.edges,
@@ -163,6 +168,9 @@ const scored = {
     { source: 'quiet-donor', target: 'trade-council', type: 'DONATED_TO' },
     { source: 'supplier', target: 'country', type: 'INCORPORATED_IN' },
     { source: 'offshore', target: 'country', type: 'INCORPORATED_IN' },
+    { source: 'insider', target: 'supplier', type: 'HELD_ROLE' },
+    { source: 'insider', target: 'shell', type: 'BENEFICIAL_OWNER_OF' },
+    { source: 'insider', target: 'insider-board', type: 'HELD_ROLE' },
   ],
 }
 const hiddenInScored = (layers: Record<string, boolean>) => [...hiddenNodeIds(scored.nodes, scored.edges, layers)].sort()
@@ -194,8 +202,34 @@ test('the risk pin also holds against orphan pruning, and against a hidden layer
 
 test('the risk pin needs a supplier on the canvas at all', () => {
   const noSupply = { nodes: scored.nodes, edges: scored.edges.filter(e => e.type !== 'SUPPLIES') }
-  assert.deepEqual([...riskPinnedOrganizations(noSupply.nodes, noSupply.edges, new Set())], [])
-  assert.deepEqual([...riskPinnedOrganizations(scored.nodes, scored.edges, new Set())].sort(), ['sanctioned-donor'])
+  assert.deepEqual([...riskPinnedNodes(noSupply.nodes, noSupply.edges, new Set())], [])
+  assert.deepEqual([...riskPinnedNodes(scored.nodes, scored.edges, new Set())].sort(), ['insider', 'sanctioned-donor', 'shell'])
+})
+
+test('a risky person is drawn over an off people layer, and an ordinary one is not', () => {
+  const hidden = hiddenInScored({ people: false, countries: true })
+  assert.ok(!hidden.includes('insider'), 'the layer hides people, not the designated insider')
+  assert.ok(hidden.includes('director'), 'an ordinary director goes with the layer')
+  // The pin is for the person, not their address book: the board they sit on for no other reason
+  // is still gone.
+  assert.ok(hidden.includes('insider-board'))
+})
+
+test('a risky organization is pinned through a risky person, whatever the people layer says', () => {
+  for (const people of [true, false]) {
+    const hidden = [...hiddenNodeIds(scored.nodes, scored.edges, { people, countries: true, indirect_orgs: false })]
+    // No contract or ownership joins the shell to the program — only the insider does, and both of
+    // them clear the floor, so both stay.
+    assert.ok(!hidden.includes('shell'), `shell should be pinned with people=${people}`)
+    assert.ok(!hidden.includes('insider'), `insider should be pinned with people=${people}`)
+  }
+})
+
+test('a person over the floor with no path to a supplier is not pinned', () => {
+  const nodes = [...scored.nodes, person('stranger', 95), risky('stranger-co', 95)]
+  const edges = [...scored.edges, { source: 'stranger', target: 'stranger-co', type: 'HELD_ROLE' }]
+  const hidden = [...hiddenNodeIds(nodes, edges, { people: false, countries: true })]
+  assert.ok(hidden.includes('stranger') && hidden.includes('stranger-co'))
 })
 
 test('orphan pruning ignores self-loops and edges to nodes that are not loaded', () => {

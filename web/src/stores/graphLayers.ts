@@ -28,9 +28,12 @@ export const INDIRECT_ORGS = 'indirect_orgs'
  *  through a person. RTX alone brings hundreds of those, none of them on an award. */
 const CHAIN_RELS = new Set(['SUPPLIES', 'OWNS', 'ULTIMATE_PARENT_OF'])
 
-/** Risk score above which a node overrides the indirect and orphan rules, just under the floor of
- *  the "elevated" band (styles/risk.ts). A lobbying counterparty scored this high is the whole
- *  reason to look at the affiliation network, so the filter must not take it away. */
+/** Risk score above which a node overrides every other rule on this page — the indirect filter,
+ *  orphan pruning, and for a person the people layer itself. Just under the floor of the
+ *  "elevated" band (styles/risk.ts), and mirrored by config.RISK_PIN_FLOOR, which is what makes
+ *  the server send a risky person over an off people layer. A lobbying counterparty or a director
+ *  scored this high is the whole reason to look at the affiliation network, so no filter takes
+ *  them away. */
 export const RISK_PIN_FLOOR = 20
 
 const SOURCE_KINDS = new Set(['record', 'registry'])
@@ -178,28 +181,35 @@ const riskScore = (node: LayerNode): number | null => {
 }
 
 /**
- * The organizations too risky to filter away: scored above RISK_PIN_FLOOR and joined to a
- * supplier by some path, of any relationship type, across what is still drawn. This is the one
- * override to the indirect and orphan rules — a sanctioned counterparty two hops off a prime is
- * the finding, not the clutter, and it survives even if it ends up floating on its own.
+ * The nodes too risky to filter away: scored above RISK_PIN_FLOOR and joined to a supplier by
+ * some path, of any relationship type. This is the one override to everything else the canvas
+ * hides — a sanctioned counterparty two hops off a prime, or the director who sits inside both,
+ * is the finding, not the clutter — and a pin holds even if the node ends up floating on its own.
  *
- * Only companies and the people between them conduct a path here. Places, categories, documents
- * and claims do not: half the canvas is incorporated in the same country and cites the same
- * registry, and a shared attribute is not a connection to a supplier. Nodes the layer toggles
- * already hid conduct nothing either — the override answers for the graph on screen.
+ * A pinned person overrides the people layer as well: turning people off is how the canvas gets
+ * readable, and it must not be how a designated director disappears. Ordinary people the layer
+ * hid conduct nothing (they are not on the canvas, and the server does not even send them), so
+ * with people off the path to a supplier has to run through companies and pinned people alone —
+ * an org whose only route to the chain was an unremarkable director goes with the layer.
+ *
+ * Places, categories, documents and claims never conduct: half the canvas is incorporated in the
+ * same country and cites the same registry, and a shared attribute is not a connection.
  */
-export function riskPinnedOrganizations(
+export function riskPinnedNodes(
   nodes: LayerGraphNode[],
   edges: LayerGraphEdge[],
   hidden: Set<string>,
   floor: number = RISK_PIN_FLOOR,
 ): Set<string> {
   const byId = new Map(nodes.map(n => [n.id, n]))
+  const isRisky = (n: LayerNode) => (riskScore(n) ?? 0) > floor
   const conducts = (id: string) => {
     const n = byId.get(id)
-    return !!n && !hidden.has(id) && (n.label === 'Entity' || n.label === 'Person')
+    if (!n) return false
+    if (n.label === 'Person') return !hidden.has(id) || isRisky(n)
+    return n.label === 'Entity' && !hidden.has(id)
   }
-  const risky = nodes.filter(n => isOrganization(n) && !hidden.has(n.id) && (riskScore(n) ?? 0) > floor)
+  const risky = nodes.filter(n => (isOrganization(n) || n.label === 'Person') && isRisky(n))
   if (!risky.length) return new Set()
   const suppliers = [...new Set(edges.filter(e => e.type === 'SUPPLIES' && byId.has(e.target)).map(e => e.source))].filter(conducts)
   if (!suppliers.length) return new Set()
@@ -207,10 +217,14 @@ export function riskPinnedOrganizations(
   return new Set(risky.filter(n => reached.has(n.id)).map(n => n.id))
 }
 
-/** Every node the layer toggles hide: the off layers, the indirect organizations if that toggle
- *  is off, then whatever organizations the hiding stranded — less the risky ones, which override
- *  both prunings but never a layer toggle. The pins are read off the graph the layers leave, so
- *  they are settled before either pruning eats into it. */
+/** Every node the canvas hides: the off layers, the indirect organizations if that toggle is off,
+ *  then whatever organizations the hiding stranded — less the risky ones, which come back at the
+ *  end, a pinned person over an off people layer included.
+ *
+ *  The pins are lifted last, after every rule has run over the graph the layer toggles left. That
+ *  order is what keeps a pin to itself: a pinned node is still "hidden" while the prunings look at
+ *  its neighbours, so a designated director drawn over an off people layer does not drag their
+ *  other three board seats back onto the canvas. */
 export function hiddenNodeIds(
   nodes: LayerGraphNode[],
   edges: LayerGraphEdge[],
@@ -219,9 +233,9 @@ export function hiddenNodeIds(
 ): Set<string> {
   const hidden = new Set<string>()
   for (const n of nodes) if (!layerVisible(layerOf(n), enabled)) hidden.add(n.id)
-  const pinned = riskPinnedOrganizations(nodes, edges, hidden)
-  const prune = (ids: Set<string>) => ids.forEach(id => { if (!pinned.has(id)) hidden.add(id) })
-  if (!indirectOrgsVisible(enabled)) prune(indirectOrganizations(nodes, edges, hidden, keep))
-  prune(orphanedOrganizations(nodes, edges, hidden, keep))
+  const pinned = riskPinnedNodes(nodes, edges, hidden)
+  if (!indirectOrgsVisible(enabled)) indirectOrganizations(nodes, edges, hidden, keep).forEach(id => hidden.add(id))
+  orphanedOrganizations(nodes, edges, hidden, keep).forEach(id => hidden.add(id))
+  pinned.forEach(id => hidden.delete(id))
   return hidden
 }

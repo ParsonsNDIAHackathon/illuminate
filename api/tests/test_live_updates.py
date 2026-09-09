@@ -96,10 +96,17 @@ def test_graph_all_returns_every_program_not_just_the_root(client):
 
 
 def test_graph_all_honours_layers(client):
+    """An off layer takes the ordinary people. A person scored over the pin floor is not
+    ordinary: the canvas can only pin what it was sent, so those come either way and the
+    canvas decides (RISK_PIN_FLOOR, web/src/stores/graphLayers.ts)."""
+    from illuminate.config import RISK_PIN_FLOOR
     lean = client.get("/api/graph/all?people=false").json()["subgraph"]
-    assert not [n for n in lean["nodes"] if n["label"] == "Person"]
+    people = [n for n in lean["nodes"] if n["label"] == "Person"]
+    assert all((n["props"].get("risk_score") or 0) > RISK_PIN_FLOOR for n in people), \
+        "an off people layer sends only the risky ones"
     full = client.get("/api/graph/all?people=true&artifacts=true").json()["subgraph"]
     assert len(full["nodes"]) >= len(lean["nodes"])
+    assert {n["id"] for n in people} <= {n["id"] for n in full["nodes"]}, "the layer only ever adds people"
 
 
 def test_graph_all_splits_artifacts_sources_and_claims(client):
