@@ -20,8 +20,8 @@ from pathlib import Path
 # These are positions, not identities: commenting a slide out of index.html renumbers
 # everything after it, and this list does not notice. If a pick starts naming the wrong
 # slide, that is why — page through index.html and read the numbers off the address bar
-# again. The map slide at the end is deliberately not picked; it is an optional aside.
-PICKS = ['5', '6', '8', '9', '10/2', '11']
+# again.
+PICKS = ['5', '6', '8', '9', '10/2', '11', '12']
 
 HEAD = '''<!doctype html>
 <html lang="en">

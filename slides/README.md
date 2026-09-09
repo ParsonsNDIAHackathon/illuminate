@@ -37,8 +37,8 @@ Pages must be switched on once, under **Settings → Pages → Source: GitHub Ac
 
 ## The short deck
 
-`short.html` is the same deck cut to six slides — the big picture, the person, risk colouring,
-why it flows, the generated report, and where it goes next. It shares `theme.css`, `deck.js` and
+`short.html` is the same deck cut to seven slides — the big picture, the person, risk colouring,
+why it flows, the generated report, where it goes next, and the map. It shares `theme.css`, `deck.js` and
 `vendor/`, so it is served and opened exactly like the full one (`slides/short.html`, or
 <http://localhost:8080/slides/short.html> under `make up`).
 
@@ -98,7 +98,7 @@ adds a scrubber; `data-once` stops the loop.
 | `media/report-risk.png` | The report's risk section | from `docs/screenshots/06-report-risk.png` |
 | `media/chat-add-program.png` | **Chat: add a new program** | **your capture** |
 | `media/permission-dialog.png` | Ask before writing | from `docs/screenshots/04-permission-dialog.png` |
-| `media/map.png` | Map view — the optional closer | **your capture** |
+| `media/map.png` | Map view — last slide of both decks | **your capture** |
 
 The rows marked *from `docs/screenshots/`* are stand-ins — overwrite any of them with a fresher
 capture under the same filename.
