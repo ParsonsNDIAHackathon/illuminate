@@ -50,10 +50,13 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useGraph } from '../stores/graph'
+import { useWorkspace } from '../stores/workspace'
+import { hiddenNodeIds } from '../stores/graphLayers'
 import { buildMapPlaces, matchesMapEntry, type MapPlace } from '../graphMap'
 import world from '../data/worldMap.json'
 import regions from '../data/mapRegions.json'
 const graph = useGraph()
+const workspace = useWorkspace()
 const props = defineProps<{ locationCode?: string }>()
 const emit = defineEmits<{ select: [] }>()
 const selectedKey = ref('')
@@ -72,7 +75,10 @@ onMounted(() => {
 onBeforeUnmount(() => mapObserver?.disconnect())
 const drag = ref<{ x: number; y: number; center: [number, number] } | null>(null)
 const viewBox = computed(() => `${center.value[0] - 540 / zoom.value} ${center.value[1] - 270 / zoom.value} ${1080 / zoom.value} ${540 / zoom.value}`)
-const data = computed(() => buildMapPlaces(graph.nodeList, graph.edgeList, world, regions))
+const data = computed(() => {
+  const hidden = hiddenNodeIds(graph.nodeList, graph.edgeList, { ...workspace.ws.layers, countries: true }, graph.focusId ? [graph.focusId] : [])
+  return buildMapPlaces(graph.nodeList.filter(node => !hidden.has(node.id)), graph.edgeList, world, regions)
+})
 const places = computed(() => data.value.places.map(place => ({ ...place, entries: place.entries.filter(entry => matchesMapEntry(entry, graph.filter)) })).filter(place => place.entries.length))
 const occupied = computed(() => new Set(places.value.filter(p => p.key.startsWith('country:')).map(p => p.key.slice(8))))
 const occupiedRegions = computed(() => new Set(places.value.filter(p => p.region).map(p => p.key.slice(7))))

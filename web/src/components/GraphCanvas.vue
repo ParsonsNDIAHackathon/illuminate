@@ -33,6 +33,7 @@ const ws = useWorkspace()
 let cy: Core | null = null
 let restoringView = false
 let holdLayout = false
+let pendingEntityFocus: string | null = null
 let staticLayout: any = null
 let renderedScope = ''
 const scopeKey = () => graph.focusId || ''
@@ -137,6 +138,7 @@ function sync() {
     stopLive()
   }
   restyle()
+  if (!restoringView) focusPendingEntity()
 }
 function restyle() {
   if (!cy || !props.active) return
@@ -296,10 +298,23 @@ function layout(fit = true) {
   // A fresh canvas has every node at the origin; fcose must randomise from there or it collapses to a line.
   const l = cy.layout({ name: 'fcose', animate: true, animationDuration: 400, randomize: fit, fit, padding: 40, nodeRepulsion: () => 9000, idealEdgeLength: () => 90, quality: 'default' } as any)
   staticLayout = l
-  l.one('layoutstop', () => { staticLayout = null; if (props.active && !restoringView) startLive() })
+  l.one('layoutstop', () => { staticLayout = null; if (props.active && !restoringView) { startLive(); focusPendingEntity() } })
   l.run()
 }
 function fit() { cy?.fit(undefined, 40) }
+
+function focusPendingEntity() {
+  if (!cy || !props.active || staticLayout || !pendingEntityFocus) return
+  const target = cy.getElementById(pendingEntityFocus)
+  if (!target.length) return
+  pendingEntityFocus = null
+  stopLive()
+  holdLayout = true
+  cy.elements().unselect()
+  target.select()
+  cy.stop(true, false)
+  cy.animate({ center: { eles: target }, zoom: Math.max(cy.zoom(), 1.25), duration: 350 })
+}
 
 onMounted(() => {
   cy = cytoscape({ container: el.value!, style: styleSheet(), wheelSensitivity: 0.25, minZoom: 0.1, maxZoom: 4 })
@@ -315,6 +330,7 @@ onBeforeUnmount(() => { stopLive(); staticLayout?.stop(); cy?.destroy() })
 watch(() => props.active, async active => {
   if (!cy) return
   if (!active) {
+    pendingEntityFocus = null
     stopLive()
     staticLayout?.stop()
     cy.stop(true, false)
@@ -324,6 +340,7 @@ watch(() => props.active, async active => {
   }
   await nextTick()
   if (!cy || !props.active) return
+  pendingEntityFocus = graph.selected?.label === 'Entity' ? graph.selected.id : null
   cy.resize()
   const saved = savedView?.scope === scopeKey() ? savedView : null
   restoringView = !!saved && saved.positions.size > 0
@@ -344,6 +361,7 @@ watch(() => props.active, async active => {
     })
   }
   restoringView = false
+  focusPendingEntity()
 })
 watch(() => graph.version, sync)
 watch(() => graph.freshVersion, revealFresh)
