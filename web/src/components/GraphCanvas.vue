@@ -30,6 +30,7 @@ const el = ref<HTMLElement>()
 const graph = useGraph()
 const ws = useWorkspace()
 let cy: Core | null = null
+let ro: ResizeObserver | null = null
 const emit = defineEmits<{ (e: 'expand', id: string): void; (e: 'report', id: string): void }>()
 
 
@@ -298,8 +299,12 @@ onMounted(() => {
   cy.on('tap', (ev) => { if (ev.target === cy) { graph.select(null); graph.selectEdge(null) } })
   cy.on('dbltap', 'node', (ev) => { const n = graph.nodes.get(ev.target.id()); if (n && (n.label === 'Entity' || n.label === 'Person')) emit('expand', ev.target.id()) })
   sync()
+  // The side panel is drag-resizable, so the container changes width without a window
+  // resize event — cytoscape would keep drawing to the old box until the next one.
+  ro = new ResizeObserver(() => cy?.resize())
+  ro.observe(el.value!)
 })
-onBeforeUnmount(() => { stopLive(); cy?.destroy() })
+onBeforeUnmount(() => { stopLive(); ro?.disconnect(); cy?.destroy() })
 watch(() => graph.version, sync)
 watch(() => graph.freshVersion, revealFresh)
 watch(() => graph.styleVersion, restyle)

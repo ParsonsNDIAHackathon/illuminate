@@ -9,9 +9,12 @@
     </div>
     <div class="messages" ref="scroller">
       <div v-if="!chat.messages.length" class="empty">
-        <p>Try:</p>
+        <p>Ask in plain language — questions are answered against the graph on screen, and the
+        canvas restyles itself to match the answer.</p>
+        <p class="mt-2">Try:</p>
         <v-chip v-for="s in suggestions" :key="s" class="ma-1" variant="outlined" size="small" @click="ask(s)">{{ s }}</v-chip>
       </div>
+      <p v-if="!chat.messages.length" class="empty-foot">Click any node or edge on the canvas to read its properties beside it.</p>
       <div v-for="m in chat.messages" :key="m.id" class="msg" :class="m.role">
         <div v-if="m.role === 'user'" class="bubble user">{{ m.text }}</div>
         <div v-else class="bubble assistant">
@@ -70,9 +73,12 @@ watch(() => chat.messages.map(m => m.text.length + (m.tools?.length || 0)).join(
 <style scoped>
 .rail { display: flex; flex-direction: column; height: 100%; }
 .rail-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid rgba(128,128,128,.2); }
-.title { font-weight: 600; font-size: 13px; }
+.title { font-weight: 600; font-size: 14px; letter-spacing: .01em; }
 .messages { flex: 1; overflow-y: auto; padding: 10px; }
 .empty { opacity: .8; font-size: 13px; }
+.empty :deep(.v-chip) { height: auto; min-height: 26px; white-space: normal; padding: 5px 10px; }
+.empty :deep(.v-chip__content) { white-space: normal; line-height: 1.3; }
+.empty-foot { margin-top: 14px; font-size: 12px; opacity: .55; }
 .msg { margin-bottom: 10px; display: flex; }
 .msg.user { justify-content: flex-end; }
 .bubble { border-radius: 10px; padding: 8px 10px; font-size: 13px; max-width: 100%; }

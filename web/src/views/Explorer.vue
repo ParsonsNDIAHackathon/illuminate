@@ -1,5 +1,5 @@
 <template>
-  <div class="explorer">
+  <div class="explorer" ref="root" :style="{ gridTemplateColumns: `1fr 6px ${sideW}px` }">
     <div class="canvas">
       <GraphCanvas ref="canvas" @expand="expand" />
       <div class="toolbar">
@@ -10,6 +10,9 @@
                   @update:model-value="setFocus" />
       </div>
       <Legend />
+      <!-- Properties ride on the canvas beside the node they describe, so the conversation
+           below never has to give up its space to them. -->
+      <SelectionCard @expand="expand" />
       <div v-if="!graph.nodes.size && !graph.loading" class="empty">
         <v-btn color="primary" @click="reload">Load graph</v-btn>
       </div>
@@ -25,22 +28,17 @@
         <details v-if="graph.lastCypher"><summary>last query</summary><CypherBlock :statement="graph.lastCypher.statement" :params="graph.lastCypher.params" /></details>
       </div>
     </div>
-    <div class="side">
-      <div class="inspector-pane">
-        <Inspector v-if="graph.selected" @expand="expand" />
-        <EdgeInspector v-else-if="graph.selectedEdge" />
-        <div v-else class="hint">Select a node or an edge to inspect it. Double-click a node to expand.</div>
-      </div>
-      <div class="chat-pane"><ChatRail /></div>
-    </div>
+    <!-- Double-click restores the default width, so a drag can always be undone without guessing. -->
+    <div class="gutter" :class="{ dragging }" title="Drag to resize — double-click to reset"
+         @pointerdown="startDrag" @dblclick="setWidth(DEFAULT_W)"></div>
+    <div class="side"><ChatRail /></div>
   </div>
 </template>
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, qs } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
-import Inspector from '../components/Inspector.vue'
-import EdgeInspector from '../components/EdgeInspector.vue'
+import SelectionCard from '../components/SelectionCard.vue'
 import ChatRail from '../components/ChatRail.vue'
 import Legend from '../components/Legend.vue'
 import LayerToggles from '../components/LayerToggles.vue'
@@ -49,6 +47,31 @@ import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 const graph = useGraph(); const ws = useWorkspace()
 const q = ref(''); const hits = ref<any[]>([]); const searching = ref(false); const open = ref(false)
+// The chat is the main way to work the graph, so it gets a panel wide enough to read a
+// paragraph in — and a handle, because how much canvas a question needs is the user's call.
+const WIDTH_KEY = 'illuminate.side.width'
+const DEFAULT_W = 440, MIN_W = 320, MIN_CANVAS = 420
+const root = ref<HTMLElement>()
+const dragging = ref(false)
+const sideW = ref(clamp(Number(localStorage.getItem(WIDTH_KEY)) || DEFAULT_W))
+function clamp(px: number) { return Math.max(MIN_W, Math.min(px, Math.max(MIN_W, window.innerWidth - MIN_CANVAS))) }
+function setWidth(px: number) { sideW.value = clamp(px); localStorage.setItem(WIDTH_KEY, String(sideW.value)) }
+// preventDefault() here would suppress the compatibility mouse events the double-click
+// reset rides on, so the drag guards against text selection with CSS instead.
+function startDrag(e: PointerEvent) {
+  if (e.button !== 0) return
+  dragging.value = true
+  const right = root.value!.getBoundingClientRect().right
+  const move = (ev: PointerEvent) => { sideW.value = clamp(right - ev.clientX) }
+  const up = () => {
+    dragging.value = false
+    setWidth(sideW.value)
+    window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up)
+  }
+  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+}
+// A window that shrank below what the stored width leaves for the canvas gives the canvas its floor back.
+function onResize() { sideW.value = clamp(sideW.value) }
 // The programs the canvas can be narrowed to. The store keeps this current from live
 // deltas, so a program added while this view is open shows up here without a reload.
 const focusItems = computed(() => [{ id: null, name: 'Everything' }, ...graph.programs])
@@ -75,17 +98,21 @@ async function reload() {
   else await graph.loadAll(ws.ws.layers)
 }
 async function expand(id: string) { await graph.loadNeighbourhood(id, 1, ws.ws.layers) }
-onMounted(async () => { if (!ws.loaded) await ws.load(); graph.loadPrograms(); if (!graph.nodes.size) reload() })
+onMounted(async () => {
+  window.addEventListener('resize', onResize)
+  if (!ws.loaded) await ws.load(); graph.loadPrograms(); if (!graph.nodes.size) reload()
+})
+onBeforeUnmount(() => window.removeEventListener('resize', onResize))
 // Depth only shapes a focused view; the whole graph is not walked from a root.
 watch(() => ws.depth, () => { if (graph.focusId) reload() })
 </script>
 <style scoped>
-.explorer { display: grid; grid-template-columns: 1fr 380px; height: calc(100vh - 48px); }
-.canvas { position: relative; }
-.side { display: grid; grid-template-rows: minmax(120px, 42%) 1fr; border-left: 1px solid rgba(128,128,128,.2); min-height: 0; }
-.inspector-pane { border-bottom: 1px solid rgba(128,128,128,.2); overflow: auto; min-height: 0; }
-.chat-pane { min-height: 0; }
-.hint { padding: 12px; opacity: .6; font-size: 13px; }
+.explorer { display: grid; height: calc(100vh - 48px); }
+.explorer:has(.gutter.dragging) { user-select: none; cursor: col-resize; }
+.canvas { position: relative; min-width: 0; }
+.gutter { cursor: col-resize; background: rgba(128,128,128,.2); transition: background .12s; user-select: none; touch-action: none; }
+.gutter:hover, .gutter.dragging { background: rgb(var(--v-theme-primary)); }
+.side { min-height: 0; min-width: 0; }
 .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: .8; }
 .toolbar { position: absolute; top: 8px; left: 12px; z-index: 5; display: flex; align-items: center; gap: 8px; }
 .focus { width: 230px; }

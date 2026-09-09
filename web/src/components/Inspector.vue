@@ -1,14 +1,11 @@
 <template>
   <div class="inspector" v-if="node">
-    <div class="d-flex align-center ga-2 mb-1">
+    <div class="d-flex align-center ga-2 flex-wrap mb-1">
       <v-chip size="x-small" variant="tonal">{{ node.label }}<span v-if="p.kind"> · {{ p.kind }}</span></v-chip>
       <v-chip v-if="p.flagged" size="x-small" color="error" variant="tonal" :title="p.flag_reason">flagged</v-chip>
       <v-chip v-if="scorable" size="x-small" variant="tonal" :color="bandChip(rs.band)"
               :title="rs.note || 'Not scored yet'">{{ scoreLabel(rs.score, rs.band) }}</v-chip>
-      <v-spacer />
-      <v-btn icon="mdi-close" variant="text" size="x-small" @click="graph.select(null)" />
     </div>
-    <h3 class="name">{{ node.name }}</h3>
     <div class="ids text-caption">
       <span v-if="p.uei">UEI {{ p.uei }}</span><span v-if="p.cage"> · CAGE {{ p.cage }}</span><span v-if="p.lei"> · LEI {{ p.lei }}</span><span v-if="p.ticker"> · {{ p.ticker }}</span>
     </div>
@@ -18,7 +15,7 @@
       <v-chip v-if="detail?.tier" size="x-small" variant="tonal">Tier {{ detail.tier }}</v-chip>
     </div>
     <template v-if="node.label === 'Entity' && detail">
-      <section>
+      <section v-if="hasSupply">
         <h4>Supply</h4>
         <dl>
           <template v-if="detail.categories?.length"><dt>Category</dt><dd>{{ detail.categories.map((c:any) => c.name).join(' › ') }}</dd></template>
@@ -145,6 +142,8 @@ const node = computed(() => graph.selected)
 const p = computed(() => node.value?.props || {})
 const detail = ref<any>(null); const supplies = ref<any[]>([]); const personRoles = ref<any[]>([]); const enriching = ref(false); const focusing = ref(false)
 const isProgram = computed(() => node.value?.label === 'Entity' && p.value.kind === 'program')
+// A heading over an empty list reads as missing data; an agency simply has no supply to show.
+const hasSupply = computed(() => !!(detail.value?.categories?.length || supplies.value.length || detail.value?.suppliers_count))
 // Only organisations, programs and people are scored; locations, artifacts and claims are
 // evidence about parties, not parties to be graded.
 const scorable = computed(() => node.value?.label === 'Entity' || node.value?.label === 'Person')
@@ -211,8 +210,7 @@ async function focusHere() {
 }
 </script>
 <style scoped>
-.inspector { padding: 12px; font-size: 13px; overflow-y: auto; height: 100%; }
-.name { font-size: 16px; line-height: 1.2; margin: 2px 0; }
+.inspector { padding: 10px 12px 12px; font-size: 13px; }
 .ids { opacity: .7; }
 section { margin-top: 10px; }
 h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; margin-bottom: 4px; }

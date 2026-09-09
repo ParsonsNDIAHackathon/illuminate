@@ -2,10 +2,7 @@
   <div class="inspector" v-if="edge">
     <div class="d-flex align-center ga-2 mb-1">
       <v-chip size="x-small" variant="tonal">edge · {{ edge.type }}</v-chip>
-      <v-spacer />
-      <v-btn icon="mdi-close" variant="text" size="x-small" @click="graph.selectEdge(null)" />
     </div>
-    <h3 class="name">{{ edge.type }}</h3>
     <div class="ends text-body-2">
       <a href="#" @click.prevent="graph.select(edge.source)">{{ sourceName }}</a>
       <span class="arrow">→</span>
@@ -44,8 +41,7 @@ const facts = computed(() => Object.entries(p.value)
   .map(([k, v]) => [k.replace(/_/g, ' '), typeof v === 'boolean' ? (v ? 'yes' : 'no') : Array.isArray(v) ? v.join(', ') : String(v)] as [string, string]))
 </script>
 <style scoped>
-.inspector { padding: 12px; font-size: 13px; overflow-y: auto; height: 100%; }
-.name { font-size: 16px; line-height: 1.2; margin: 2px 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.inspector { padding: 10px 12px 12px; font-size: 13px; }
 .ends { margin: 4px 0 2px; line-height: 1.4; overflow-wrap: anywhere; }
 .ends a { text-decoration: none; }
 .arrow { opacity: .5; margin: 0 6px; }
