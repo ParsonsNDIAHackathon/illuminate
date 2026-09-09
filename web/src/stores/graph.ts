@@ -57,6 +57,8 @@ export const useGraph = defineStore('graph', {
     // The programs the focus picker offers, kept current from live deltas so one added
     // while the canvas is open is selectable without a reload.
     programs: [] as { id: string; name: string }[],
+    // Preset encodings the server can draw — name, label and what it means (schemes.py).
+    schemes: [] as { name: string; label: string; description: string }[],
     truncated: false,    // the whole graph did not fit under the node cap
     fresh: [] as string[],   // ids that just arrived from a live change, for the canvas to reveal
     freshVersion: 0,
@@ -200,6 +202,18 @@ export const useGraph = defineStore('graph', {
         this.notePrograms(r.subgraph?.nodes || [])
         this.lastCypher = { statement: r.cypher, params: r.params }
       } finally { this.loading = false }
+    },
+    /** The preset colour schemes on offer — what the "Colour by" menu is built from. */
+    async loadSchemes() {
+      try { this.schemes = (await api.get('/api/styles/schemes')).items } catch { /* the menu just stays empty */ }
+    },
+    /** Colour what is on the canvas by a preset scheme (api/illuminate/schemes.py). The ops
+     *  are appended like any other encoding: a scheme adds a reading of the graph, it does
+     *  not throw away the highlights the conversation has already put there. */
+    async applyScheme(name: string) {
+      const r = await api.post(`/api/styles/schemes/${encodeURIComponent(name)}`, { ids: [...this.nodes.keys()] })
+      if (r.style_ops?.length) this.applyStyleOps(r.style_ops, true)
+      return r
     },
     async runTemplate(name: string, params: any, applyStyles = true) {
       // A template's root is whatever the canvas is focused on unless the caller says otherwise.

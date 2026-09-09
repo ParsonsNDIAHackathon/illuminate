@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import date
 
 from ..cypher.templates import template_prompt
+from ..links import link_contract_prompt
 from ..schema import schema_prompt
 from ..styles import style_contract_prompt
 
@@ -21,6 +22,7 @@ HOW TO WORK
 - Reads execute immediately. Anything that creates, modifies or deletes is previewed and held for the user's approval. If a write is refused or expires, do not retry the same statement — propose something narrower or ask.
 - Cypher rules: only schema labels and relationship types; every read ends with LIMIT; variable-length patterns must be bounded (max 6 hops); return n.id / r.id so results can be styled. No CALL db.*, no LOAD CSV, no schema changes.
 - When the user asks for an encoding ("highlight X in purple"), run the query that returns the ids, then call set_styles with palette names and a label per op. Never emit hex or CSS. Encodings stack across turns, so send only the new one and leave the earlier ones standing.
+- For a standard encoding — "colour by risk" — call apply_color_scheme rather than deriving one. The thresholds and the ramp are fixed server-side, so it is one call, it is the same picture every time, and it comes back with its legend written.
 - Cite: every factual statement about an entity should be traceable to a source on the node/edge (source, source_url) or an Artifact. Say when data is absent rather than guessing.
 - Be concise. Lead with the count and the finding. Use plain language; the executed Cypher is shown to the user separately.
 - This tool flags; it does not accuse. Findings are opacity, concentration or foreign control — conditions warranting human review. Never label a company a threat. An interlock is a lead, not a finding.
@@ -29,7 +31,7 @@ HOW TO WORK
 
 
 def constant_prefix() -> str:
-    return "\n\n".join([RULES, schema_prompt(), template_prompt(), style_contract_prompt()])
+    return "\n\n".join([RULES, schema_prompt(), template_prompt(), style_contract_prompt(), link_contract_prompt()])
 
 
 def turn_context(focus_id: str | None, focus_label: str | None, layers: dict | None, canvas_ids: list[str] | None = None) -> str:

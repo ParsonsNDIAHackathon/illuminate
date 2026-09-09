@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from ..cypher.templates import TEMPLATES
 from ..reports import DEFAULT_KIND as DEFAULT_REPORT_KIND, kinds as report_kinds
+from ..schemes import catalog as scheme_catalog
 from ..styles import SWATCHES
+
+# Preset encodings are declared once, in schemes.py, for the same reason report kinds are:
+# a scheme the contract advertises and the module cannot draw is a tool call that always fails.
+SCHEMES = scheme_catalog()
+SCHEME_NAMES = [s["name"] for s in SCHEMES]
 
 # Report kinds are declared once, in reports.py, and published from there: a kind the contract
 # knows about and the module cannot build would be a tool call that always fails.
@@ -146,6 +152,24 @@ TOOLS: list[dict] = [
                 }
             },
             "required": ["ops"],
+        },
+    },
+    {
+        "name": "apply_color_scheme",
+        "description": "Colour the canvas with a preset scheme. Use this whenever the user asks for a standard encoding "
+                       "— 'colour by risk', 'show me the risk gradient' — instead of querying scores and working out a "
+                       "mapping with set_styles: the buckets, the thresholds and the ramp are fixed server-side, so the "
+                       "same question gets the same picture every time and the legend comes back written. Schemes: "
+                       + "; ".join(f"{s['name']} — {s['description']}" for s in SCHEMES) + ". "
+                       "Like every other encoding this adds to what is already on the canvas; it does not clear it.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "scheme": {"type": "string", "enum": SCHEME_NAMES},
+                "ids": {"type": "array", "items": {"type": "string"},
+                        "description": "restrict to these node ids; omit to colour everything the scheme can grade"},
+            },
+            "required": ["scheme"],
         },
     },
     {

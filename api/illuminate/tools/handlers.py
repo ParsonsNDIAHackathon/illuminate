@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from .. import db, events
+from .. import db, events, links as applinks
 from ..config import load_workspace
 from ..cypher.templates import TEMPLATES
 from ..cypher.validator import CypherRejected, validate
@@ -32,6 +32,10 @@ class ToolContext:
     # looking at it. Nothing is focused by default: a workspace holds every program.
     focus_id: str | None = None
     focus_label: str | None = None
+    # What the caller currently has drawn, when it has a canvas at all. An encoding applied
+    # to the graph the user is looking at should count what is in front of them; an agent
+    # over MCP has no canvas and gets the whole graph.
+    canvas_ids: list[str] | None = None
 
     @classmethod
     def from_workspace(cls, **kw) -> "ToolContext":
@@ -49,6 +53,9 @@ class ToolResult:
     style_ops: list[dict] = field(default_factory=list)
     legend: list[dict] = field(default_factory=list)
     permission: dict | None = None              # decision summary when a write was involved
+    # Where the user can go with what this produced — a report to open, a page to visit.
+    # Rendered as buttons under the answer, so a deliverable is one click away (links.py).
+    links: list[dict] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
     def for_model(self, max_chars: int = 12000) -> str:
@@ -256,8 +263,11 @@ async def generate_report(ctx: ToolContext, subject_id: str | None = None, kind:
         ok=True,
         data={**row, "note": "Stored as a Report node in the graph and listed on the Reports tab. Its properties "
                              "carry the generation time and a regenerate control; regenerating rewrites this same "
-                             "report from current data."},
+                             "report from current data. A button to open it is already under your answer, so name "
+                             "the report rather than repeating the link."},
         subgraph=sub,
+        # The whole point of writing a document is reading it: the answer carries the door.
+        links=applinks.dump([applinks.report(row["id"], row["title"], subject_name=row.get("subject_name"))]),
     )
 
 
@@ -273,7 +283,9 @@ async def get_entity_report(ctx: ToolContext, entity_id: str) -> ToolResult:
                    "former": [{k: p[k] for k in ("name", "title", "from", "to", "moved_to_flagged")} for p in rep["people"]["former"][:12]]},
         "risk": rep["risk"], "screens": rep["screens"], "news": rep["news"][:5], "sources": rep["sources"], "summary": rep["summary"]["text"],
     }
-    return ToolResult(ok=True, data=compact)
+    name = rep["identity"].get("name") or entity_id
+    return ToolResult(ok=True, data=compact,
+                      links=applinks.dump([applinks.entity(entity_id, name), applinks.canvas(entity_id, name)]))
 
 
 def _loc(code: str) -> tuple[str, str]:
@@ -437,6 +449,28 @@ async def discover_suppliers(ctx: ToolContext, entity_id: str, keywords: list[st
                       cypher=v.statement, params=params, permission=perm)
 
 
+async def apply_color_scheme(ctx: ToolContext, scheme: str, ids: list[str] | None = None) -> ToolResult:
+    """Paint the canvas with a preset encoding instead of deriving one.
+
+    The buckets and the ramp live in schemes.py, so "colour by risk" is one call rather
+    than a query, a mapping and a set_styles the model has to get right again every time.
+
+    With no ids the scheme covers what the caller has on the canvas, so the legend counts
+    what the user can actually see; a caller with no canvas gets the whole graph.
+    """
+    from .. import schemes
+
+    try:
+        out = await schemes.apply(scheme, ids if ids is not None else ctx.canvas_ids)
+    except schemes.UnknownScheme:
+        return ToolResult(ok=False, data={"error": f"unknown scheme {scheme!r}", "schemes": schemes.catalog()})
+    return ToolResult(
+        ok=True,
+        data={"scheme": out["scheme"], "node_count": out["node_count"], "legend": out["legend"], "note": out["note"]},
+        style_ops=out["style_ops"], legend=out["legend"],
+    )
+
+
 async def enrich_entity(ctx: ToolContext, entity_id: str, connectors: list[str] | None = None) -> ToolResult:
     from ..enrichment.worker import worker
     rows = await db.read("MATCH (e:Entity {id:$id}) RETURN e.id AS id, e.name AS name", {"id": entity_id})
@@ -455,6 +489,7 @@ HANDLERS = {
     "propose_entity": propose_entity,
     "attach_evidence": attach_evidence,
     "set_styles": set_styles,
+    "apply_color_scheme": apply_color_scheme,
     "generate_report": generate_report,
     "get_entity_report": get_entity_report,
     "discover_suppliers": discover_suppliers,

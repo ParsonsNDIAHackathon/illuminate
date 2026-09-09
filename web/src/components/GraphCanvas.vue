@@ -35,15 +35,22 @@ function badgeFor(n: any) {
   if (p.flagged) bits.push('⚑')
   // The number, not just the halo: two nodes in the same band still rank against each
   // other, and a thin score is marked so nobody acts on 100/2-of-7 as if it were settled.
-  if (p.risk_score != null && p.risk_band && p.risk_band !== 'low') {
+  // Both are risk emphasis, so both answer to the same switch (stores/workspace.ts).
+  if (ws.riskEmphasis && p.risk_score != null && p.risk_band && p.risk_band !== 'low') {
     bits.push(`${p.risk_score}${isThin(p.risk_confidence) ? '?' : ''}`)
   }
   return bits.join(' ')
 }
 
-/** Risk halo data for a node, or nulls when it is unscored — unscored gets no ink at all. */
+/** Risk halo data for a node, or nulls when it is unscored — unscored gets no ink at all.
+ *
+ *  With risk emphasis off — the default — no node gets a halo whatever it scored. That is
+ *  the ordinary picture of a supply chain: a few hundred discs, none of them saying which
+ *  one is the problem. Every other way in is still open (the Risk tab, a score in the
+ *  properties card, "colour by risk"); what the switch governs is whether the canvas
+ *  volunteers it. */
 function haloData(n: any, theme: 'light' | 'dark') {
-  const halo = haloFor(n.props?.risk_band, theme)
+  const halo = ws.riskEmphasis ? haloFor(n.props?.risk_band, theme) : null
   return { haloColor: halo?.color ?? '#000000', haloPad: halo?.padding ?? 0, haloOpacity: halo?.opacity ?? 0 }
 }
 
@@ -306,6 +313,8 @@ watch(() => graph.filter, applyFilter)
 watch(() => graph.highlightIds, applyTrace)
 watch(() => ws.ws.layers, applyLayers, { deep: true })
 watch(() => ws.theme, () => { cy?.style(styleSheet() as any); sync() })
+// Halo and score badge are node data, so flipping the switch is a re-sync, not a reload.
+watch(() => ws.riskEmphasis, sync)
 watch(() => [graph.selectedId, graph.selectedEdgeId], ([id, eid]) => {
   if (!cy) return
   cy.elements().unselect()

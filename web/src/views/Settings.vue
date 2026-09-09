@@ -13,6 +13,21 @@
       </v-card-text>
     </v-card>
     <v-card class="mb-4" variant="outlined">
+      <v-card-title class="text-subtitle-1">Canvas</v-card-title>
+      <v-card-text>
+        <v-switch :model-value="ws.riskEmphasis" @update:model-value="(v: any) => ws.setRiskEmphasis(!!v)"
+                  color="primary" density="compact" hide-details
+                  label="Mark risk on the canvas — halo and score on every node the scorer has graded" />
+        <p class="text-caption mt-2" style="opacity:.7">
+          Off by default, and worth leaving off to start with: a supply chain drawn without it is the picture
+          everyone already has — a few hundred identical discs, with nothing saying which one is the problem.
+          Turning it on, or asking the chat to colour by risk, is the difference this tool makes.
+          Risk is always available either way — on the <router-link to="/risk">Risk tab</router-link>, in a node's
+          properties, and in any report.
+        </p>
+      </v-card-text>
+    </v-card>
+    <v-card class="mb-4" variant="outlined">
       <v-card-title class="text-subtitle-1">Model tiers</v-card-title>
       <v-card-text>
         <div class="d-flex ga-3 flex-wrap">

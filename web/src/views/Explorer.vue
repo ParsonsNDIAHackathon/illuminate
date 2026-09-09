@@ -26,6 +26,18 @@
                          subtitle="Take every node off the view" @click="graph.clear()" />
           </v-list>
         </v-menu>
+        <!-- The preset encodings the server knows how to draw. The same call the chat makes,
+             so "colour by risk" typed into the conversation and picked from here agree. -->
+        <v-menu v-if="graph.schemes.length" location="bottom start">
+          <template #activator="{ props }">
+            <v-btn v-bind="props" size="small" prepend-icon="mdi-palette-outline" append-icon="mdi-menu-down"
+                   :loading="colouring" title="Colour every node by a preset scheme">Colour by</v-btn>
+          </template>
+          <v-list density="compact" class="scheme-menu">
+            <v-list-item v-for="s in graph.schemes" :key="s.name" :title="s.label" :subtitle="s.description"
+                         prepend-icon="mdi-gradient-horizontal" @click="colourBy(s.name)" />
+          </v-list>
+        </v-menu>
         <!-- The icon says which of the two states you are in: a crosshair only means something
              when the canvas is actually narrowed to one program. -->
         <v-select class="focus" :model-value="graph.focusId" :items="focusItems" item-title="name" item-value="id"
@@ -125,9 +137,17 @@ async function reload() {
   else await graph.loadAll(ws.ws.layers)
 }
 async function expand(id: string) { await graph.loadNeighbourhood(id, 1, ws.ws.layers) }
+// A scheme is a read, so the only failure worth showing is that it did not land; the note it
+// comes back with (how many nodes were unscored, and so left uncoloured) goes to the legend
+// through the ops themselves.
+const colouring = ref(false)
+async function colourBy(name: string) {
+  colouring.value = true
+  try { await graph.applyScheme(name) } finally { colouring.value = false }
+}
 onMounted(async () => {
   window.addEventListener('resize', onResize)
-  if (!ws.loaded) await ws.load(); graph.loadPrograms(); if (!graph.nodes.size) reload()
+  if (!ws.loaded) await ws.load(); graph.loadPrograms(); graph.loadSchemes(); if (!graph.nodes.size) reload()
 })
 onBeforeUnmount(() => window.removeEventListener('resize', onResize))
 // The card is measured rather than assumed: it is only in the DOM once something is
@@ -154,6 +174,8 @@ watch(() => ws.depth, () => { if (graph.focusId) reload() })
 .toolbar { position: absolute; top: 8px; left: 12px; z-index: 5; display: flex; align-items: center; gap: 8px; }
 .layers-menu { max-width: 340px; }
 .canvas-menu { min-width: 260px; }
+.scheme-menu { max-width: 380px; }
+.scheme-menu :deep(.v-list-item-subtitle) { white-space: normal; font-size: 11px; }
 .focus { width: 230px; }
 .search { position: absolute; top: 52px; left: 12px; width: 360px; z-index: 5; }
 .hits { position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; max-height: 320px; overflow: auto; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.25); }

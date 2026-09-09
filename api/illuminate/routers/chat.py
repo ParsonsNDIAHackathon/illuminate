@@ -71,7 +71,8 @@ async def ws_chat(ws: WebSocket):
             # The focused program travels with the message: it is what the canvas is
             # showing right now, which the server has no other way of knowing.
             ctx = ToolContext(source="chat", conversation_id=conv.id, user=user, layers=msg.get("layers") or ws_settings.layers,
-                              focus_id=msg.get("focus_id"), focus_label=msg.get("focus_label"))
+                              focus_id=msg.get("focus_id"), focus_label=msg.get("focus_label"),
+                              canvas_ids=msg.get("canvas_ids"))
 
             async def emit(ev: dict, _ws=ws, _cid=conv.id):
                 ev = {**ev, "conversation_id": _cid}

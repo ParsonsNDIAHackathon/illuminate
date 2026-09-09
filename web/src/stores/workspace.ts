@@ -14,6 +14,12 @@ export const useWorkspace = defineStore('workspace', {
     ws: { permission_mode: 'ask_always', model_strong: null, model_fast: null, openai_base_url: null, layers: readLayers() } as Workspace,
     theme: (localStorage.getItem('illuminate.theme') as 'light' | 'dark') || 'dark',
     depth: Number(localStorage.getItem('illuminate.depth') || 2),
+    // Does the canvas mark risk on its own — the halo under a scored node and the score on
+    // its label? Off by default, and deliberately so: a supply chain drawn without it is
+    // what everyone already has, and the point of this tool is how little that picture
+    // tells you. Turning it on is the demonstration. Per-browser, like the theme and the
+    // depth; it changes what you are looking at, not what the workspace holds.
+    riskEmphasis: localStorage.getItem('illuminate.riskEmphasis') === '1',
     modelKey: false,
     loaded: false,
     // Does this workspace hold scenario material at all? Scenario records are drawn and
@@ -35,5 +41,6 @@ export const useWorkspace = defineStore('workspace', {
     },
     setTheme(t: 'light' | 'dark') { this.theme = t; localStorage.setItem('illuminate.theme', t) },
     setDepth(d: number) { this.depth = d; localStorage.setItem('illuminate.depth', String(d)) },
+    setRiskEmphasis(on: boolean) { this.riskEmphasis = on; localStorage.setItem('illuminate.riskEmphasis', on ? '1' : '0') },
   },
 })
