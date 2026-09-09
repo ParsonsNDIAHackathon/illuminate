@@ -31,7 +31,7 @@
             <text v-for="region in regionLabels" :key="`label:${region.id}`" :x="(region.longitude + 180) * 3" :y="(90 - region.latitude) * 3" :font-size="10.5 / (zoom * mapScale)" class="region-label">{{ region.name }}</text>
           </template>
         </g>
-        <g v-for="place in places" :key="place.key" :transform="`translate(${(place.longitude + 180) * 3},${(90 - place.latitude) * 3})`"
+        <g v-for="place in visiblePlaces" :key="place.key" :transform="`translate(${(place.longitude + 180) * 3},${(90 - place.latitude) * 3})`"
            class="marker" :class="{ active: selectedKey === place.key, precise: place.precise, regional: place.region, traced: traced(place) }" tabindex="0" role="button"
            :aria-label="`${place.name}: ${entityCount(place)} entities, ${place.precise ? 'supplied coordinates' : place.region ? 'state/province-level placement' : 'country-level placement'}`"
            @pointerdown.stop @click.stop="selectedKey = place.key" @keydown.enter.prevent="selectedKey = place.key" @keydown.space.prevent="selectedKey = place.key">
@@ -39,7 +39,7 @@
           <circle :r="(selectedKey === place.key ? 13 : 10) / (zoom * mapScale)" />
           <text :font-size="11 / (zoom * mapScale)" text-anchor="middle" dominant-baseline="central">{{ entityCount(place) }}</text>
         </g>
-        <g v-for="place in news.visible ? newsData.places : []" :key="`news:${place.code}`"
+        <g v-for="place in visibleNewsPlaces" :key="`news:${place.code}`"
            :transform="`translate(${(place.longitude + 180) * 3},${(90 - place.latitude) * 3})`"
            class="marker news-marker" :class="{ active: news.location === place.code }" tabindex="0" role="button"
            :aria-label="`${place.name}: ${place.articles.length} news articles; approximate country mention`"
@@ -47,7 +47,7 @@
           <title>{{ place.name }} · {{ place.articles.length }} news articles · Country mentioned in headline</title>
           <path :d="`M0,${-25 / (zoom * mapScale)} l${7 / (zoom * mapScale)},${7 / (zoom * mapScale)} l${-7 / (zoom * mapScale)},${7 / (zoom * mapScale)} l${-7 / (zoom * mapScale)},${-7 / (zoom * mapScale)} Z`" />
         </g>
-        <g v-for="place in acled.visible ? acled.mapped : []" :key="`acled:${place.id}`"
+        <g v-for="place in visibleAcledPlaces" :key="`acled:${place.id}`"
           :transform="`translate(${(place.longitude + 180) * 3},${(90 - place.latitude) * 3})`"
           class="marker acled-marker" :class="{ active: acled.selectedId === place.id }" tabindex="0" role="button"
           :aria-label="`ACLED: ${place.name}, ${place.country}: ${place.events} events; area centroid`"
@@ -65,17 +65,17 @@
         <v-btn icon="mdi-minus" aria-label="Zoom out" size="small" :disabled="zoom <= 1" @click="zoom = Math.max(1, zoom - .5)" />
         <v-btn size="small" @click="zoom = 1; center = [540, 270]">Reset</v-btn>
       </v-btn-group>
-      <p v-if="!places.length && !(news.visible && newsData.places.length) && !(acled.visible && acled.mapped.length)" class="map-empty" role="status">{{ graph.loading ? 'Loading locations…' : graph.filter ? 'No mapped entities match your search.' : 'No geographic locations in this graph scope. Try a deeper traversal or another program.' }}</p>
+      <p v-if="!visiblePlaces.length && !visibleNewsPlaces.length && !visibleAcledPlaces.length" class="map-empty" role="status">{{ graph.loading ? 'Loading locations…' : graph.filter ? 'No mapped entities match your search.' : 'No markers in this map area. Zoom out or pan to another location.' }}</p>
       <a class="attribution" href="https://www.naturalearthdata.com/about/terms-of-use/" target="_blank" rel="noopener">Natural Earth · illustrative boundaries</a>
     </div>
-    <AcledDetails />
+    <AcledDetails :places="visibleAcledPlaces" />
     <div v-if="news.visible" class="news-details">
       <div class="detail-heading">
         <v-select v-model="news.location" :items="newsLocations" label="News location" density="compact" variant="outlined" hide-details class="location-select" />
-        <span>Coral diamonds: approximate country mentions. <template v-if="news.result">“{{ news.result.query }}” · past {{ timeWindows.find(window => window.value === news.result.timespan)?.title }} · {{ newsData.mapped }} mapped, {{ newsData.unmapped.length }} unplaced. Up to 250 articles; longer searches sample each 3-month window.</template></span>
+        <span>Coral diamonds: approximate country mentions. <template v-if="news.result">“{{ news.result.query }}” · past {{ timeWindows.find(window => window.value === news.result.timespan)?.title }} · {{ newsArticles.length }} articles in view. Up to 250 articles; longer searches sample each 3-month window.</template></span>
       </div>
       <v-progress-linear v-if="news.loading" indeterminate color="primary" aria-label="Searching recent coverage" />
-      <p v-if="news.result && !newsArticles.length" class="text-caption pa-2" role="status">No articles found for this selection. Try another topic or a longer time window.</p>
+      <p v-if="news.result && !newsArticles.length" class="text-caption pa-2" role="status">No news articles in this map area. Zoom out or pan to another location.</p>
       <v-list class="entry-list" density="compact" aria-label="News articles">
         <v-list-item v-for="article in newsArticles" :key="article.url" class="news-article" :active="news.selectedUrl === article.url" color="primary"
                      :title="article.title || article.url" :subtitle="`${article.domain} · Seen ${newsDate(article.seendate) || 'date unavailable'}`"
@@ -87,7 +87,7 @@
     <div class="map-details">
       <div class="detail-heading">
         <v-select v-model="selectedKey" :items="entityLocations" label="Map location" density="compact" variant="outlined" hide-details class="location-select" />
-        <span>Gold: country · Blue: state/province · Teal: coordinates. Area markers are approximate.</span>
+        <span>Gold: country · Blue: state/province · Teal: coordinates. Area markers are approximate. Rows follow the visible map area.</span>
       </div>
       <v-list class="entry-list" density="compact" aria-label="Mapped entities">
         <v-list-item v-for="{ entry, place } in entries" :key="`${place.key}:${entry.node.id}:${entry.edge?.id || ''}`" :active="graph.selectedId === entry.node.id"
@@ -112,6 +112,7 @@ import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 import { hiddenNodeIds } from '../stores/graphLayers'
 import { buildMapPlaces, matchesMapEntry, type MapPlace } from '../graphMap'
+import { inMapViewport, visibleNewsArticles } from '../mapViewport'
 import world from '../data/worldMap.json'
 import regions from '../data/mapRegions.json'
 const graph = useGraph()
@@ -130,10 +131,9 @@ onMounted(() => { cooldownTimer = setInterval(() => { now.value = Date.now() }, 
 onBeforeUnmount(() => { clearInterval(cooldownTimer) })
 const timeWindows = [{ title: '7 days', value: '7d' }, { title: '1 month', value: '1m' }, { title: '3 months', value: '3m' }, { title: '1 year', value: '12m' }]
 const newsData = computed(() => mapNews(news.result?.articles || [], world))
-const newsArticles = computed(() => news.location === 'unplaced' ? newsData.value.unmapped
-  : news.location ? newsData.value.places.find(place => place.code === news.location)?.articles || [] : news.result?.articles || [])
-const newsLocations = computed(() => [{ title: 'All news', value: '' }, { title: `Unplaced (${newsData.value.unmapped.length})`, value: 'unplaced' },
-  ...newsData.value.places.map(place => ({ title: `${place.name} (${place.articles.length})`, value: place.code }))])
+const newsArticles = computed(() => visibleNewsArticles(news.result?.articles || [], visibleNewsPlaces.value, news.location))
+const newsLocations = computed(() => [{ title: 'All news in view', value: '' },
+  ...visibleNewsPlaces.value.map(place => ({ title: `${place.name} (${place.articles.length})`, value: place.code }))])
 onMounted(() => news.ensureLoaded())
 const zoom = ref(1)
 const showRegions = ref(true)
@@ -155,7 +155,13 @@ const data = computed(() => {
   return buildMapPlaces(graph.nodeList.filter(node => !hidden.has(node.id)), graph.edgeList, world, regions)
 })
 const places = computed(() => data.value.places.map(place => ({ ...place, entries: place.entries.filter(entry => matchesMapEntry(entry, graph.filter)) })).filter(place => place.entries.length))
-const entityLocations = computed(() => [{ title: `All locations (${places.value.length})`, value: '' }, ...places.value.map(place => ({ title: `${place.name} (${entityCount(place)})`, value: place.key }))])
+const visiblePlaces = computed(() => places.value.filter(place => inMapViewport(place, center.value, zoom.value)))
+const visibleNewsPlaces = computed(() => news.visible ? newsData.value.places.filter(place => inMapViewport(place, center.value, zoom.value)) : [])
+const visibleAcledPlaces = computed(() => acled.visible ? acled.mapped.filter(place => inMapViewport(place, center.value, zoom.value)) : [])
+const entityLocations = computed(() => [{ title: `All locations in view (${visiblePlaces.value.length})`, value: '' }, ...visiblePlaces.value.map(place => ({ title: `${place.name} (${entityCount(place)})`, value: place.key }))])
+watch(visibleNewsPlaces, value => { if (!value.some(p => p.code === news.location)) news.location = '' })
+watch(visibleAcledPlaces, value => { if (!value.some(p => p.id === acled.selectedId)) acled.selectedId = '' })
+watch(newsArticles, value => { if (!value.some(a => a.url === news.selectedUrl)) news.selectedUrl = null })
 const occupied = computed(() => new Set(places.value.filter(p => p.key.startsWith('country:')).map(p => p.key.slice(8))))
 const occupiedRegions = computed(() => new Set(places.value.filter(p => p.region).map(p => p.key.slice(7))))
 const visibleRegions = computed(() => regions.filter(region => {
@@ -176,7 +182,7 @@ const regionLabels = computed(() => {
     return true
   })
 })
-const entries = computed(() => places.value.filter(p => !selectedKey.value || p.key === selectedKey.value).flatMap(place => place.entries.map(entry => ({ entry, place }))))
+const entries = computed(() => visiblePlaces.value.filter(p => !selectedKey.value || p.key === selectedKey.value).flatMap(place => place.entries.map(entry => ({ entry, place }))))
 watch(() => props.locationCode, code => {
   if (!code) return
   const normalized = code.toUpperCase()
@@ -200,7 +206,7 @@ function acledMarkerSize(id: string) { return (acled.selectedId === id ? 10 : zo
 function entityCount(place: MapPlace) { return new Set(place.entries.map(e => e.node.id)).size }
 function traced(place: MapPlace) { return place.entries.some(e => graph.highlightIds.includes(e.node.id) || (e.edge && graph.highlightIds.includes(e.edge.id)) || graph.selectedId === e.node.id) }
 function inspect(id: string) { graph.select(id); emit('select') }
-watch(places, value => { if (!value.some(p => p.key === selectedKey.value)) selectedKey.value = '' })
+watch(visiblePlaces, value => { if (!value.some(p => p.key === selectedKey.value)) selectedKey.value = '' })
 function wheelZoom(event: WheelEvent) {
   const matrix = svg.value?.getScreenCTM()
   if (!matrix || !event.deltaY) return

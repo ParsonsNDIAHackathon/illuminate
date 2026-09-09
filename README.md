@@ -116,8 +116,8 @@ The map includes an offline **ACLED** layer built from the checked-in regional
 workbooks. Purple squares represent state/province centroids. Filter by country,
 event type, and 7 days, 1 month, 3 months, or 1 year; select an area to inspect event
 counts, reported fatalities, and workbook provenance. Periods end at the latest
-week covered by every region, shown on the map, rather than today. Unplaced areas
-remain in the list and totals. This layer makes no external ACLED/GDELT requests.
+week covered by every region, shown on the map, rather than today. The map tables and their totals follow the visible map area as you pan and zoom;
+unplaced records are excluded from these tables. This layer makes no external ACLED/GDELT requests.
 
 See [ACLED data preparation](datasets/acled/README.md) for source coverage and
 `python3 scripts/build_acled_map.py` to regenerate the map snapshot.
