@@ -80,7 +80,9 @@
     <section v-if="node.label === 'Artifact'">
       <h4>Artifact</h4>
       <dl>
-        <template v-if="p.url"><dt>Page</dt><dd><SourceLink :href="p.url" :artifact-id="node.id">{{ p.url }}</SourceLink></dd></template>
+        <!-- An award URL can run to 200 characters; the row shows what identifies the page and
+             keeps the whole of it on hover and in the link itself. -->
+        <template v-if="p.url"><dt>Page</dt><dd class="url" :title="p.url"><SourceLink :href="p.url" :artifact-id="node.id">{{ p.url }}</SourceLink></dd></template>
         <template v-if="p.published_at"><dt>Published</dt><dd>{{ p.published_at }}</dd></template>
         <template v-if="p.amount"><dt>Amount</dt><dd>${{ Number(p.amount).toLocaleString() }}</dd></template>
         <template v-if="p.award_id"><dt>Award</dt><dd>{{ p.award_id }}</dd></template>
@@ -216,6 +218,8 @@ section { margin-top: 10px; }
 h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; margin-bottom: 4px; }
 dl { display: grid; grid-template-columns: 90px 1fr; gap: 2px 8px; margin: 0; }
 dt { opacity: .6; } dd { margin: 0; }
+.url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.url a { display: block; overflow: hidden; text-overflow: ellipsis; }
 .risk-row { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 4px; padding: 1px 0; }
 .risk-row.clickable { cursor: pointer; }
 .risk-row.clickable:hover .risk-label { text-decoration: underline; }

@@ -50,11 +50,9 @@ const chat = useChat(); const graph = useGraph(); const ws = useWorkspace()
 const draft = ref('')
 const scroller = ref<HTMLElement>()
 const suggestions = [
-  "for all of the program's vendors, highlight goods in purple and services in yellow",
-  'highlight all entities that rely on manufacturing in CN, include tier 2 and below',
-  'which suppliers have a foreign ultimate parent?',
-  'show sole-source suppliers',
-  'shared directors across suppliers',
+  'color graph by risk',
+  'highlight single source suppliers',
+  'color nodes affected by active conflicts orange',
 ]
 chat.bind()
 function ask(s: string) { draft.value = s; submit() }
