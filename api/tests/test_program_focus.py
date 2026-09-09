@@ -26,6 +26,10 @@ def test_neighbourhood_confines_the_walk_only_when_a_program_is_given():
     assert "blacklistNodes:blocked" in confined_cy
     assert confined_params["program"] == "ent_x"
     assert "shortestPath" in confined_cy and confined_params["risk_floor"] > 0
+    # Ownership is walked upwards in a program view — the owner of a supplier, not that owner's
+    # other subsidiaries — while SUPPLIES stays two-way and the sweep's own path is undirected.
+    assert "<OWNS" in confined_cy and "<ULTIMATE_PARENT_OF" in confined_cy
+    assert "<SUPPLIES" not in confined_cy and "<OWNS" not in open_cy
     assert validate(confined_cy, params=confined_params).classification == "READ"
 
 
@@ -92,6 +96,38 @@ def test_a_focused_program_carries_its_risky_nodes_past_the_depth(client):
         # Each one arrives on a path, not as a lone dot the canvas cannot place.
         joined = {e["source"] for e in sub["edges"]} | {e["target"] for e in sub["edges"]}
         assert scored <= joined
+
+
+async def test_a_focused_program_leaves_the_sister_companies_out():
+    """An OWNS edge earns its place by pointing at the chain. The owner of a supplier controls a
+    company on the contract; that owner's other subsidiaries say nothing about the program, and
+    RAYTHEON COMPANY alone brings a dozen of them. Risky ones are the exception — the sweep fetches
+    those and the canvas pins them."""
+    from illuminate.config import RISK_PIN_FLOOR
+    from illuminate.graphio import subgraph_from_graph
+    await db.close_driver()
+    try:
+        await db.read("RETURN 1 AS x")
+    except Exception:
+        pytest.skip("neo4j not reachable")
+    try:
+        programs = await db.read("MATCH (p:Entity {kind:'program'}) RETURN p.id AS id ORDER BY p.name")
+        t = TEMPLATES["neighbourhood"]
+        for prog in programs:
+            cy, bound = t.build({"entity_id": prog["id"], "depth": 2, "program_id": prog["id"]})
+            _, graph, _ = await db.read_graph(validate(cy, params=bound).statement, bound)
+            ids = list(subgraph_from_graph(graph)["nodes"])
+            siblings = await db.read(
+                "MATCH (owner:Entity)-[:OWNS|ULTIMATE_PARENT_OF]->(child:Entity) "
+                "WHERE owner.id IN $ids AND NOT (child)-[:SUPPLIES]->() "
+                "AND coalesce(child.risk_score, 0) <= $floor "
+                "RETURN DISTINCT child.id AS id, child.name AS name",
+                {"ids": ids, "floor": RISK_PIN_FLOOR},
+            )
+            drawn = [s["name"] for s in siblings if s["id"] in ids]
+            assert not drawn, f"sister companies on the {prog['id']} canvas: {drawn}"
+    finally:
+        await db.close_driver()
 
 
 PROG_ID = "ent_testfocusprog"
