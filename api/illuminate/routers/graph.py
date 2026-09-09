@@ -3,11 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from .. import db, events
+from ..config import RISK_PIN_FLOOR
 from ..content import document, summarize
 from ..connectors.http import HttpError, fetch_document
 from ..graphio import subgraph_from_graph
 from ..raw import find_raw
-from ..report import build_report
+from ..report import build_person_report, build_report
 from ..schema import SOURCE_KINDS
 from ..tools.handlers import ToolContext, expand_subgraph, search_entities
 from .deps import user_id
@@ -39,13 +40,14 @@ async def search(q: str, kind: str = "any", limit: int = 10, user: str = Depends
 
 @router.get("/graph/subgraph")
 async def subgraph(entity_id: str, depth: int = 2, people: bool = True, countries: bool = False, artifacts: bool = False,
-                   sources: bool = False, claims: bool = False, categories: bool = False,
+                   sources: bool = False, claims: bool = False, categories: bool = False, reports: bool = True,
                    program_id: str | None = None, user: str = Depends(user_id)):
     """A neighbourhood around one entity. program_id — the program the canvas is focused
     on — keeps the walk inside that program's supply chain instead of crossing into
     another program through a supplier they share."""
     ctx = ToolContext.from_workspace(source="ui", user=user)
-    layers = {"people": people, "countries": countries, "artifacts": artifacts, "sources": sources, "claims": claims, "categories": categories}
+    layers = {"people": people, "countries": countries, "artifacts": artifacts, "sources": sources, "claims": claims,
+              "categories": categories, "reports": reports}
     r = await expand_subgraph(ctx, entity_id, depth, layers, program_id)
     return {"subgraph": r.subgraph, "cypher": r.cypher, "params": r.params}
 
@@ -59,18 +61,22 @@ async def programs():
     return {"items": rows}
 
 
-# Layer name -> the node labels it governs. Entities are always drawn. Artifacts are one label
-# split over two layers by kind (see schema.SOURCE_KINDS), handled separately in the query.
-_LAYER_LABELS = {"people": ["Person"], "countries": ["Location"], "categories": ["Category"], "claims": ["Claim"]}
+# Layer name -> the node labels it governs. Entities are always drawn, and so is a person scored
+# over RISK_PIN_FLOOR: the canvas can only pin what it was sent, and an off "people" layer must not
+# be how a designated director leaves the graph. Artifacts are one label split over two layers by
+# kind (see schema.SOURCE_KINDS), handled separately in the query. Reports carry their own layer:
+# a generated document is a node like any other and the canvas can be told to leave it out.
+_LAYER_LABELS = {"people": ["Person"], "countries": ["Location"], "categories": ["Category"], "claims": ["Claim"],
+                 "reports": ["Report"]}
 
 
 @router.get("/graph/all")
 async def graph_all(people: bool = True, countries: bool = False, artifacts: bool = False, sources: bool = False, claims: bool = False,
-                    categories: bool = False, limit: int = Query(1500, le=5000)):
+                    categories: bool = False, reports: bool = True, limit: int = Query(1500, le=5000)):
     """The whole graph, not one consumer's neighbourhood. A workspace holds several
     programs and the entities that supply them; the canvas shows all of it by default
     and narrows to a single consumer only when the user asks for that."""
-    on = {"people": people, "countries": countries, "categories": categories, "claims": claims}
+    on = {"people": people, "countries": countries, "categories": categories, "claims": claims, "reports": reports}
     labels = ["Entity"] + [l for k, v in on.items() if v for l in _LAYER_LABELS[k]]
     # Collected into two lists rather than a row per edge: the read cap counts records, and
     # the graph is hydrated from whatever the row references however deeply it is nested.
@@ -78,15 +84,17 @@ async def graph_all(people: bool = True, countries: bool = False, artifacts: boo
         """
         MATCH (n) WHERE any(l IN labels(n) WHERE l IN $labels)
            OR (n:Artifact AND CASE WHEN coalesce(n.kind, 'record') IN $source_kinds THEN $sources ELSE $artifacts END)
-        WITH n, CASE WHEN n:Entity THEN 0 WHEN n:Person THEN 1 WHEN n:Location THEN 2
-                     WHEN n:Category THEN 3 WHEN n:Artifact THEN 4 ELSE 5 END AS rank
+           OR (n:Person AND coalesce(n.risk_score, 0) > $risk_floor)
+        WITH n, CASE WHEN n:Entity THEN 0 WHEN n:Report THEN 1 WHEN n:Person THEN 2 WHEN n:Location THEN 3
+                     WHEN n:Category THEN 4 WHEN n:Artifact THEN 5 ELSE 6 END AS rank
         ORDER BY rank, coalesce(n.name, n.id)
         WITH collect(n)[..$limit] AS nodes
         UNWIND nodes AS n
         OPTIONAL MATCH (n)-[r]->(m) WHERE m IN nodes
         RETURN nodes, collect(DISTINCT r) AS rels
         """,
-        {"labels": labels, "limit": limit, "artifacts": artifacts, "sources": sources, "source_kinds": list(SOURCE_KINDS)},
+        {"labels": labels, "limit": limit, "artifacts": artifacts, "sources": sources,
+         "source_kinds": list(SOURCE_KINDS), "risk_floor": RISK_PIN_FLOOR},
     )
     sub = subgraph_from_graph(graph)
     return {"subgraph": sub, "truncated": len(sub["nodes"]) >= limit}
@@ -169,6 +177,15 @@ async def people(q: str | None = None, limit: int = Query(200, le=1000)):
         """,
         params,
     )
+
+
+@router.get("/people/{person_id}")
+async def person(person_id: str):
+    """One person's page: seats held, the standing of each employer, screens and risk."""
+    rep = await build_person_report(person_id)
+    if not rep:
+        raise HTTPException(404, "no such person")
+    return rep
 
 
 @router.get("/artifacts")

@@ -23,10 +23,15 @@ own evidence:
   financial      distress: lapsed registration, late or absent filings, collapsed market
                  value, no award activity for a firm that lives on awards.
 
-Two further dimensions come along because the graph already holds them and dropping them
-would score worse than the report did before this module existed: `concentration`
-(sole-source dependence) and `media` (the adverse-media screen). They carry the least
-weight of the seven.
+  dependency     what a consumer inherits from the suppliers it cannot replace. Being a
+                 sole source is not a risk the supplier carries — it says nothing about
+                 whether that company is likely to fail or to be designated. It is a risk
+                 its *customer* carries, and only in proportion to how irreplaceable the
+                 supplier is: a high-risk sole source is a single point of failure, the
+                 same company as one of six competed vendors is a fraction of one.
+
+`media` (the adverse-media screen) comes along because the graph already holds it, and
+carries the least weight.
 
 Three rules the whole module answers to:
 
@@ -57,10 +62,10 @@ MAX_SEVERITY = 3.0
 DIMENSIONS: dict[str, tuple[float, str]] = {
     "designation": (3.0, "Designation"),
     "proximity": (2.0, "Proximity to designated parties"),
+    "dependency": (2.0, "Dependence on risky suppliers"),
     "foreign": (1.5, "Foreign ownership and operations"),
     "financial": (1.5, "Financial distress"),
     "regional": (1.0, "Regional conflict and natural hazard"),
-    "concentration": (1.0, "Supply concentration"),
     "media": (0.75, "Adverse media"),
 }
 
@@ -68,13 +73,37 @@ DIMENSIONS: dict[str, tuple[float, str]] = {
 # and personnel edges carry exposure; INCORPORATED_IN or PROVIDES do not — two companies
 # that make the same widget in the same country are not thereby connected.
 PROXIMITY_MAX_HOPS = 3
-PROXIMITY_RELS = "OWNS|ULTIMATE_PARENT_OF|BENEFICIAL_OWNER_OF|HELD_ROLE|SUPPLIES|TRANSACTS_WITH|MEMBER_OF"
 HOP_SEVERITY = {1: "high", 2: "medium", 3: "low"}
+
+# Contamination along a supply edge is not symmetric. Buying from a designated party puts
+# its problem inside your product; selling to one is a concern of a different kind and a
+# smaller one for supply-chain integrity. So the walk runs twice.
+#
+# `SUPPLIES>` leaves the designated seed along the direction it supplies, reaching the
+# companies that buy from it, and from them the companies that buy from *them* — the
+# chain the risk actually travels. Control and personnel edges stay undirected: owning a
+# designated subsidiary and being owned by a designated parent are both severe, and a
+# shared officer has no direction at all.
+_UNDIRECTED = "OWNS|ULTIMATE_PARENT_OF|BENEFICIAL_OWNER_OF|HELD_ROLE|TRANSACTS_WITH|MEMBER_OF"
+PROXIMITY_RELS_DOWNSTREAM = f"{_UNDIRECTED}|SUPPLIES>"
+PROXIMITY_RELS_ANY = f"{_UNDIRECTED}|SUPPLIES"
+# A route that only exists against the flow of supply is graded one step softer. Low
+# becomes clear: three hops upstream of a designated buyer is not a finding.
+WEAKER = {"high": "medium", "medium": "low", "low": "clear", "clear": "clear"}
 
 # Screens whose 'hit' means the party is designated by someone with authority to designate.
 DESIGNATION_SCREENS = ("sanctions_screen", "exclusion_screen", "restricted_list_screen")
 
 BANDS = [(75, "severe"), (50, "high"), (25, "elevated"), (0, "low")]
+
+# Supplier risk flows to the consumer, decayed by how substitutable the supplier is. Run as
+# a fixed number of passes rather than a recursion: SUPPLIES can hold a cycle in imperfect
+# data, and a bounded sweep is what carries a deep sole-source chain up to the program
+# without letting a loop run away. Four covers program ← tier 1 ← tier 2 ← tier 3 ← tier 4,
+# which is deeper than any sub-award data the seed has ever produced.
+DEPENDENCY_PASSES = 4
+# Exposure is on the same 0-100 scale as a score; these are where it changes severity.
+DEPENDENCY_SEVERITY = [(50, "high"), (25, "medium"), (10, "low")]
 
 # A registration this close to lapsing is already a continuity question.
 REGISTRATION_WARN_DAYS = 60
@@ -145,7 +174,6 @@ async def _entities(ids: list[str] | None) -> list[dict]:
         OPTIONAL MATCH (n)-[:PARENT_SEATED_IN]->(seat:Location)
         OPTIONAL MATCH (n)-[:OPERATES_IN]->(ops:Location)
         OPTIONAL MATCH (n)-[:MANUFACTURES_IN]->(mfg:Location)
-        OPTIONAL MATCH (n)-[s:SUPPLIES]->(consumer:Entity)
         OPTIONAL MATCH (a:Artifact)-[:ABOUT]->(n) WHERE a.kind IN ['award', 'filing']
         RETURN n.id AS id, n.name AS name, coalesce(n.kind, 'organization') AS kind,
                coalesce(n.flagged, false) AS flagged, n.flag_reason AS flag_reason,
@@ -156,8 +184,6 @@ async def _entities(ids: list[str] | None) -> list[dict]:
                [x IN collect(DISTINCT seat.code) WHERE x IS NOT NULL] AS parent_seat,
                [x IN collect(DISTINCT ops.code) WHERE x IS NOT NULL] AS operates,
                [x IN collect(DISTINCT mfg.code) WHERE x IS NOT NULL] AS manufactures,
-               count(DISTINCT consumer) AS consumers,
-               [x IN collect(DISTINCT {{id: s.id, sole: s.sole_source}}) WHERE x.sole = true AND x.id IS NOT NULL | x.id] AS sole_source_ids,
                [x IN collect(DISTINCT {{kind: a.kind, form: a.form, at: coalesce(a.published_at, a.retrieved_at)}}) WHERE x.at IS NOT NULL] AS docs
         """,
         {"ids": ids},
@@ -178,8 +204,15 @@ async def _people(ids: list[str] | None) -> list[dict]:
     )
 
 
-async def _screens(ids: list[str] | None) -> dict[str, dict[str, dict]]:
-    """Latest committed screen per node per predicate."""
+async def _screens(ids: list[str] | None) -> dict[str, dict[tuple[str, str], dict]]:
+    """Latest committed screen per node, per predicate *and source*.
+
+    Keyed by source as well as predicate because two lists are two findings: a node can be
+    designated by OFAC and by the UN Security Council under one `sanctions_screen`
+    predicate, and collapsing them would report one of the two and silently drop the other.
+    Re-running the same screen against the same source still supersedes, which is what the
+    dedupe is for.
+    """
     rows = await db.read(
         f"""
         MATCH (c:Claim)-[:ASSERTS]->(n)
@@ -191,10 +224,19 @@ async def _screens(ids: list[str] | None) -> dict[str, dict[str, dict]]:
         """,
         {"ids": ids},
     )
-    out: dict[str, dict[str, dict]] = {}
+    out: dict[str, dict[tuple[str, str], dict]] = {}
     for row in rows:
-        out.setdefault(row["id"], {}).setdefault(row["predicate"], row)
+        out.setdefault(row["id"], {}).setdefault((row["predicate"], row["source"] or ""), row)
     return out
+
+
+def _latest(screens: dict[tuple[str, str], dict], predicate: str) -> dict | None:
+    """The most recent screen under one predicate, whichever source ran it.
+
+    For the dimensions that read a single verdict rather than a roster of lists.
+    """
+    rows = [s for (p, _), s in screens.items() if p == predicate]
+    return max(rows, key=lambda s: s.get("retrieved_at") or "", default=None)
 
 
 async def _ultimate_parents(ids: list[str] | None) -> dict[str, list[dict]]:
@@ -218,7 +260,7 @@ async def _ultimate_parents(ids: list[str] | None) -> dict[str, list[dict]]:
     return {r["id"]: r["parents"] for r in rows}
 
 
-async def _proximity(seeds: list[str], ids: list[str] | None) -> dict[str, dict]:
+async def _proximity(seeds: list[str], ids: list[str] | None, rels: str) -> dict[str, dict]:
     """Shortest walk from each designated party to everything within reach.
 
     apoc.path.expandConfig with bfs + NODE_GLOBAL gives each reachable node once, by its
@@ -244,9 +286,54 @@ async def _proximity(seeds: list[str], ids: list[str] | None) -> dict[str, dict]
                           rel_ids: rel_ids, chain: chain}) AS paths
         RETURN id, paths[0] AS nearest, size(paths) AS reachable
         """,
-        {"seeds": seeds, "ids": ids, "rels": PROXIMITY_RELS, "max": PROXIMITY_MAX_HOPS},
+        {"seeds": seeds, "ids": ids, "rels": rels, "max": PROXIMITY_MAX_HOPS},
     )
     return {r["id"]: {**r["nearest"], "reachable": r["reachable"]} for r in rows}
+
+
+def merge_proximity(downstream: dict[str, dict], any_direction: dict[str, dict]) -> dict[str, dict]:
+    """Pick the route that grades worst, and remember which direction produced it.
+
+    A node can be one hop from a designated party against the flow of supply and three
+    hops with it. Neither reading is the whole answer, so both are graded and the worse
+    one wins — which keeps the asymmetry from hiding a close reverse tie, and keeps a
+    reverse tie from being reported as though the risk were flowing the usual way.
+    """
+    out: dict[str, dict] = {}
+    for nid in set(downstream) | set(any_direction):
+        options = []
+        if nid in downstream:
+            d = downstream[nid]
+            options.append((HOP_SEVERITY.get(d["hops"], "low"), {**d, "downstream": True}))
+        if nid in any_direction:
+            a = any_direction[nid]
+            # Only meaningful as the reverse reading; if the downstream walk found the same
+            # route it is already in the list above and grades higher.
+            options.append((WEAKER[HOP_SEVERITY.get(a["hops"], "low")], {**a, "downstream": False}))
+        severity, best = max(options, key=lambda o: SEVERITY_WEIGHT[o[0]])
+        out[nid] = {**best, "severity": severity}
+    return out
+
+
+async def _supply_edges() -> dict[str, list[dict]]:
+    """Every SUPPLIES edge, grouped by consumer.
+
+    Never filtered by the ids being rescored: a consumer's exposure is a property of its
+    whole supplier base, and scoring it from the subset in hand would report a dilution
+    that is not real.
+    """
+    rows = await db.read(
+        """
+        MATCH (s:Entity)-[r:SUPPLIES]->(c:Entity)
+        WHERE s.id <> c.id
+        RETURN c.id AS consumer, s.id AS supplier, s.name AS supplier_name, r.id AS edge_id,
+               coalesce(r.sole_source, false) AS sole_source, coalesce(r.amount, 0) AS amount
+        """
+    )
+    by_consumer: dict[str, list[dict]] = {}
+    for row in rows:
+        by_consumer.setdefault(row["consumer"], []).append(row)
+    return by_consumer
 
 
 async def _designated_ids() -> list[str]:
@@ -270,14 +357,22 @@ async def _designated_ids() -> list[str]:
 
 # --- Dimensions -------------------------------------------------------------------
 
-def _designation(row: dict, screens: dict[str, dict]) -> dict:
-    hits = [s for p, s in screens.items() if p in DESIGNATION_SCREENS and s["result"] == "hit"]
-    ran = [s for p, s in screens.items() if p in DESIGNATION_SCREENS]
+def _designation(row: dict, screens: dict[tuple[str, str], dict]) -> dict:
+    """Every designation list that ran on the node itself, named one by one.
+
+    A party on two lists is on two lists: both sources are named and both findings are
+    carried in the detail, because "designated by OFAC" and "designated by OFAC and the UN"
+    are different facts to the analyst deciding what to do next.
+    """
+    hits = sorted((s for (p, _), s in screens.items() if p in DESIGNATION_SCREENS and s["result"] == "hit"),
+                  key=lambda s: s.get("source") or "")
+    ran = [s for (p, _), s in screens.items() if p in DESIGNATION_SCREENS]
     if hits:
-        first = hits[0]
         sources = " · ".join(sorted({h["source"] for h in hits if h.get("source")}))
+        details = list(dict.fromkeys(h["detail"] for h in hits if h.get("detail")))
         return component("designation", f"Designated — {sources or 'listed'}", "high", source=sources or None,
-                         detail=first.get("detail"), url=first.get("url"), ids=[row["id"]])
+                         detail="; ".join(details) or None,
+                         url=next((h["url"] for h in hits if h.get("url")), None), ids=[row["id"]])
     if row.get("flagged"):
         # Flagged without a screen behind it: something asserted the designation directly.
         return component("designation", "Flagged in the graph", "high", source="graph",
@@ -297,14 +392,21 @@ def _proximity_component(row: dict, near: dict | None) -> dict:
                          f"{PROXIMITY_MAX_HOPS} hops of ownership, personnel or commercial ties", "clear",
                          source="graph", ids=[row["id"]])
     hops = int(near["hops"])
+    downstream = near.get("downstream", True)
+    severity = near.get("severity") or HOP_SEVERITY.get(hops, "low")
     chain = " → ".join(near.get("chain") or [])
     more = near.get("reachable", 1) - 1
     detail = f"{hops} hop{'s' if hops != 1 else ''}: {chain}"
+    if not downstream:
+        detail += (" · reached only against the flow of supply — the designated party buys from this chain "
+                   "rather than selling into it, so the grading is one step softer")
     if more > 0:
         detail += f" · {more} further designated part{'ies' if more != 1 else 'y'} within reach"
     ids = list(dict.fromkeys((near.get("node_ids") or []) + (near.get("rel_ids") or [])))
-    return component("proximity", f"{hops} degree{'s' if hops != 1 else ''} of separation from {near.get('seed') or 'a designated party'}",
-                     HOP_SEVERITY.get(hops, "low"), source="graph", detail=detail, ids=ids)
+    label = f"{hops} degree{'s' if hops != 1 else ''} of separation from {near.get('seed') or 'a designated party'}"
+    if not downstream:
+        label += " (downstream of it)"
+    return component("proximity", label, severity, source="graph", detail=detail, ids=ids)
 
 
 def _foreign(row: dict, parents: list[dict]) -> dict:
@@ -389,7 +491,7 @@ def _regional(row: dict) -> dict:
                      ids=[row["id"]])
 
 
-def _financial(row: dict, screens: dict[str, dict], today: date) -> dict:
+def _financial(row: dict, screens: dict[tuple[str, str], dict], today: date) -> dict:
     """Distress signals, each of which is a reason someone stops delivering.
 
     A private company with no filings and no registration record produces no signal at all,
@@ -430,7 +532,7 @@ def _financial(row: dict, screens: dict[str, dict], today: date) -> dict:
         elif change <= -25:
             findings.append(("medium", f"Market value down {abs(change):.0f}% over 12 months"))
 
-    fin = screens.get("financial_screen")
+    fin = _latest(screens, "financial_screen")
     if fin and fin["result"] in SEVERITY_WEIGHT and fin["result"] != "clear":
         findings.append((fin["result"], fin.get("detail") or "financial screen"))
 
@@ -451,19 +553,90 @@ def _financial(row: dict, screens: dict[str, dict], today: date) -> dict:
                      detail="Private entity with no filings, market data or registration record")
 
 
-def _concentration(row: dict) -> dict:
-    sole = [i for i in (row.get("sole_source_ids") or []) if i]
-    if sole:
-        n = len(sole)
-        return component("concentration", f"Sole source on {n} award relationship{'s' if n != 1 else ''}", "medium",
-                         source="USAspending", ids=[row["id"]] + sole)
-    if row.get("consumers"):
-        return component("concentration", "No sole-source awards on record", "clear", source="USAspending")
-    return component("concentration", "Supply position", None, detail="No award records for this entity")
+def dependence_weights(edges: list[dict]) -> list[tuple[dict, float]]:
+    """How much of a consumer's exposure each of its suppliers carries.
+
+    A sole-source award means nothing else was competed for that scope, so the supplier is
+    irreplaceable and carries the consumer's full exposure to whatever is wrong with it —
+    weight 1.0, and several sole sources each carry their own.
+
+    Everything else is substitutable within its group, so the group shares one unit of
+    exposure between them, split by obligated amount where the awards say and evenly where
+    they do not. That is the dilution: the same troubled company is a whole problem when
+    it is the only option and a sixth of one when it is one of six.
+    """
+    sole = [e for e in edges if e.get("sole_source")]
+    competed = [e for e in edges if not e.get("sole_source")]
+    out: list[tuple[dict, float]] = [(e, 1.0) for e in sole]
+    total = sum(float(e.get("amount") or 0) for e in competed)
+    for e in competed:
+        # Amounts are missing on plenty of sub-award rows; an even split is the honest
+        # fallback, not a reason to drop the supplier from the calculation.
+        out.append((e, (float(e["amount"]) / total) if total > 0 else 1.0 / len(competed)))
+    return out
 
 
-def _media(screens: dict[str, dict]) -> dict:
-    adv = screens.get("adverse_media_screen")
+def _dependency(row: dict, weighted: list[tuple[dict, float]], scores: dict[str, int | None]) -> dict:
+    """A consumer's exposure through the suppliers it cannot replace.
+
+    Exposure is the worst of two readings, not the sum of everything:
+
+    * each **sole source** contributes its own risk undiluted, because it is a single
+      point of failure in its own right. They are not added together — a consumer with two
+      irreplaceable suppliers at 80 is 80 exposed twice over, not 160 exposed, and adding
+      them would let a long list of unremarkable sole sources manufacture a severe finding
+      out of nothing. How many there are is a structural fact, reported in the detail.
+    * the **substitutable group** shares one unit of dependence between its members, so
+      what it contributes is their share-weighted average: as bad as its worst member only
+      when they are all that bad, and a quarter of it when three of the four are fine.
+
+    So a single-point-of-failure vendor at 80 hands its customer 80; the same vendor as one
+    of four equal competed suppliers hands over 20.
+    """
+    if not weighted:
+        return component("dependency", "Supplier dependence", None,
+                         detail="No supplier relationships recorded for this consumer")
+    graded = [(e, w, scores[e["supplier"]]) for e, w in weighted if scores.get(e["supplier"]) is not None]
+    unscored = [e for e, _ in weighted if scores.get(e["supplier"]) is None]
+    if not graded:
+        return component("dependency", "Supplier dependence", None,
+                         detail=f"{len(weighted)} supplier{'s' if len(weighted) != 1 else ''} on record, none of them scored yet")
+
+    sole = [(e, w, s) for e, w, s in graded if e.get("sole_source")]
+    competed = [(e, w, s) for e, w, s in graded if not e.get("sole_source")]
+    options: list[tuple[float, dict, float]] = [(s * w, e, w) for e, w, s in sole]
+    if competed:
+        lead_e, lead_w, _ = max(competed, key=lambda c: c[2] * c[1])
+        options.append((sum(s * w for _, w, s in competed), lead_e, lead_w))
+    exposure, lead_edge, lead_weight = max(options, key=lambda o: o[0])
+    exposure = min(100.0, exposure)
+    severity = next((sev for floor, sev in DEPENDENCY_SEVERITY if exposure >= floor), "clear")
+    lead_score = scores.get(lead_edge["supplier"])
+    n_sole = sum(1 for e, _ in weighted if e.get("sole_source"))
+
+    if lead_edge.get("sole_source"):
+        label = f"Sole-source dependence on {lead_edge['supplier_name']} (risk {lead_score})"
+    elif lead_weight >= 0.99:
+        label = f"Single supplier — {lead_edge['supplier_name']} (risk {lead_score})"
+    else:
+        label = (f"Supply base carries {exposure:.0f} risk — {lead_edge['supplier_name']} is its largest share "
+                 f"at {lead_weight:.0%} (risk {lead_score})")
+    parts = [f"Exposure {exposure:.0f}/100 across {len(weighted)} supplier{'s' if len(weighted) != 1 else ''}"]
+    if n_sole:
+        parts.append(f"{n_sole} sole-source, graded on the worst rather than added up")
+    if unscored:
+        # Named, because unscored suppliers can only understate this dimension and the
+        # reader has to know the exposure is a floor rather than a total.
+        parts.append(f"{len(unscored)} unscored and contributing nothing")
+    top = sorted(graded, key=lambda c: c[2] * c[1], reverse=True)[:3]
+    parts.append("; ".join(f"{e['supplier_name']} {w:.0%}×{s}" for e, w, s in top))
+    ids = [row["id"]] + [i for e, _, _ in top for i in (e["supplier"], e.get("edge_id")) if i]
+    return component("dependency", label, severity, source="USAspending",
+                     detail=" · ".join(parts), ids=list(dict.fromkeys(ids)))
+
+
+def _media(screens: dict[tuple[str, str], dict]) -> dict:
+    adv = _latest(screens, "adverse_media_screen")
     if not adv:
         return component("media", "Adverse media", None, detail="No media screen has run")
     severity = adv["result"] if adv["result"] in SEVERITY_WEIGHT else "low"
@@ -511,43 +684,82 @@ def _score(components: list[dict], row: dict, label: str) -> dict:
 
 
 async def score_nodes(ids: list[str] | None = None) -> dict[str, dict]:
-    """Score every Entity and Person, or just the given ids. Reads only; see persist()."""
+    """Score every Entity and Person, or just the given ids. Reads only; see persist().
+
+    Two phases, because one dimension depends on the others. Everything a node carries in
+    its own right is graded first; only then can a consumer be graded on what it inherits
+    from suppliers, since that needs their scores to exist. The inherited dimension is then
+    swept a few times so exposure travels the length of a sole-source chain rather than
+    stopping one hop from the vendor that caused it.
+    """
     today = date.today()
     seeds = await _designated_ids()
     entities = await _entities(ids)
     persons = await _people(ids)
     screens = await _screens(ids)
     parents = await _ultimate_parents(ids)
-    near = await _proximity(seeds, ids)
+    near = merge_proximity(await _proximity(seeds, ids, PROXIMITY_RELS_DOWNSTREAM),
+                           await _proximity(seeds, ids, PROXIMITY_RELS_ANY))
+    supply = await _supply_edges()
 
-    out: dict[str, dict] = {}
+    # --- phase 1: what each node is, on its own ---------------------------------
+    intrinsic: dict[str, list[dict]] = {}
+    rows_by_id: dict[str, dict] = {}
+    labels: dict[str, str] = {}
     for row in entities:
         s = screens.get(row["id"], {})
-        comps = [
+        intrinsic[row["id"]] = [
             _designation(row, s),
             _proximity_component(row, near.get(row["id"])),
             _foreign(row, parents.get(row["id"], [])),
             _financial(row, s, today),
             _regional(row),
-            _concentration(row),
             _media(s),
         ]
-        out[row["id"]] = _score(comps, row, "Entity")
+        rows_by_id[row["id"]] = row
+        labels[row["id"]] = "Entity"
 
     # A person is graded on the dimensions that mean something for a person. Financial
-    # distress, supply concentration and regional exposure belong to organisations; a
-    # person inherits them only through the entity, where they are already scored.
+    # distress, regional exposure and supplier dependence belong to organisations; a person
+    # meets them only through the entity, where they are already scored.
     entity_by_id = {e["id"]: e for e in entities}
     for row in persons:
         s = screens.get(row["id"], {})
-        comps = [
+        intrinsic[row["id"]] = [
             _designation(row, s),
             _proximity_component(row, near.get(row["id"])),
             _person_foreign(row, entity_by_id, parents),
             _media(s),
         ]
-        out[row["id"]] = _score(comps, row, "Person")
+        rows_by_id[row["id"]] = row
+        labels[row["id"]] = "Person"
+
+    # --- phase 2: what a consumer inherits from its suppliers --------------------
+    # Suppliers outside the rescored subset still have to contribute, so the starting
+    # scores come from the graph for anything phase 1 did not compute.
+    scores: dict[str, int | None] = {nid: composite(comps)[0] for nid, comps in intrinsic.items()}
+    if ids is not None:
+        scores = {**await _stored_scores(), **scores}
+    weights = {cid: dependence_weights(edges) for cid, edges in supply.items()}
+    dep: dict[str, dict] = {}
+    for _ in range(DEPENDENCY_PASSES):
+        dep = {cid: _dependency(rows_by_id.get(cid, {"id": cid}), w, scores) for cid, w in weights.items()}
+        for nid, comps in intrinsic.items():
+            if labels[nid] == "Entity":
+                scores[nid] = composite(comps + [dep.get(nid) or _dependency({"id": nid}, [], scores)])[0]
+
+    out: dict[str, dict] = {}
+    for nid, comps in intrinsic.items():
+        full = comps + ([dep.get(nid) or _dependency(rows_by_id[nid], [], scores)] if labels[nid] == "Entity" else [])
+        out[nid] = _score(full, rows_by_id[nid], labels[nid])
     return out
+
+
+async def _stored_scores() -> dict[str, int | None]:
+    """Scores already on the graph, for suppliers a targeted rescore does not recompute."""
+    rows = await db.read(
+        "MATCH (n:Entity) WHERE n.risk_score IS NOT NULL RETURN n.id AS id, n.risk_score AS score")
+    return {r["id"]: r["score"] for r in rows}
 
 
 def _person_foreign(row: dict, entity_by_id: dict[str, dict], parents: dict[str, list[dict]]) -> dict:

@@ -34,6 +34,7 @@
         </span>
       </template>
       <template #item.top_factor="{ item }"><span style="opacity:.85">{{ item.top_factor || '—' }}</span></template>
+      <template #item.view="{ item }"><v-btn icon="mdi-graph" size="x-small" variant="text" title="Open on the canvas" @click.stop="openOnCanvas(item.id, item.label)" /></template>
     </v-data-table>
 
     <v-alert variant="tonal" density="compact" type="info" class="mt-3">
@@ -50,6 +51,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, qs } from '../api/client'
 import { bandChip, isThin, RISK_BANDS } from '../styles/risk'
+import { useOpenOnCanvas } from '../composables/openOnCanvas'
 
 const router = useRouter()
 const items = ref<any[]>([]); const bands = ref<Record<string, number> | null>(null)
@@ -65,6 +67,7 @@ const headers = [
   { title: 'Kind', key: 'kind', width: 110 },
   { title: 'Coverage', key: 'confidence', width: 130 },
   { title: 'Leading factor', key: 'top_factor' },
+  { title: '', key: 'view', width: 44, sortable: false },
 ]
 
 async function load() {
@@ -78,8 +81,9 @@ async function rescore() {
   rescoring.value = true
   try { await api.post('/api/risk/rescore', {}); await load() } finally { rescoring.value = false }
 }
-// A person has no report page of their own; the people list is where their roles are.
-function open(row: any) { router.push(row.label === 'Person' ? '/people' : `/entities/${row.id}`) }
+// Each kind of party has a page of its own; the row opens it.
+const { openOnCanvas } = useOpenOnCanvas()
+function open(row: any) { router.push(row.label === 'Person' ? `/people/${row.id}` : `/entities/${row.id}`) }
 watch([band, label], load)
 onMounted(load)
 </script>

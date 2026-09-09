@@ -31,14 +31,16 @@ export const useChat = defineStore('chat', {
       switch (ev.type) {
         case 'socket': this.connected = !!ev.connected; break
         case 'hello': this.modelKey = !!ev.model_key; break
-        case 'turn_start': this.conversationId = ev.conversation_id; break
+        // A turn's styling is added to what is already on the canvas, so mark where it
+        // starts — the answer resends the whole turn and has to overwrite, not double up.
+        case 'turn_start': this.conversationId = ev.conversation_id; graph.beginStyleTurn(); break
         case 'delta': { const m = this.current(); if (m) m.text += ev.text; break }
         case 'tool_call': { const m = this.current(); m?.tools!.push({ name: ev.name, args: ev.args }); break }
         case 'tool_result': {
           const m = this.current()
           if (m) { const t = [...m.tools!].reverse().find(t => t.name === ev.name && t.ok === undefined); if (t) Object.assign(t, { ok: ev.ok, cypher: ev.cypher, params: ev.params, summary: ev.summary, permission: ev.permission, notes: ev.notes }) }
           if (ev.subgraph) graph.merge(ev.subgraph)
-          if (ev.style_ops?.length) graph.applyStyleOps(ev.style_ops)
+          if (ev.style_ops?.length) graph.appendStyleOps(ev.style_ops)
           if (ev.cypher) graph.lastCypher = { statement: ev.cypher, params: ev.params }
           break
         }
@@ -46,7 +48,7 @@ export const useChat = defineStore('chat', {
           const m = this.current()
           if (m) { m.text = ev.answer || m.text; m.streaming = false; m.cypher = ev.cypher; m.legend = ev.legend; m.permissions = ev.permissions }
           if (ev.subgraph) graph.merge(ev.subgraph)
-          if (ev.style_ops?.length) graph.applyStyleOps(ev.style_ops)
+          if (ev.style_ops?.length) graph.setTurnStyleOps(ev.style_ops)
           this.busy = false
           break
         }

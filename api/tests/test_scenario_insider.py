@@ -61,9 +61,11 @@ async def test_one_person_holds_a_role_at_the_vendor_and_at_the_flagged_group(gr
 async def test_the_group_is_flagged_and_carries_a_cyber_screen(graph):
     await seed.scenario_insider("ent_program", exclude="ent_other")
     assert any("e.flagged = true" in c for c, _ in graph["writes"])
-    predicates = {c["predicate"] for c in graph["claims"]}
+    group_id = next(iter(graph["entities"]))
+    on_group = [c for c in graph["claims"] if c["subject_id"] == group_id]
+    predicates = {c["predicate"] for c in on_group}
     assert "cyber_screen" in predicates and "sanctions_screen" in predicates
-    assert all(c["object_value"] == "hit" for c in graph["claims"])
+    assert all(c["object_value"] == "hit" for c in on_group), "the group is the only party that screens as a hit"
 
 
 @pytest.mark.asyncio
@@ -74,10 +76,23 @@ async def test_both_sanctions_lists_are_represented(graph):
 
 
 @pytest.mark.asyncio
-async def test_the_person_is_screened_as_well_as_the_group(graph):
+async def test_the_person_is_screened_and_clear_on_every_list(graph):
+    # The person is only a risk by association: their own record is as clean as the
+    # vendor's, so the screens ran and every one of them came back clear.
     await seed.scenario_insider("ent_program", exclude="ent_other")
     person_id = next(iter(graph["people"]))
-    assert any(c["subject_id"] == person_id and c["predicate"] == "sanctions_screen" for c in graph["claims"])
+    screens = [c for c in graph["claims"] if c["subject_id"] == person_id and c["predicate"] == "sanctions_screen"]
+    assert screens, "the person must be screened, or the report cannot say they came back clear"
+    assert {c["object_value"] for c in screens} == {"clear"}
+    assert {c["source"] for c in screens} == {"OFAC", "UN Security Council"}, "clear on the same lists that designate the group"
+
+
+@pytest.mark.asyncio
+async def test_the_person_is_never_flagged_directly(graph):
+    await seed.scenario_insider("ent_program", exclude="ent_other")
+    person_id = next(iter(graph["people"]))
+    assert not graph["people"][person_id].get("flagged")
+    assert all(person_id not in (params or {}).values() for cypher, params in graph["writes"] if "flagged = true" in cypher)
 
 
 @pytest.mark.asyncio

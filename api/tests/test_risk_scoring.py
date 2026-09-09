@@ -22,7 +22,7 @@ def entity(**over) -> dict:
         "registration_status": None, "registration_expires": None, "entity_status": None, "public": False,
         "ticker": None, "market_cap": None, "price_change_12m": None, "revenue": None,
         "incorporated": [], "parent_seat": [], "operates": [], "manufactures": [],
-        "consumers": 0, "sole_source_ids": [], "docs": [],
+        "docs": [],
     }
     return {**base, **over}
 
@@ -30,6 +30,11 @@ def entity(**over) -> dict:
 def screen(predicate: str, result: str, **over) -> dict:
     return {"predicate": predicate, "result": result, "source": "OFAC", "detail": "detail",
             "retrieved_at": "2026-09-01T00:00:00Z", "url": None, **over}
+
+
+def screens(*rows: dict) -> dict[tuple[str, str], dict]:
+    """Screens keyed the way the graph hands them over: one entry per list per source."""
+    return {(r["predicate"], r["source"]): r for r in rows}
 
 
 # --- no data is not a zero ---------------------------------------------------------
@@ -47,7 +52,7 @@ def test_an_unscreened_unplaced_private_entity_gets_no_score_at_all():
         risk._foreign(entity(), []),
         risk._financial(entity(), {}, TODAY),
         risk._regional(entity()),
-        risk._concentration(entity()),
+        risk._dependency(entity(), [], {}),
         risk._media({}),
     ]
     # Proximity is the exception: "nothing designated within reach" is a real finding.
@@ -58,7 +63,7 @@ def test_an_unscreened_unplaced_private_entity_gets_no_score_at_all():
 
 
 def test_the_composite_ignores_absent_dimensions_rather_than_averaging_them_in():
-    designated = risk._designation(entity(), {"sanctions_screen": screen("sanctions_screen", "hit")})
+    designated = risk._designation(entity(), screens(screen("sanctions_screen", "hit")))
     quiet = risk._regional(entity())
     assert quiet["no_data"] is True
     # One dimension answered, and it answered "high": the score is high, not diluted to a
@@ -77,10 +82,10 @@ def test_a_node_with_no_data_anywhere_has_no_score():
 # --- designation -------------------------------------------------------------------
 
 def test_a_screen_hit_is_the_finding_and_names_its_lists():
-    comp = risk._designation(entity(), {
-        "sanctions_screen": screen("sanctions_screen", "hit", source="OFAC"),
-        "restricted_list_screen": screen("restricted_list_screen", "hit", source="U.S. Department of Defense"),
-    })
+    comp = risk._designation(entity(), screens(
+        screen("sanctions_screen", "hit", source="OFAC"),
+        screen("restricted_list_screen", "hit", source="U.S. Department of Defense"),
+    ))
     assert comp["severity"] == "high"
     assert "OFAC" in comp["label"] and "Department of Defense" in comp["label"]
 
@@ -90,11 +95,23 @@ def test_a_node_flagged_without_a_screen_behind_it_still_counts_as_designated():
     assert comp["severity"] == "high" and "cyber-threat" in comp["detail"]
 
 
+def test_two_lists_under_one_predicate_are_two_findings_not_one():
+    # OFAC and the UN both designate under `sanctions_screen`. Keeping only one per
+    # predicate would name one list and drop the other from the finding entirely.
+    comp = risk._designation(entity(), screens(
+        screen("sanctions_screen", "hit", source="OFAC", detail="SDN designation"),
+        screen("sanctions_screen", "hit", source="UN Security Council", detail="on the Consolidated List"),
+    ))
+    assert comp["severity"] == "high"
+    assert "OFAC" in comp["label"] and "UN Security Council" in comp["label"]
+    assert "SDN designation" in comp["detail"] and "Consolidated List" in comp["detail"]
+
+
 def test_screens_that_ran_and_found_nothing_grade_clear_and_say_how_many_ran():
-    comp = risk._designation(entity(), {
-        "sanctions_screen": screen("sanctions_screen", "clear"),
-        "exclusion_screen": screen("exclusion_screen", "clear", source="SAM.gov"),
-    })
+    comp = risk._designation(entity(), screens(
+        screen("sanctions_screen", "clear"),
+        screen("exclusion_screen", "clear", source="SAM.gov"),
+    ))
     assert comp["severity"] == "clear" and "2 lists" in comp["label"]
 
 
@@ -128,6 +145,55 @@ def test_further_designated_parties_within_reach_are_counted_in_the_detail():
 def test_nothing_designated_within_reach_is_a_clear_finding_not_a_missing_one():
     comp = risk._proximity_component(entity(), None)
     assert comp["severity"] == "clear" and comp["no_data"] is False
+
+
+# --- proximity is asymmetric ---------------------------------------------------------
+#
+# Buying from a designated party puts its problem inside your product. Selling to one is a
+# concern of a different kind and a smaller one, so the same number of hops grades softer
+# when the only route runs against the flow of supply.
+
+
+def reach(hops: int, seed: str = "Obsidian Lantern") -> dict:
+    return {"seed": seed, "hops": hops, "chain": ["A", "B"], "node_ids": ["ent_a"],
+            "rel_ids": ["rel_1"], "reachable": 1}
+
+
+def test_a_designated_supplier_outweighs_a_designated_customer_at_the_same_distance():
+    downstream = risk.merge_proximity({"ent_x": reach(1)}, {"ent_x": reach(1)})["ent_x"]
+    reverse = risk.merge_proximity({}, {"ent_x": reach(1)})["ent_x"]
+    assert downstream["severity"] == "high" and downstream["downstream"] is True
+    assert reverse["severity"] == "medium" and reverse["downstream"] is False
+    assert risk.SEVERITY_WEIGHT[downstream["severity"]] > risk.SEVERITY_WEIGHT[reverse["severity"]]
+
+
+def test_a_distant_customer_of_a_designated_party_is_not_a_finding_at_all():
+    # Three hops upstream of a designated buyer softens from low to clear.
+    assert risk.merge_proximity({}, {"ent_x": reach(3)})["ent_x"]["severity"] == "clear"
+
+
+def test_the_worse_of_the_two_readings_wins():
+    # One hop the wrong way (→ medium) beats three hops the right way (→ low): the
+    # asymmetry must not be able to hide a close reverse tie.
+    merged = risk.merge_proximity({"ent_x": reach(3)}, {"ent_x": reach(1)})["ent_x"]
+    assert merged["severity"] == "medium" and merged["downstream"] is False
+
+
+def test_a_reverse_route_says_so_in_the_finding_it_produces():
+    comp = risk._proximity_component(entity(), risk.merge_proximity({}, {"ent_x": reach(1)})["ent_x"])
+    assert "downstream of it" in comp["label"]
+    assert "against the flow of supply" in comp["detail"]
+
+
+def test_control_and_personnel_ties_are_walked_in_both_directions():
+    # Owning a designated subsidiary and being owned by a designated parent are both
+    # severe, and a shared officer has no direction to speak of.
+    for rel in ("OWNS", "ULTIMATE_PARENT_OF", "BENEFICIAL_OWNER_OF", "HELD_ROLE", "MEMBER_OF", "TRANSACTS_WITH"):
+        assert f"{rel}>" not in risk.PROXIMITY_RELS_DOWNSTREAM
+        assert rel in risk.PROXIMITY_RELS_DOWNSTREAM
+    # Supply is the one that carries a direction.
+    assert "SUPPLIES>" in risk.PROXIMITY_RELS_DOWNSTREAM
+    assert "SUPPLIES>" not in risk.PROXIMITY_RELS_ANY
 
 
 # --- foreign ownership and operations ----------------------------------------------
@@ -229,6 +295,135 @@ def test_an_active_registration_grades_continuity_and_says_it_is_not_solvency():
     assert comp["severity"] == "clear" and "not solvency" in comp["detail"]
 
 
+# --- dependence on suppliers ---------------------------------------------------------
+#
+# The rule these guard: being a sole source is not a risk the *supplier* carries. It says
+# nothing about whether that company will fail or be designated. It is a risk its customer
+# carries, in proportion to how irreplaceable the supplier is.
+
+
+def supply_edge(supplier: str, name: str, *, sole: bool = False, amount: float = 0) -> dict:
+    return {"consumer": "ent_vendor", "supplier": supplier, "supplier_name": name,
+            "edge_id": f"rel_{supplier}", "sole_source": sole, "amount": amount}
+
+
+def test_being_a_sole_source_adds_nothing_to_the_suppliers_own_score():
+    # The supplier's dimensions are exactly what they would be without the award; there is
+    # no dimension on this side of the edge for sole-source status to move.
+    assert "concentration" not in risk.DIMENSIONS
+    supplier = entity(id="ent_sole", name="Only Option")
+    comps = [
+        risk._designation(supplier, screens(screen("sanctions_screen", "clear"))),
+        risk._proximity_component(supplier, None),
+        risk._dependency(supplier, [], {}),
+    ]
+    assert risk.composite(comps)[0] == 0
+
+
+def test_a_sole_source_hands_its_customer_the_whole_of_its_risk():
+    weighted = risk.dependence_weights([supply_edge("ent_a", "Only Option", sole=True)])
+    comp = risk._dependency(entity(), weighted, {"ent_a": 80})
+    assert comp["severity"] == "high"
+    assert "Sole-source dependence on Only Option" in comp["label"]
+    assert "Exposure 80/100" in comp["detail"]
+
+
+def test_the_same_supplier_among_four_competed_ones_is_a_quarter_of_the_problem():
+    edges = [supply_edge("ent_a", "Alpha"), supply_edge("ent_b", "Bravo"),
+             supply_edge("ent_c", "Charlie"), supply_edge("ent_d", "Delta")]
+    comp = risk._dependency(entity(), risk.dependence_weights(edges), {"ent_a": 80, "ent_b": 0, "ent_c": 0, "ent_d": 0})
+    # 80 × 0.25 = 20: still worth seeing, nothing like a single point of failure.
+    assert comp["severity"] == "low"
+    assert "Exposure 20/100" in comp["detail"]
+
+
+def test_a_diversified_base_of_equally_risky_suppliers_is_not_diluted_away():
+    # Dilution is about substitutability, not about arithmetic comfort: if every option is
+    # as bad as the last, switching supplier buys nothing and the exposure is undiminished.
+    edges = [supply_edge(f"ent_{i}", f"S{i}") for i in range(4)]
+    comp = risk._dependency(entity(), risk.dependence_weights(edges), {f"ent_{i}": 80 for i in range(4)})
+    assert comp["severity"] == "high"
+    assert "Exposure 80/100" in comp["detail"]
+
+
+def test_dependence_is_split_by_obligated_amount_when_the_awards_say_so():
+    edges = [supply_edge("ent_big", "Big", amount=900), supply_edge("ent_small", "Small", amount=100)]
+    weights = dict((e["supplier"], w) for e, w in risk.dependence_weights(edges))
+    assert weights["ent_big"] == pytest.approx(0.9)
+    assert weights["ent_small"] == pytest.approx(0.1)
+
+
+def test_missing_amounts_fall_back_to_an_even_split_rather_than_dropping_a_supplier():
+    edges = [supply_edge("ent_a", "Alpha"), supply_edge("ent_b", "Bravo")]
+    weights = dict((e["supplier"], w) for e, w in risk.dependence_weights(edges))
+    assert weights == pytest.approx({"ent_a": 0.5, "ent_b": 0.5})
+
+
+def test_each_sole_source_carries_its_own_full_weight_alongside_competed_ones():
+    edges = [supply_edge("ent_sole", "Irreplaceable", sole=True),
+             supply_edge("ent_a", "Alpha"), supply_edge("ent_b", "Bravo")]
+    weights = dict((e["supplier"], w) for e, w in risk.dependence_weights(edges))
+    # The competed pair shares one unit between them; the sole source is not part of that
+    # bargain, because nothing else was competed for its scope.
+    assert weights == pytest.approx({"ent_sole": 1.0, "ent_a": 0.5, "ent_b": 0.5})
+
+
+def test_a_single_competed_supplier_is_still_a_single_point_of_dependence():
+    weighted = risk.dependence_weights([supply_edge("ent_a", "Alpha")])
+    assert weighted[0][1] == 1.0
+    comp = risk._dependency(entity(), weighted, {"ent_a": 60})
+    assert comp["severity"] == "high"
+
+
+def test_several_sole_sources_do_not_add_up_into_a_worse_finding():
+    # Two irreplaceable suppliers at 90 leave you 90 exposed twice over, not 180 exposed.
+    edges = [supply_edge("ent_a", "Alpha", sole=True), supply_edge("ent_b", "Bravo", sole=True)]
+    comp = risk._dependency(entity(), risk.dependence_weights(edges), {"ent_a": 90, "ent_b": 90})
+    assert "Exposure 90/100" in comp["detail"]
+    assert "graded on the worst rather than added up" in comp["detail"]
+
+
+def test_a_long_list_of_unremarkable_sole_sources_is_not_a_severe_finding():
+    # The failure this replaced: eleven sole sources at single-digit risk summed to 54 and
+    # reported a program as highly exposed, led by a supplier scoring 9. Structure is not
+    # risk; how many there are belongs in the detail, not in the grade.
+    edges = [supply_edge(f"ent_{i}", f"S{i}", sole=True) for i in range(11)]
+    comp = risk._dependency(entity(), risk.dependence_weights(edges), {f"ent_{i}": 9 for i in range(11)})
+    assert comp["severity"] == "clear"
+    assert "Exposure 9/100" in comp["detail"] and "11 sole-source" in comp["detail"]
+
+
+def test_one_bad_sole_source_among_benign_ones_still_leads():
+    edges = [supply_edge(f"ent_{i}", f"S{i}", sole=True) for i in range(5)] + [supply_edge("ent_bad", "Trouble", sole=True)]
+    scores = {f"ent_{i}": 5 for i in range(5)} | {"ent_bad": 70}
+    comp = risk._dependency(entity(), risk.dependence_weights(edges), scores)
+    assert comp["severity"] == "high"
+    assert "Trouble" in comp["label"] and "Exposure 70/100" in comp["detail"]
+
+
+def test_a_consumer_with_no_suppliers_is_not_graded_on_dependence():
+    assert risk._dependency(entity(), [], {})["no_data"] is True
+
+
+def test_suppliers_nobody_has_scored_abstain_and_are_named_as_missing():
+    # They can only understate the exposure, so the reader has to be told it is a floor.
+    edges = [supply_edge("ent_a", "Alpha", sole=True), supply_edge("ent_b", "Bravo")]
+    comp = risk._dependency(entity(), risk.dependence_weights(edges), {"ent_a": 80})
+    assert comp["severity"] == "high"
+    assert "1 unscored and contributing nothing" in comp["detail"]
+
+
+def test_a_consumer_whose_suppliers_are_all_unscored_is_not_graded_either():
+    comp = risk._dependency(entity(), risk.dependence_weights([supply_edge("ent_a", "Alpha")]), {})
+    assert comp["no_data"] is True and "none of them scored yet" in comp["detail"]
+
+
+def test_the_exposure_carries_the_suppliers_and_edges_that_produced_it():
+    edges = [supply_edge("ent_a", "Alpha", sole=True)]
+    comp = risk._dependency(entity(), risk.dependence_weights(edges), {"ent_a": 80})
+    assert comp["element_ids"] == ["ent_vendor", "ent_a", "rel_ent_a"]
+
+
 # --- people ------------------------------------------------------------------------
 
 def _person(**over) -> dict:
@@ -266,12 +461,12 @@ def test_designation_outweighs_the_softer_dimensions_it_competes_with():
     designated = risk.composite([
         risk._designation(entity(flagged=True), {}),
         risk._regional(entity(operates=["US-VT"])),
-        risk._concentration(entity(consumers=2)),
+        risk._dependency(entity(), [], {}),
     ])[0]
     hazardous = risk.composite([
-        risk._designation(entity(), {"sanctions_screen": screen("sanctions_screen", "clear")}),
+        risk._designation(entity(), screens(screen("sanctions_screen", "clear"))),
         risk._regional(entity(manufactures=["PH"])),
-        risk._concentration(entity(consumers=2)),
+        risk._dependency(entity(), [], {}),
     ])[0]
     assert designated > hazardous
 
@@ -288,7 +483,7 @@ def test_a_thin_score_is_still_reported_but_the_note_says_not_to_act_on_it_yet()
     near = {"seed": "Ningbo", "hops": 1, "chain": ["Ningbo", "Pacific Alloy"], "node_ids": [], "rel_ids": [], "reachable": 1}
     scored = risk._score([
         risk._designation(row, {}), risk._proximity_component(row, near), risk._foreign(row, []),
-        risk._financial(row, {}, TODAY), risk._regional(row), risk._concentration(row), risk._media({}),
+        risk._financial(row, {}, TODAY), risk._regional(row), risk._dependency(row, [], {}), risk._media({}),
     ], row, "Entity")
     # Everything known about it is bad, so it scores 100 — but on a fifth of the model,
     # and the note has to carry that or the number lies about how much is behind it.
@@ -301,19 +496,18 @@ def test_a_thin_score_is_still_reported_but_the_note_says_not_to_act_on_it_yet()
 
 
 def test_full_coverage_does_not_carry_the_act_with_caution_warning():
-    row = entity(registration_status="Active", incorporated=["US"], operates=["US-VT"], consumers=2,
-                 manufactures=["US-VT"])
+    row = entity(registration_status="Active", incorporated=["US"], operates=["US-VT"], manufactures=["US-VT"])
     scored = risk._score([
-        risk._designation(row, {"sanctions_screen": screen("sanctions_screen", "clear")}),
+        risk._designation(row, screens(screen("sanctions_screen", "clear"))),
         risk._proximity_component(row, None), risk._foreign(row, []), risk._financial(row, {}, TODAY),
-        risk._regional(row), risk._concentration(row),
-        risk._media({"adverse_media_screen": screen("adverse_media_screen", "clear")}),
+        risk._regional(row), risk._dependency(row, [(supply_edge('ent_a', 'Alpha'), 1.0)], {'ent_a': 0}),
+        risk._media(screens(screen("adverse_media_screen", "clear"))),
     ], row, "Entity")
     assert scored["confidence"] == 100 and "raise the confidence" not in scored["note"]
 
 
 def test_every_dimension_the_scorer_emits_has_a_declared_weight():
-    for name in ("designation", "proximity", "foreign", "financial", "regional", "concentration", "media"):
+    for name in ("designation", "proximity", "dependency", "foreign", "financial", "regional", "media"):
         assert name in risk.DIMENSIONS
 
 

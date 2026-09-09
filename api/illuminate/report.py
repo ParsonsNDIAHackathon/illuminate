@@ -15,7 +15,12 @@ HOME = risk.riskdata.HOME
 # Families the scorer computes better than this module can, because it walks the whole
 # graph rather than one entity's neighbourhood. When a scored breakdown is supplied they
 # are dropped in its favour; the rest survive as context.
-SUPERSEDED_BY_SCORER = ("ownership", "sanctions", "financial", "media", "concentration")
+#
+# 'concentration' is deliberately not on this list. Being a sole source is not a risk this
+# entity carries — it is one its customers carry — so the scorer grades it on the consumer
+# side as `dependency` and this module keeps describing it here as what it is for the
+# supplier: a fact about the award, and a lead.
+SUPERSEDED_BY_SCORER = ("ownership", "sanctions", "financial", "media")
 
 
 """How far up a control chain the ultimate-parent walk will go before giving up."""
@@ -215,15 +220,23 @@ async def affiliations(entity_id: str) -> dict:
             "donations": by_type["DONATED_TO"], "subsidiaries": by_type["OWNS"], "count": len(rows)}
 
 
-async def screens(entity_id: str) -> list[dict]:
+def _party(label: str) -> str:
+    """Screens and artifacts hang off organisations and people alike; the label is spelled
+    into the pattern (Cypher cannot take it as a parameter) and so is checked first."""
+    if label not in ("Entity", "Person"):
+        raise ValueError(f"not a party label: {label}")
+    return label
+
+
+async def screens(entity_id: str, label: str = "Entity") -> list[dict]:
     """Sanctions / exclusion / registry screens are Claims with predicate *_screen."""
     rows = await db.read(
-        """
-        MATCH (c:Claim)-[:ASSERTS]->(e:Entity {id:$id})
+        f"""
+        MATCH (c:Claim)-[:ASSERTS]->(e:{_party(label)} {{id:$id}})
         WHERE c.predicate ENDS WITH '_screen' AND c.status = 'committed'
         OPTIONAL MATCH (a:Artifact)-[:EVIDENCES]->(c)
         RETURN c.predicate AS predicate, c.object_value AS result, c.source AS source, c.confidence AS confidence,
-               c.retrieved_at AS retrieved_at, collect(a{.id,.title,.url})[0] AS artifact, c.detail AS detail
+               c.retrieved_at AS retrieved_at, collect(a{{.id,.title,.url}})[0] AS artifact, c.detail AS detail
         ORDER BY c.retrieved_at DESC
         """,
         {"id": entity_id},
@@ -234,10 +247,10 @@ async def screens(entity_id: str) -> list[dict]:
     return list(latest.values())
 
 
-async def artifacts(entity_id: str, limit: int = 50) -> list[dict]:
+async def artifacts(entity_id: str, limit: int = 50, label: str = "Entity") -> list[dict]:
     return await db.read(
-        """
-        MATCH (e:Entity {id:$id})
+        f"""
+        MATCH (e:{_party(label)} {{id:$id}})
         OPTIONAL MATCH (a1:Artifact)-[:ABOUT]->(e)
         OPTIONAL MATCH (a2:Artifact)-[:EVIDENCES]->(c:Claim)-[:ASSERTS]->(e)
         WITH collect(DISTINCT a1) + collect(DISTINCT a2) AS arts
@@ -312,13 +325,20 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
                          dp["name"] + (f" ({dp['pct']}%)" if dp.get("pct") else ""), ids=[dp["id"]]))
     else:
         inds.append(_ind("ownership", "Ownership chain", None, None, "No parent records resolved"))
-    # 2. Concentration / sole source
+    # 2. Sole-source position. Whose risk this is matters: being irreplaceable says nothing
+    # about whether *this* company will fail, so it is described here and scored on the
+    # customer, as risk.py's `dependency` dimension.
     if supply["supplies"]:
         ss = [s for s in supply["supplies"] if s.get("sole_source")]
         if ss:
             s0 = ss[0]
-            inds.append(_ind("concentration", f"Sole source at tier {s0.get('tier') or '?'}" + (f" for PSC {s0['psc']}" if s0.get("psc") else ""),
-                             "medium", s0.get("source") or "USAspending", s0.get("contract_ref"), s0.get("source_url")))
+            customers = ", ".join(sorted({s["name"] for s in ss if s.get("name")})[:3])
+            inds.append(_ind("concentration",
+                             f"Sole source at tier {s0.get('tier') or '?'}" + (f" for PSC {s0['psc']}" if s0.get("psc") else ""),
+                             "medium", s0.get("source") or "USAspending",
+                             f"Irreplaceable for {customers or 'its customer'} — exposure carried by the customer, "
+                             "not by this entity" + (f" · {s0['contract_ref']}" if s0.get("contract_ref") else ""),
+                             s0.get("source_url")))
         else:
             inds.append(_ind("concentration", "No sole-source awards on record", "clear", "USAspending"))
     else:
@@ -485,6 +505,57 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
             if with_data else "No signal families returned data; no composite is computed."
         ),
         "disclaimer": disclaimer,
+    }
+
+
+async def build_person_report(person_id: str) -> dict | None:
+    """One person's page: every seat they hold or held, with the employer's own standing
+    beside it, plus the screens, artifacts and stored risk breakdown on the person. A person
+    is only ever interesting through what they connect, so the roles carry the flag and the
+    score of the entity at the other end."""
+    rows = await db.read(
+        """
+        MATCH (p:Person {id:$id})
+        OPTIONAL MATCH (p)-[r:HELD_ROLE|BENEFICIAL_OWNER_OF]->(e:Entity)
+        WITH p, r, e ORDER BY coalesce(r.current, r.to IS NULL) DESC, r.from DESC
+        RETURN p{.*} AS person,
+               [x IN collect({edge_id:r.id, rel:type(r), entity_id:e.id, entity:e.name, kind:e.kind,
+                              title:coalesce(r.title, CASE type(r) WHEN 'BENEFICIAL_OWNER_OF' THEN 'Beneficial owner' ELSE null END),
+                              role_type:r.role_type, from:r.from, to:r.to, pct:r.pct,
+                              current:coalesce(r.current, r.to IS NULL), source:r.source, source_url:r.source_url, detail:r.detail,
+                              flagged:coalesce(e.flagged,false), flag_reason:e.flag_reason, simulated:coalesce(e.simulated,false),
+                              risk_score:e.risk_score, risk_band:e.risk_band,
+                              supplier: EXISTS { (e)-[:SUPPLIES]->() }})
+                WHERE x.entity_id IS NOT NULL] AS roles
+        """,
+        {"id": person_id},
+    )
+    if not rows:
+        return None
+    person = dict(rows[0]["person"] or {})
+    person.pop("risk_components", None)   # the breakdown arrives parsed, under risk
+    roles = rows[0]["roles"] or []
+    scr = await screens(person_id, "Person")
+    arts = await artifacts(person_id, label="Person")
+    scored = await risk.explain(person_id)
+    sources = sorted({s for s in [person.get("source")] + [r.get("source") for r in roles] + [a.get("source") for a in arts] if s})
+    return {
+        "person": person,
+        "identity": {
+            "id": person.get("id"), "name": person.get("name"), "flagged": bool(person.get("flagged")),
+            "flag_reason": person.get("flag_reason"), "simulated": bool(person.get("simulated")),
+            "public_official": bool(person.get("public_official")), "person_types": person.get("person_types"),
+            "source": person.get("source"), "source_url": person.get("source_url"), "method": person.get("method"),
+            "confidence": person.get("confidence"), "retrieved_at": person.get("retrieved_at"),
+        },
+        "roles": roles,
+        "current": [r for r in roles if r.get("current")],
+        "former": [r for r in roles if not r.get("current")],
+        "screens": scr,
+        "risk": scored,
+        "artifacts": arts,
+        "sources": sources,
+        "generated_at": date.today().isoformat(),
     }
 
 

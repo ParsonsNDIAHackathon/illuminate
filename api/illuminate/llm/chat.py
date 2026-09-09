@@ -177,14 +177,23 @@ def _summarise(r: ToolResult) -> str:
 
 
 _ENTITY_HINT = re.compile(r"\b(?:of|for|owns?|about)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,4})")
+# Asking for a report is worth catching without a key, because a report does not need one:
+# its findings, paths, goods and mitigations are all computed from the graph, and the model
+# only ever adds the summary paragraph on top.
+_REPORT_INTENT = re.compile(r"\b(risk assessment|vendor profile|entity profile|"
+                            r"(?:generate|write|make|produce|give me|create)\s+(?:me\s+)?(?:an?\s+)?report)\b", re.I)
+_PROFILE_INTENT = re.compile(r"\b(vendor|entity|company|supplier)\s+profile\b", re.I)
 
 
 async def _template_only_turn(conv: Conversation, text: str, ctx: ToolContext, emit: Emit, acc: TurnAccumulator) -> dict:
     """No model key: degrade to template queries matched by intent, not an error."""
+    if _REPORT_INTENT.search(text):
+        return await _report_turn(conv, text, ctx, emit, acc)
     name = match_intent(text)
     if not name:
-        msg = ("No OpenAI key is configured, so I can only run saved templates. Try: 'show sole-source suppliers', "
-               "'foreign parent', 'shared directors', 'goods vs services', 'manufactures in CN', or add a key under Settings › Connectors.")
+        msg = ("No OpenAI key is configured, so I can only run saved templates and write reports. Try: 'show sole-source suppliers', "
+               "'foreign parent', 'shared directors', 'goods vs services', 'manufactures in CN', 'write a risk assessment', "
+               "or add a key under Settings › Connectors.")
         conv.messages.append({"role": "assistant", "content": msg})
         final = acc.final(msg)
         await emit(final)
@@ -214,6 +223,34 @@ async def _template_only_turn(conv: Conversation, text: str, ctx: ToolContext, e
         msg = f"Template `{name}` returned {n} row(s) (no model key — template mode)."
     else:
         msg = f"Template `{name}` could not run: {r.data.get('error')}"
+    conv.messages.append({"role": "assistant", "content": msg})
+    final = acc.final(msg)
+    await emit(final)
+    return final
+
+
+async def _report_turn(conv: Conversation, text: str, ctx: ToolContext, emit: Emit, acc: TurnAccumulator) -> dict:
+    """Write a report with no model key. The document is a projection of the graph, so all
+    that is lost is the summary paragraph — which the report says, rather than pretending."""
+    kind = "entity_profile" if _PROFILE_INTENT.search(text) else "risk_assessment"
+    args: dict[str, Any] = {"kind": kind}
+    m = _ENTITY_HINT.search(text)
+    if m:
+        s = await dispatch(ctx, "search_entities", {"query": m.group(1), "kind": "entity", "limit": 1})
+        if s.ok and s.data["results"]:
+            args["subject_id"] = s.data["results"][0]["id"]
+    await emit({"type": "tool_call", "name": "generate_report", "args": args})
+    r = await dispatch(ctx, "generate_report", args)
+    acc.absorb("generate_report", args, r)
+    await emit({"type": "tool_result", "name": "generate_report", "ok": r.ok, "cypher": r.cypher, "params": r.params,
+                "summary": _summarise(r), "subgraph": r.subgraph, "style_ops": r.style_ops, "legend": r.legend, "notes": r.notes})
+    if r.ok:
+        d = r.data
+        msg = (f"Wrote **{d['title']}** — {d.get('finding_count', 0)} finding(s), generated {d['generated_at']}. "
+               "It is on the Reports tab and on the canvas beside its subject; regenerate it there once the graph "
+               "has moved on. (No model key, so the report carries its computed summary rather than a written one.)")
+    else:
+        msg = f"Could not write that report: {r.data.get('error')}"
     conv.messages.append({"role": "assistant", "content": msg})
     final = acc.final(msg)
     await emit(final)

@@ -53,6 +53,52 @@ async def summarize_entity(user: str, report: dict) -> dict | None:
     return None
 
 
+REPORT_SYSTEM = (
+    "You are writing the opening of a supply-chain risk assessment for a defence program office, from a JSON "
+    "summary of findings a graph produced. Use ONLY those findings. Do not add companies, countries, "
+    "relationships or numbers that are not in them, and do not soften or sharpen a severity the data gives you. "
+    "Reply JSON {\"summary\": str, \"analyst_note\": str}. `summary` is 3-5 sentences: how many paths carry "
+    "significant risk, which is the most exposed and why, what is affected, and how much of the supply base "
+    "could actually be assessed — a supplier nothing is known about is unexamined, never safe. `analyst_note` is "
+    "1-3 sentences on what to do first and what would settle the open questions. Neutral, specific, no "
+    "hedging filler. This tool flags conditions warranting review; it never accuses anyone of wrongdoing."
+)
+
+
+async def report_narrative(user: str, data: dict) -> dict | None:
+    """The prose a generated report carries on top of its computed findings (reports.py).
+
+    Returns None whenever there is no key, no answer, or nothing for a model to add — the
+    document is built from the graph either way and simply loses two paragraphs.
+    """
+    kind = data.get("kind")
+    if kind == "entity_profile":
+        # The profile already has a summarizer, and it reads the same facts. Reuse it rather
+        # than teaching a second prompt the same job.
+        rep = data.get("report") or {}
+        return await summarize_entity(user, rep) if rep and not (rep.get("summary") or {}).get("text") else None
+    if kind != "risk_assessment":
+        return None
+    facts = {
+        "subject": {k: data["subject"].get(k) for k in ("name", "kind", "score", "band", "top_factor")},
+        "coverage": data.get("coverage"),
+        "findings": [{
+            "supplier": f["name"], "tier": f["tier"], "score": f.get("score"), "band": f.get("band"),
+            "leading_factor": f.get("top_factor"), "sole_source": f.get("sole_source"), "flagged": f.get("flagged"),
+            "path": [n.get("name") for n in f.get("chain") or []],
+            "goods": [c.get("name") for c in f.get("categories") or []],
+            "drivers": [{"label": d.get("label"), "severity": d.get("severity"), "detail": d.get("detail")}
+                        for d in (f.get("drivers") or [])[:4]],
+        } for f in (data.get("findings") or [])[:15]],
+        "unscreened_sole_sources": [g.get("name") for g in (data.get("gaps") or [])[:10]],
+    }
+    out = await _json_call(user, REPORT_SYSTEM, json.dumps(facts, default=str)[:14000], strong=True)
+    if not out or not out.get("summary"):
+        return None
+    strong, _fast = models(user)
+    return {"summary": out["summary"], "analyst_note": out.get("analyst_note"), "model": strong}
+
+
 async def extract_facts(user: str, entity_name: str, text: str, url: str) -> list[dict]:
     """Extract candidate facts about an entity from a web page. Each fact becomes a
     staged Claim (D5) — never a direct write."""

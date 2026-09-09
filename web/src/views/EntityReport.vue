@@ -1,9 +1,13 @@
 <template>
+  <!-- The entity's page: identity, supply position, people, affiliations, risk and artifacts on
+       one screen. The canvas card shows the same record at a glance; a stored Report is the
+       document you generate and keep. This is the view in between, the one a list link opens. -->
   <v-container fluid v-if="rep" class="report">
     <div class="d-flex align-center ga-2 mb-1">
       <v-btn icon="mdi-arrow-left" variant="text" @click="router.back()" />
       <h2 class="text-h6">{{ rep.identity.name }}</h2>
-      <v-chip v-if="rep.entity.flagged" size="x-small" color="error" variant="tonal">flagged</v-chip>
+      <v-chip v-if="rep.entity.flagged" size="x-small" color="error" variant="tonal" :title="rep.entity.flag_reason">flagged</v-chip>
+      <v-chip v-if="rep.identity.simulated" size="x-small" color="warning" variant="tonal">SIM</v-chip>
       <v-chip v-if="rep.risk?.composite != null" size="x-small" variant="tonal" :color="bandChip(rep.risk.band)"
               :title="rep.risk.note" @click="tab = 'risk'" style="cursor:pointer">
         risk {{ rep.risk.composite }} · {{ bandLabel(rep.risk.band) }}<span v-if="isThin(rep.risk.confidence)"> ?</span>
@@ -73,11 +77,13 @@
         <p class="text-caption mb-2" style="opacity:.7">Current — {{ rep.people.resolved_current_count }} resolved<span v-if="rep.people.board_size"> of {{ rep.people.board_size }} seats</span>. Two tenures are two edges, not one record overwritten.</p>
         <v-list density="compact" lines="two">
           <v-list-subheader>Current</v-list-subheader>
-          <v-list-item v-for="p in rep.people.current" :key="p.edge_id" :title="`${p.name} — ${p.title || ''}`" :subtitle="`${p.role_type || ''} · since ${p.from || '?'}${p.elsewhere.length ? ' · also: ' + p.elsewhere.map((x:any) => x.entity + (x.current ? '' : ' (former)')).join(', ') : ''}`">
+          <v-list-item v-for="p in rep.people.current" :key="p.edge_id" :subtitle="`${p.role_type || ''} · since ${p.from || '?'}${p.elsewhere.length ? ' · also: ' + p.elsewhere.map((x:any) => x.entity + (x.current ? '' : ' (former)')).join(', ') : ''}`">
+            <template #title><router-link :to="`/people/${p.person_id}`">{{ p.name }}</router-link> — {{ p.title || '' }}</template>
             <template #append><v-chip v-if="p.interlock" size="x-small" color="secondary" variant="tonal">Interlock</v-chip><v-chip v-if="p.concurrent_government" size="x-small" color="warning" variant="tonal" class="ml-1">Government post</v-chip><v-chip v-else-if="p.former_government" size="x-small" color="secondary" variant="tonal" class="ml-1">Ex-government</v-chip><v-chip v-if="p.public_official" size="x-small" color="secondary" variant="tonal" class="ml-1">Public official</v-chip><v-chip v-if="p.elsewhere.some((x:any) => x.flagged)" size="x-small" color="error" variant="tonal" class="ml-1">Linked to flagged</v-chip><a v-if="p.source_url" :href="p.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ p.source }}</a></template>
           </v-list-item>
           <v-list-subheader>Former</v-list-subheader>
-          <v-list-item v-for="p in rep.people.former" :key="p.edge_id" :title="`${p.name} — ${p.title || ''}`" :subtitle="`${p.role_type || ''} · ${p.from || '?'} – ${p.to || '?'}${p.elsewhere.length ? ' · now: ' + p.elsewhere.filter((x:any) => x.current).map((x:any) => x.entity).join(', ') : ''}`">
+          <v-list-item v-for="p in rep.people.former" :key="p.edge_id" :subtitle="`${p.role_type || ''} · ${p.from || '?'} – ${p.to || '?'}${p.elsewhere.length ? ' · now: ' + p.elsewhere.filter((x:any) => x.current).map((x:any) => x.entity).join(', ') : ''}`">
+            <template #title><router-link :to="`/people/${p.person_id}`">{{ p.name }}</router-link> — {{ p.title || '' }}</template>
             <template #append><v-chip v-if="p.moved_to_flagged" size="x-small" color="error" variant="tonal">Moved to flagged</v-chip><a v-if="p.source_url" :href="p.source_url" target="_blank" rel="noopener" class="ml-2 text-caption">{{ p.source }}</a></template>
           </v-list-item>
           <v-list-item v-if="!rep.people.current.length && !rep.people.former.length" subtitle="No officers or directors resolved. LittleSis and EDGAR coverage is strongest for large listed firms." />
@@ -140,9 +146,13 @@
         <p v-if="!rep.artifacts.length" class="text-body-2 mt-2" style="opacity:.6">No artifacts attached yet.</p>
       </v-window-item>
       <v-window-item value="graph">
-        <div style="height: 60vh; position: relative"><GraphCanvas /></div>
+        <div style="height: 60vh; position: relative"><GraphCanvas @expand="expand" /></div>
       </v-window-item>
     </v-window>
+  </v-container>
+  <v-container v-else-if="error">
+    <p class="text-body-2 text-error">{{ error }}</p>
+    <v-btn variant="tonal" to="/entities">Back to entities</v-btn>
   </v-container>
   <v-container v-else><v-progress-linear indeterminate /></v-container>
 </template>
@@ -155,21 +165,28 @@ import ArtifactViewer from '../components/ArtifactViewer.vue'
 import SourceLink from '../components/SourceLink.vue'
 import { bandChip, bandLabel, confidenceNote, isThin, sevColor, sevIcon } from '../styles/risk'
 import { useGraph } from '../stores/graph'
-const rawId = ref<string | null>(null)
 import { useJobs } from '../stores/jobs'
 import { useWorkspace } from '../stores/workspace'
+import { useOpenOnCanvas } from '../composables/openOnCanvas'
 const props = defineProps<{ id: string }>()
 const router = useRouter(); const graph = useGraph(); const jobs = useJobs(); const ws = useWorkspace()
+const { openOnCanvas } = useOpenOnCanvas()
 const rep = ref<any>(null); const tab = ref('overview'); const enriching = ref(false); const regen_busy = ref(false)
+const rawId = ref<string | null>(null); const error = ref('')
 // tier is counted towards the program the canvas is focused on, if any
-async function load() { rep.value = await api.get(`/api/entities/${props.id}/report?${qs({ root_id: graph.focusId })}`) }
+async function load() {
+  error.value = ''
+  try { rep.value = await api.get(`/api/entities/${props.id}/report?${qs({ root_id: graph.focusId })}`) }
+  catch (e: any) { rep.value = null; error.value = e?.message || String(e) }
+}
 // A report built before the scorer ran has no `scored` flag on its indicators; treating an
 // absent flag as scored keeps that older shape rendering as one list.
 const scoredIndicators = computed<any[]>(() => (rep.value?.risk?.indicators || []).filter((i: any) => i.scored !== false))
 const contextIndicators = computed<any[]>(() => (rep.value?.risk?.indicators || []).filter((i: any) => i.scored === false))
 async function enrich() { enriching.value = true; try { await jobs.enqueue(props.id) } finally { enriching.value = false } }
 async function regen() { regen_busy.value = true; try { await api.post(`/api/entities/${props.id}/summary`); await load() } catch (e: any) { alert(e.message) } finally { regen_busy.value = false } }
-async function openInGraph() { await graph.loadNeighbourhood(props.id, 2, ws.ws.layers); graph.select(props.id); router.push('/') }
+function openInGraph() { return openOnCanvas(props.id, 'Entity') }
+async function expand(id: string) { await graph.loadNeighbourhood(id, 1, ws.ws.layers) }
 watch(tab, async (t) => { if (t === 'graph') { await graph.loadNeighbourhood(props.id, 2, { ...ws.ws.layers, people: true, countries: true }, true); graph.select(props.id) } })
 watch(() => jobs.jobs.filter(j => j.entity_id === props.id && j.status === 'done').length, load)
 onMounted(load); watch(() => props.id, load)

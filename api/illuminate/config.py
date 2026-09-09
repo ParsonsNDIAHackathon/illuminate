@@ -57,9 +57,21 @@ settings = Settings()
 # Canvas layers and whether each is drawn by default. "entities" is always on. Artifacts split by
 # kind over "artifacts" (documents: filings, news, awards, web) and "sources" (registry entries and
 # source records); "claims" is the reified assertions those artifacts evidence. "indirect_orgs" is
-# a canvas-side filter, not a fetch layer: off, organizations that only people, places, documents
-# or claims point at are left undrawn (web/src/stores/graphLayers.ts).
-LAYER_DEFAULTS = {"entities": True, "indirect_orgs": True, "people": True, "countries": False, "categories": False, "artifacts": False, "sources": False, "claims": False}
+# a canvas-side filter, not a fetch layer: off, an organization is left undrawn unless a chain of
+# contracts or ownership joins it to a program — people, places, documents, claims and affiliation
+# edges (lobbying, memberships, donations) do not carry that chain, and ownership carries it only
+# pointing in, so the owner of a supplier is drawn and that owner's other subsidiaries are not. A
+# node scored over 20 that reaches a supplier is drawn either way (web/src/stores/graphLayers.ts).
+# "reports" is on by default: a report exists because someone asked for it, and there are a handful
+# of them at most, so hiding the thing the user just generated would be the surprising default.
+LAYER_DEFAULTS = {"entities": True, "indirect_orgs": True, "people": True, "countries": False, "categories": False, "artifacts": False, "sources": False, "claims": False,
+                  "reports": True}
+
+# Risk score above which a node is drawn whatever the filters say, mirrored by RISK_PIN_FLOOR in
+# web/src/stores/graphLayers.ts. The canvas can only pin what it was sent, so the graph queries
+# carry risky people past an off "people" layer: hiding people is how the canvas gets readable and
+# must not be how a designated director disappears. Just under the "elevated" band floor (risk.py).
+RISK_PIN_FLOOR = 20
 
 
 class WorkspaceSettings(BaseModel):
