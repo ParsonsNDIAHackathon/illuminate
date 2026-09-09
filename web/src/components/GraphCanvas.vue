@@ -312,7 +312,24 @@ watch(() => [graph.selectedId, graph.selectedEdgeId], ([id, eid]) => {
   if (id) cy.getElementById(id).select()
   else if (eid) cy.getElementById(eid).select()
 })
-defineExpose({ fit, layout })
+/** Keep a selected node clear of the properties card: when it would sit at or behind the
+ *  card's left edge, slide the view so it lands in the middle of the strip still in view.
+ *  Vertical position is left alone unless the node is off-screen, which would otherwise
+ *  leave it "centred" somewhere the user cannot see. */
+function panIntoView(id: string, rightBound: number) {
+  if (!cy || rightBound <= 0) return
+  const n = cy.getElementById(id)
+  if (!n || n.empty()) return
+  const pos = n.renderedPosition()
+  if (!pos) return
+  const height = cy.height()
+  const offscreenY = pos.y < 0 || pos.y > height
+  if (pos.x < rightBound && !offscreenY) return
+  cy.animate({
+    panBy: { x: pos.x >= rightBound ? rightBound / 2 - pos.x : 0, y: offscreenY ? height / 2 - pos.y : 0 },
+  }, { duration: 250 })
+}
+defineExpose({ fit, layout, panIntoView })
 </script>
 
 <style scoped>

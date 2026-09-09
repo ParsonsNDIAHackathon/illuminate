@@ -1,6 +1,6 @@
 <template>
   <div class="explorer" ref="root" :style="{ gridTemplateColumns: `1fr 6px ${sideW}px` }">
-    <div class="canvas">
+    <div class="canvas" ref="canvasBox">
       <GraphCanvas ref="canvas" @expand="expand" />
       <div class="toolbar">
         <!-- Both menus follow the pattern on illuminate-map: the controls fold away so the
@@ -26,8 +26,11 @@
                          subtitle="Take every node off the view" @click="graph.clear()" />
           </v-list>
         </v-menu>
+        <!-- The icon says which of the two states you are in: a crosshair only means something
+             when the canvas is actually narrowed to one program. -->
         <v-select class="focus" :model-value="graph.focusId" :items="focusItems" item-title="name" item-value="id"
-                  density="compact" variant="solo" flat hide-details prepend-inner-icon="mdi-target"
+                  density="compact" variant="solo" flat hide-details
+                  :prepend-inner-icon="graph.focusId ? 'mdi-target' : 'mdi-earth'"
                   :title="graph.focusId ? 'Showing one program and its supply chain — pick Everything to see them all' : 'Showing every program'"
                   @update:model-value="setFocus" />
       </div>
@@ -57,7 +60,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, qs } from '../api/client'
 import GraphCanvas from '../components/GraphCanvas.vue'
 import SelectionCard from '../components/SelectionCard.vue'
@@ -69,6 +72,7 @@ import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 const graph = useGraph(); const ws = useWorkspace()
 const canvas = ref<InstanceType<typeof GraphCanvas>>()
+const canvasBox = ref<HTMLElement>()
 const q = ref(''); const hits = ref<any[]>([]); const searching = ref(false); const open = ref(false)
 // The chat is the main way to work the graph, so it gets a panel wide enough to read a
 // paragraph in — and a handle, because how much canvas a question needs is the user's call.
@@ -126,6 +130,16 @@ onMounted(async () => {
   if (!ws.loaded) await ws.load(); graph.loadPrograms(); if (!graph.nodes.size) reload()
 })
 onBeforeUnmount(() => window.removeEventListener('resize', onResize))
+// The card is measured rather than assumed: it is only in the DOM once something is
+// selected, so this waits a tick for it before asking where its edge fell.
+watch(() => graph.selectedId, async (id) => {
+  if (!id) return
+  await nextTick()
+  const box = canvasBox.value?.getBoundingClientRect()
+  const card = canvasBox.value?.querySelector('.selection-card')?.getBoundingClientRect()
+  if (!box || !card) return
+  canvas.value?.panIntoView(id, card.left - box.left)
+})
 // Depth only shapes a focused view; the whole graph is not walked from a root.
 watch(() => ws.depth, () => { if (graph.focusId) reload() })
 </script>
