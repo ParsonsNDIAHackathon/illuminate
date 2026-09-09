@@ -58,7 +58,7 @@ adds a scrubber; `data-once` stops the loop.
 | `media/chat-styles.png` | Chat: goods purple, services yellow | from `docs/screenshots/03-chat-goods-services.png` |
 | `media/chat-report.*` | **Chat: generate a report** | ⬜ empty — mp4 preferred |
 | `media/report-risk.png` | The report's risk section | from `docs/screenshots/06-report-risk.png` |
-| `media/chat-add-program.*` | **Chat: add a new program** | ⬜ empty — mp4 preferred |
+| `media/chat-add-program.png` | **Chat: add a new program** | **your capture** |
 | `media/permission-dialog.png` | Ask before writing | from `docs/screenshots/04-permission-dialog.png` |
 
 The rows marked *from `docs/screenshots/`* are stand-ins — overwrite any of them with a fresher
