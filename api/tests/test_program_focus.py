@@ -18,9 +18,14 @@ def test_neighbourhood_confines_the_walk_only_when_a_program_is_given():
     assert "blacklistNodes" not in open_cy
     assert "program" not in open_params
 
+    # The risk sweep rides with the confinement: a focused program keeps its scored nodes whatever
+    # the depth, while expanding a bare entity stays where the user pointed.
+    assert "shortestPath" not in open_cy
+
     confined_cy, confined_params = t.build({"entity_id": "ent_x", "depth": 2, "program_id": "ent_x"})
     assert "blacklistNodes:blocked" in confined_cy
     assert confined_params["program"] == "ent_x"
+    assert "shortestPath" in confined_cy and confined_params["risk_floor"] > 0
     assert validate(confined_cy, params=confined_params).classification == "READ"
 
 
@@ -63,6 +68,30 @@ def test_focused_subgraph_leaves_the_other_programs_out(client):
     if other not in open_ids:
         pytest.skip("these two programs share no supplier within the depth, nothing to confine")
     assert ids < open_ids
+
+
+def test_a_focused_program_carries_its_risky_nodes_past_the_depth(client):
+    """Depth says how much context to draw, not which findings are out of sight. Around the
+    V-22 program at depth 2 the director scored 100 is three hops out and the metals group
+    five; both belong to that chain and both have to arrive, people layer or no people layer."""
+    from illuminate.config import RISK_PIN_FLOOR
+    me, scored = None, set()
+    for p in _programs(client):
+        reach = client.get(f"/api/graph/subgraph?entity_id={p['id']}&depth=6&program_id={p['id']}").json()["subgraph"]
+        found = {n["id"] for n in reach["nodes"] if (n["props"].get("risk_score") or 0) > RISK_PIN_FLOOR}
+        if found:
+            me, scored = p["id"], found
+            break
+    if not me:
+        pytest.skip("no program's chain has anything scored over the pin floor")
+
+    for people in ("true", "false"):
+        sub = client.get(f"/api/graph/subgraph?entity_id={me}&depth=1&program_id={me}&people={people}").json()["subgraph"]
+        ids = {n["id"] for n in sub["nodes"]}
+        assert scored <= ids, f"a scored node was left outside the depth with people={people}"
+        # Each one arrives on a path, not as a lone dot the canvas cannot place.
+        joined = {e["source"] for e in sub["edges"]} | {e["target"] for e in sub["edges"]}
+        assert scored <= joined
 
 
 PROG_ID = "ent_testfocusprog"
