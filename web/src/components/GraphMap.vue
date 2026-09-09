@@ -4,6 +4,14 @@
       <div><span class="eyebrow">GEOGRAPHIC EXPOSURE</span><h2>{{ graph.focusLabel || 'Across the graph' }}</h2></div>
       <div class="counts"><strong>{{ data.mappedCount }}</strong> entities placed <span>·</span> <strong>{{ data.unmappedCount }}</strong> not placed</div>
     </div>
+    <div class="news-search acled-controls">
+      <v-checkbox v-model="acled.visible" label="ACLED" density="compact" hide-details class="news-toggle" />
+      <template v-if="acled.visible">
+        <v-select v-model="acled.period" :items="timeWindows" label="ACLED period" density="compact" variant="outlined" hide-details class="news-window" />
+        <v-select v-model="acled.eventType" :items="[{ title: 'All event types', value: '' }, ...acled.eventTypes.map(value => ({ title: value, value }))]" label="ACLED event type" density="compact" variant="outlined" hide-details class="news-topic" />
+        <v-autocomplete v-model="acled.country" :items="[{ title: 'All countries', value: '' }, ...acled.countries.map(value => ({ title: value, value }))]" label="ACLED country" density="compact" variant="outlined" hide-details class="news-topic" />
+      </template>
+    </div>
     <form class="news-search" @submit.prevent="news.search()">
       <v-checkbox v-model="news.visible" label="News" density="compact" hide-details class="news-toggle" />
       <v-text-field v-model="news.query" label="News topic" placeholder="Search recent news…" density="compact" variant="outlined" hide-details maxlength="250" class="news-topic" />
@@ -39,6 +47,14 @@
           <title>{{ place.name }} · {{ place.articles.length }} news articles · Country mentioned in headline</title>
           <path :d="`M0,${-25 / (zoom * mapScale)} l${7 / (zoom * mapScale)},${7 / (zoom * mapScale)} l${-7 / (zoom * mapScale)},${7 / (zoom * mapScale)} l${-7 / (zoom * mapScale)},${-7 / (zoom * mapScale)} Z`" />
         </g>
+        <g v-for="place in acled.visible ? acled.mapped : []" :key="`acled:${place.id}`"
+          :transform="`translate(${(place.longitude + 180) * 3},${(90 - place.latitude) * 3})`"
+          class="marker acled-marker" :class="{ active: acled.selectedId === place.id }" tabindex="0" role="button"
+          :aria-label="`ACLED: ${place.name}, ${place.country}: ${place.events} events; area centroid`"
+          @pointerdown.stop @click.stop="acled.selectedId = place.id" @keydown.enter.prevent="acled.selectedId = place.id" @keydown.space.prevent="acled.selectedId = place.id">
+          <title>ACLED · {{ place.name }}, {{ place.country }} · {{ place.events }} events · {{ place.fatalities }} reported fatalities · Area centroid</title>
+          <rect :x="-acledMarkerSize(place.id) / 2" :y="-acledMarkerSize(place.id) / 2" :width="acledMarkerSize(place.id)" :height="acledMarkerSize(place.id)" />
+        </g>
       </svg>
       <v-sheet class="detail-toggle" rounded>
         <v-checkbox v-model="showRegions" label="States & provinces" density="compact" hide-details />
@@ -49,9 +65,10 @@
         <v-btn icon="mdi-minus" aria-label="Zoom out" size="small" :disabled="zoom <= 1" @click="zoom = Math.max(1, zoom - .5)" />
         <v-btn size="small" @click="zoom = 1; center = [540, 270]">Reset</v-btn>
       </v-btn-group>
-      <p v-if="!places.length && !(news.visible && newsData.places.length)" class="map-empty" role="status">{{ graph.loading ? 'Loading locations…' : graph.filter ? 'No mapped entities match your search.' : 'No geographic locations in this graph scope. Try a deeper traversal or another program.' }}</p>
+      <p v-if="!places.length && !(news.visible && newsData.places.length) && !(acled.visible && acled.mapped.length)" class="map-empty" role="status">{{ graph.loading ? 'Loading locations…' : graph.filter ? 'No mapped entities match your search.' : 'No geographic locations in this graph scope. Try a deeper traversal or another program.' }}</p>
       <a class="attribution" href="https://www.naturalearthdata.com/about/terms-of-use/" target="_blank" rel="noopener">Natural Earth · illustrative boundaries</a>
     </div>
+    <AcledDetails />
     <div v-if="news.visible" class="news-details">
       <div class="detail-heading">
         <v-select v-model="news.location" :items="newsLocations" label="News location" density="compact" variant="outlined" hide-details class="location-select" />
@@ -87,6 +104,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import AcledDetails from './AcledDetails.vue'
+import { useAcled } from '../stores/acled'
 import { useNews } from '../stores/news'
 import { mapNews, newsDate, type NewsArticle } from '../newsMap'
 import { useGraph } from '../stores/graph'
@@ -101,6 +120,9 @@ const props = defineProps<{ locationCode?: string }>()
 const emit = defineEmits<{ select: []; 'select-news': [article: NewsArticle] }>()
 const selectedKey = ref('')
 const news = useNews()
+const acled = useAcled()
+onMounted(() => acled.load())
+watch(() => [acled.period, acled.eventType, acled.country], () => { acled.selectedId = '' })
 const now = ref(Date.now())
 const retrySeconds = computed(() => Math.max(0, Math.ceil((news.retryAt - now.value) / 1000)))
 let cooldownTimer: ReturnType<typeof setInterval> | undefined
@@ -174,6 +196,7 @@ watch(() => props.locationCode, code => {
   }
   selectedKey.value = `${region ? 'region' : 'country'}:${location.code}`
 }, { immediate: true })
+function acledMarkerSize(id: string) { return (acled.selectedId === id ? 10 : zoom.value < 2 ? 4 : 8) / (zoom.value * mapScale.value) }
 function entityCount(place: MapPlace) { return new Set(place.entries.map(e => e.node.id)).size }
 function traced(place: MapPlace) { return place.entries.some(e => graph.highlightIds.includes(e.node.id) || (e.edge && graph.highlightIds.includes(e.edge.id)) || graph.selectedId === e.node.id) }
 function inspect(id: string) { graph.select(id); emit('select') }
@@ -205,7 +228,9 @@ function movePan(event: PointerEvent) {
 </script>
 
 <style scoped>
-.news-search { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:8px; }
+.acled-marker rect { fill:#ce9eff; stroke:#102b38; stroke-width:1; vector-effect:non-scaling-stroke; }
+.acled-marker.active rect,.acled-marker:focus rect { stroke:white; stroke-width:3; }
+.news-search { flex-shrink:0; display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:8px; }
 .news-toggle { flex:0 0 auto; }
 .news-topic { flex:1 1 180px; }
 .news-window { flex:0 1 170px; min-width:150px; }
@@ -215,7 +240,7 @@ function movePan(event: PointerEvent) {
 .news-marker.active path,.news-marker:focus path { stroke:white; stroke-width:3; }
 .news-details { flex:0 1 170px; min-height:90px; display:flex; flex-direction:column; padding-top:10px; font-size:12px; }
 .news-article :deep(.v-list-item-title) { white-space:normal; font-size:12px; }
-.geo-view { height:100%; padding:112px 16px 12px; display:flex; flex-direction:column; background:rgb(var(--v-theme-background)); }
+.geo-view { height:100%; overflow:auto; padding:112px 16px 12px; display:flex; flex-direction:column; background:rgb(var(--v-theme-background)); }
 .map-summary { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 4px 12px; flex-wrap:wrap; }
 .eyebrow { font-size:10px; letter-spacing:.14em; color:rgb(var(--v-theme-primary)); font-weight:800; }
 h2 { font-size:20px; font-weight:600; }.counts { font-size:12px; opacity:.85; }.counts strong { font-size:18px; }.counts span { margin:0 8px; }

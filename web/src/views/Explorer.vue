@@ -31,7 +31,8 @@
     </div>
     <div class="side">
       <div class="inspector-pane">
-        <NewsInspector v-if="news.selected" />
+        <AcledInspector v-if="viewMode === 'map' && acled.visible && acled.selected" />
+        <NewsInspector v-else-if="news.selected" />
         <Inspector v-else-if="graph.selected" @expand="expand" />
         <EdgeInspector v-else-if="graph.selectedEdge" />
         <div v-else class="hint">Select a node or an edge to inspect it. Double-click a node to expand.</div>
@@ -43,6 +44,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import AcledInspector from '../components/AcledInspector.vue'
+import { useAcled } from '../stores/acled'
 import NewsInspector from '../components/NewsInspector.vue'
 import { useNews } from '../stores/news'
 import type { NewsArticle } from '../newsMap'
@@ -59,13 +62,18 @@ import { useGraph } from '../stores/graph'
 import { useWorkspace } from '../stores/workspace'
 const graph = useGraph(); const ws = useWorkspace()
 const news = useNews()
+const acled = useAcled()
+watch(() => acled.selectedId, id => {
+  if (id) { graph.select(null); graph.selectEdge(null); news.selectedUrl = null }
+})
 function selectNews(article: NewsArticle) {
+  acled.selectedId = ''
   graph.select(null)
   graph.selectEdge(null)
   news.selectedUrl = article.url
 }
 watch([() => graph.selectedId, () => graph.selectedEdgeId], ([node, edge]) => {
-  if (node || edge) news.selectedUrl = null
+  if (node || edge) { news.selectedUrl = null; acled.selectedId = '' }
 })
 const route = useRoute(); const router = useRouter()
 const viewMode = ref(route.query.view === 'map' ? 'map' : 'graph')

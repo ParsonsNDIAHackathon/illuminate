@@ -109,3 +109,15 @@ One-year news searches sample each three-month window separately because
 GDELT limits article-list queries to three months per request. Up to 250 articles are
 distributed across the windows, deduplicated and sorted newest first. Longer searches
 can take longer; failures are reported rather than returning an incomplete time range.
+
+### ACLED map layer
+
+The map includes an offline **ACLED** layer built from the checked-in regional
+workbooks. Purple squares represent state/province centroids. Filter by country,
+event type, and 7 days, 1 month, 3 months, or 1 year; select an area to inspect event
+counts, reported fatalities, and workbook provenance. Periods end at the latest
+week covered by every region, shown on the map, rather than today. Unplaced areas
+remain in the list and totals. This layer makes no external ACLED/GDELT requests.
+
+See [ACLED data preparation](datasets/acled/README.md) for source coverage and
+`python3 scripts/build_acled_map.py` to regenerate the map snapshot.
