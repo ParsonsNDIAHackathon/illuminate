@@ -22,11 +22,21 @@ export type GraphLayer =
 export const INDIRECT_ORGS = 'indirect_orgs'
 
 /** Relationship types that carry a program's chain from one organization to the next: it supplies
- *  into the chain, or it owns / is owned by something that does. Every other entity-to-entity
- *  edge is affiliation, not contract — MEMBER_OF a trade council, LOBBIES a government body,
- *  DONATED_TO, TRANSACTS_WITH — and a company reached only that way is as indirect as one reached
- *  through a person. RTX alone brings hundreds of those, none of them on an award. */
+ *  into the chain, or it owns something that does. Every other entity-to-entity edge is
+ *  affiliation, not contract — MEMBER_OF a trade council, LOBBIES a government body, DONATED_TO,
+ *  TRANSACTS_WITH — and a company reached only that way is as indirect as one reached through a
+ *  person. RTX alone brings hundreds of those, none of them on an award. */
 const CHAIN_RELS = new Set(['SUPPLIES', 'OWNS', 'ULTIMATE_PARENT_OF'])
+
+/** Chain edges that count only when they point *at* the chain. OWNS runs parent -> child, and who
+ *  owns a supplier is material — it controls a company on the contract — while that owner's other
+ *  subsidiaries are not: Raytheon Visual Analytics is on the V-22 canvas because its parent sells
+ *  to the program, which says nothing about the V-22. So ownership is walked upwards only, from a
+ *  company in the chain to its owner, and the siblings stay off unless they are risky in their own
+ *  right, where the pin holds them. SUPPLIES is walked both ways: the direction recorded on it is
+ *  not reliable enough to hang the supply base on — a one-way walk drops two dozen real V-22
+ *  suppliers, Rolls-Royce and Northrop Grumman among them. */
+const INWARD_CHAIN_RELS = new Set(['OWNS', 'ULTIMATE_PARENT_OF'])
 
 /** Risk score above which a node overrides every other rule on this page — the indirect filter,
  *  orphan pruning, and for a person the people layer itself. Just under the floor of the
@@ -84,10 +94,14 @@ export function isOrganization(node: LayerNode): boolean {
 
 const isProgram = (node: LayerNode) => node.label === 'Entity' && node.props?.kind === 'program'
 
+/** Who is next to whom, over the edges `accept` takes. Edges are two-way unless `inward` claims
+ *  one, which then leads from its target to its source only — the way an edge that points at the
+ *  chain brings in what it points from, and nothing else. */
 function adjacency(
   nodes: LayerGraphNode[],
   edges: LayerGraphEdge[],
   accept: (edge: LayerGraphEdge) => boolean = () => true,
+  inward: (edge: LayerGraphEdge) => boolean = () => false,
 ): Map<string, string[]> {
   const ids = new Set(nodes.map(n => n.id))
   const neighbours = new Map<string, string[]>()
@@ -98,8 +112,8 @@ function adjacency(
   }
   for (const e of edges) {
     if (e.source === e.target || !ids.has(e.source) || !ids.has(e.target) || !accept(e)) continue
-    link(e.source, e.target)
     link(e.target, e.source)
+    if (!inward(e)) link(e.source, e.target)
   }
   return neighbours
 }
@@ -152,9 +166,10 @@ export function orphanedOrganizations(
  * program (or to `keep`, the root) by a chain of contracts and ownership. They are the other
  * companies a supplier's director also sits on the board of, the parent that a shared country
  * pulled in, and — the bulk of them — the trade councils, government bodies and donation
- * recipients a prime is tied to by affiliation alone. RTX's LOBBIES and MEMBER_OF network is
- * hundreds of organizations that no award touches, and hanging off a supplier is not what makes
- * a company part of the chain; a contract or an ownership stake is (CHAIN_RELS).
+ * recipients a prime is tied to by affiliation alone, and the sister companies that share its
+ * owner. RTX's LOBBIES and MEMBER_OF network is hundreds of organizations that no award touches,
+ * and hanging off a supplier is not what makes a company part of the chain; a contract, or an
+ * ownership stake in something on one, is (CHAIN_RELS, INWARD_CHAIN_RELS).
  *
  * The walk goes from every visible program and kept node over CHAIN_RELS edges whose both ends
  * are visible entities; every organization it never arrives at is returned, an organization with
@@ -170,7 +185,7 @@ export function indirectOrganizations(
   const byId = new Map(nodes.map(n => [n.id, n]))
   const anchors = [...new Set([...nodes.filter(n => isProgram(n) && !hidden.has(n.id)).map(n => n.id), ...keep])].filter(id => byId.has(id))
   if (!anchors.length) return new Set()
-  const neighbours = adjacency(nodes, edges, e => CHAIN_RELS.has(e.type || ''))
+  const neighbours = adjacency(nodes, edges, e => CHAIN_RELS.has(e.type || ''), e => INWARD_CHAIN_RELS.has(e.type || ''))
   const reached = reachable(anchors, neighbours, id => !hidden.has(id) && byId.get(id)!.label === 'Entity')
   return new Set(nodes.filter(n => isOrganization(n) && !hidden.has(n.id) && !reached.has(n.id)).map(n => n.id))
 }

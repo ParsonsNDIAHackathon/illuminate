@@ -66,10 +66,10 @@ test('source records and documents obey independent layer toggles', () => {
 })
 
 // A program, its supplier and the supplier's own subcontractor (with the holding company that owns
-// it), a director of the supplier who also sits on two other boards (one of those companies owning
-// a subsidiary), a trade council the supplier is only a member of, a company known only by where it
-// is incorporated, and a company nothing points at. Person nodes come with the "people" layer;
-// entities always arrive.
+// it, and that holding company's other subsidiary, which supplies nobody), a director of the
+// supplier who also sits on two other boards (one of those companies owning a subsidiary), a trade
+// council the supplier is only a member of, a company known only by where it is incorporated, and a
+// company nothing points at. Person nodes come with the "people" layer; entities always arrive.
 const org = (id: string) => ({ id, label: 'Entity', layer: null, props: { kind: 'organization' } })
 const network = {
   nodes: [
@@ -82,6 +82,7 @@ const network = {
     org('club'),
     org('club-subsidiary'),
     org('trade-council'),
+    org('sister'),
     org('seated-only'),
     { id: 'country', label: 'Location', layer: 'countries', props: {} },
     org('isolated'),
@@ -95,6 +96,7 @@ const network = {
     { source: 'director', target: 'club', type: 'HELD_ROLE' },
     { source: 'club', target: 'club-subsidiary', type: 'OWNS' },
     { source: 'supplier', target: 'trade-council', type: 'MEMBER_OF' },
+    { source: 'holding', target: 'sister', type: 'OWNS' },
     { source: 'seated-only', target: 'country', type: 'INCORPORATED_IN' },
   ],
 }
@@ -122,7 +124,7 @@ test('programs, the root and organizations with no edges are never pruned', () =
 
 test('the indirect-orgs toggle hides organizations no contract or ownership chain joins to a program, whatever the layers show', () => {
   // An organization with no edges at all counts as indirect too: nothing joins it to anything.
-  assert.deepEqual(hiddenWith({ people: true, countries: true, indirect_orgs: false }), ['board-seat', 'club', 'club-subsidiary', 'isolated', 'seated-only', 'trade-council'])
+  assert.deepEqual(hiddenWith({ people: true, countries: true, indirect_orgs: false }), ['board-seat', 'club', 'club-subsidiary', 'isolated', 'seated-only', 'sister', 'trade-council'])
   // The default is to show them.
   assert.deepEqual(hiddenWith({ people: true, countries: true }), [])
 })
@@ -142,8 +144,19 @@ test('the indirect walk starts from the root too, and from nothing when the canv
   assert.deepEqual([...indirectOrganizations(noProgram.nodes, noProgram.edges, hidden)], [])
   assert.deepEqual(
     [...indirectOrganizations(noProgram.nodes, noProgram.edges, hidden, ['supplier'])].sort(),
-    ['board-seat', 'club', 'club-subsidiary', 'isolated', 'seated-only', 'trade-council'],
+    ['board-seat', 'club', 'club-subsidiary', 'isolated', 'seated-only', 'sister', 'trade-council'],
   )
+})
+
+test('ownership counts pointing at the chain, not away from it', () => {
+  const hidden = hiddenWith({ people: true, countries: true, indirect_orgs: false })
+  // Who owns a company on the contract is material; that owner's other subsidiary is not — the
+  // Raytheon Visual Analytics shape, on the canvas only because its parent sells to the program.
+  assert.ok(!hidden.includes('holding'), 'the owner of a supplier stays')
+  assert.ok(hidden.includes('sister'), 'the owner\'s other subsidiary does not')
+  // Unless it is risky in its own right, where the pin holds it: Pacific Alloy under Zhejiang.
+  const nodes = network.nodes.map(n => (n.id === 'sister' ? { ...n, props: { ...n.props, risk_score: 100 } } : n))
+  assert.ok(![...hiddenNodeIds(nodes, network.edges, { people: true, countries: true, indirect_orgs: false })].includes('sister'))
 })
 
 // The same shape with risk on it: a donor to the trade council, a quiet peer beside it, an offshore

@@ -347,6 +347,14 @@ def _neighbourhood(p):
         rel_filter += ["ASSERTS", "TARGETS", "EVIDENCES"]
     rel_filter = list(dict.fromkeys(rel_filter))
     rf = "|".join(rel_filter)
+    # Ownership is walked upwards in a program view: who owns a company on the contract is
+    # material, its owner's other subsidiaries are not — Raytheon Visual Analytics arrives only
+    # because its parent sells to the V-22, which says nothing about the V-22. Two dozen sister
+    # companies come in that way per program, none of them supplying anything. Expanding a bare
+    # entity keeps both directions: there the user is pointing at the node and asking what is
+    # around it. SUPPLIES stays two-way either way — the recorded direction is not consistent
+    # enough to hang the supply base on.
+    rf_up = "|".join(("<" + r if r in ("OWNS", "ULTIMATE_PARENT_OF") else r) for r in rel_filter)
     bound = {"id": p["entity_id"], "limit": int(p.get("limit", 400)), "risk_floor": RISK_PIN_FLOOR}
     tail = _RISKY_PEOPLE_ONLY if not layers.get("people", True) else ""
     if p.get("program_id"):
@@ -361,7 +369,7 @@ def _neighbourhood(p):
             "MATCH (root:Entity {id:$id})\n"
             "OPTIONAL MATCH (other:Entity) WHERE other.kind = 'program' AND other.id <> $program\n"
             "WITH root, collect(other) AS blocked\n"
-            f"CALL apoc.path.subgraphAll(root, {{maxLevel:{d}, relationshipFilter:'{rf}', limit:$limit, blacklistNodes:blocked}}) YIELD nodes, relationships\n"
+            f"CALL apoc.path.subgraphAll(root, {{maxLevel:{d}, relationshipFilter:'{rf_up}', limit:$limit, blacklistNodes:blocked}}) YIELD nodes, relationships\n"
             f"{sweep}"
             f"{tail}"
             "RETURN nodes, relationships LIMIT 1"

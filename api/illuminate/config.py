@@ -59,8 +59,9 @@ settings = Settings()
 # source records); "claims" is the reified assertions those artifacts evidence. "indirect_orgs" is
 # a canvas-side filter, not a fetch layer: off, an organization is left undrawn unless a chain of
 # contracts or ownership joins it to a program — people, places, documents, claims and affiliation
-# edges (lobbying, memberships, donations) do not carry that chain. A node scored over 20 that
-# reaches a supplier is drawn either way (web/src/stores/graphLayers.ts).
+# edges (lobbying, memberships, donations) do not carry that chain, and ownership carries it only
+# pointing in, so the owner of a supplier is drawn and that owner's other subsidiaries are not. A
+# node scored over 20 that reaches a supplier is drawn either way (web/src/stores/graphLayers.ts).
 LAYER_DEFAULTS = {"entities": True, "indirect_orgs": True, "people": True, "countries": False, "categories": False, "artifacts": False, "sources": False, "claims": False}
 
 # Risk score above which a node is drawn whatever the filters say, mirrored by RISK_PIN_FLOOR in
