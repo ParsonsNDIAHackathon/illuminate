@@ -23,6 +23,13 @@ from pathlib import Path
 # again.
 PICKS = ['5', '6', '8', '9', '10/2', '11', '12']
 
+# Media the short deck swaps out, keyed by the data-slot in index.html. Only the slot name
+# changes — data-try, the caption and everything else are lifted as they are, so the two decks
+# stay one slide. Use this when the full recording is too long for the short cut: chat-report is
+# 2m42s of asking, generating and reading, and the short deck joins it at 2:20 for the last 22s,
+# where the report is actually being produced.
+SHORT_MEDIA = {'media/chat-report': 'media/chat-report-short'}
+
 HEAD = '''<!doctype html>
 <html lang="en">
 <head>
@@ -87,6 +94,10 @@ def pick(spec):
 
 
 picked = [pick(spec).strip() for spec in PICKS]
+for _full, _short in SHORT_MEDIA.items():
+    if f'data-slot="{_full}"' not in ''.join(picked):
+        sys.exit(f'SHORT_MEDIA: no picked slide uses data-slot="{_full}"')
+    picked = [p.replace(f'data-slot="{_full}"', f'data-slot="{_short}"') for p in picked]
 banner = [f'<!-- {"=" * (68 - len(str(n + 1)))} {n + 1} -->' for n in range(len(picked))]
 out = HEAD + '\n' + '\n\n'.join(f'{b}\n{s}' for b, s in zip(banner, picked)) + '\n' + TAIL
 (here / 'short.html').write_text(out)
