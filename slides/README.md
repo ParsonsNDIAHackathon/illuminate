@@ -10,6 +10,11 @@ xdg-open slides/index.html          # or drag it into a browser
 Serving it instead (`python3 -m http.server -d slides 8099` → <http://localhost:8099>) changes
 nothing except that `file://` console noise goes away.
 
+The running app also serves the deck at `/slides/` — <http://localhost:8080/slides/> under
+`make up`, <http://localhost:5173/slides/> under `make dev` — and the **Deck** button at the
+bottom of the app's left rail opens it in a new tab, so a demo can cut between the two. The
+container bind-mounts this directory, so editing a slide needs a reload, not a rebuild.
+
 | Key | |
 | --- | --- |
 | `→` / `space` | next step — walks vertical stacks too |

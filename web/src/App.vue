@@ -29,6 +29,18 @@
           <template #append v-if="n.badge"><v-badge :content="n.badge" color="warning" inline /></template>
         </v-list-item>
       </v-list>
+      <!-- The deck is a separate static page, not a route: leave the app where it is and open it
+           beside itself, so a demo can cut back to a live canvas without reloading anything. -->
+      <template #append>
+        <v-list density="compact" nav>
+          <v-tooltip text="Open the pitch deck in a new tab" location="right">
+            <template #activator="{ props }">
+              <v-list-item v-bind="props" href="/slides/" target="_blank" rel="noopener"
+                           prepend-icon="mdi-presentation" title="Deck" />
+            </template>
+          </v-tooltip>
+        </v-list>
+      </template>
     </v-navigation-drawer>
     <v-main>
       <router-view />
