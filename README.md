@@ -101,3 +101,45 @@ Selecting a headline opens the Explorer inspector; **View article details** reus
 artifact viewer for metadata and raw GDELT data, and **Open source** uses the shared
 source viewer. News search results are previews and are not automatically saved as
 graph artifacts. Failed searches retain the previous labelled results.
+
+## Shipping routes on the map
+
+In **Map**, enable **Shipping**. Select a square port marker to filter route records
+using that port, or select a route line / **Inspect route** to review goods, linked
+supplier and customer, segment itinerary, evidence source, record date and notes.
+**Route evidence** filters confirmed (solid teal), inferred (dashed amber) and
+illustrative (dotted violet) records. Counts are records and unique linked suppliers /
+destinations, not shipment volumes. Routes follow the loaded graph scope and search;
+both entities and their exact directional `SUPPLIES` relationship must be loaded.
+
+The bundled catalog contains **two hypothetical alternatives** from Nagoya to Los
+Angeles or Oakland, linked to the demo SUBARU → V-22 relationship for demonstration.
+Neither route nor its example cargo is a claim about actual supplier logistics.
+Port positions and ocean waypoints are approximate. Inland legs, live AIS positions,
+schedules, travel times and automated disruption scoring are not included. News
+country mentions do not establish route disruptions, and the overlay does not change
+vendor risk scores or create graph assertions.
+
+`GET /api/shipping` serves the validated catalog. To use your own records, copy
+`api/illuminate/shipping_demo.json` to `api/data/shipping.json` (or `shipping.json`
+inside `ILLUMINATE_DATA_DIR`), replace its contents, and click **Refresh**. The override
+replaces the entire demo catalog; an explicit empty catalog disables the examples.
+A malformed override reports an error instead of silently falling back to demo data.
+The data directory is included in the existing backup workflow.
+
+Catalog format:
+
+- `ports`: unique `id`, `name`, two-letter `country`, `latitude`, `longitude`.
+- `routes`: unique `id`, `name`, `supplier_id`, `customer_id`, `relationship_id`,
+  `goods`, `status`, `source: {title, reference}`, `updated_at` (ISO date), `notes`,
+  and an ordered, nonempty `segments` list.
+- Each segment has `from_port`, `to_port`, optional `waypoints` (latitude/longitude)
+  and optional `passages` (names). Adjacent segments must share a connecting port.
+  Pacific crossings are split at the date line when drawn.
+
+Use **confirmed** only when a source documents that supplier's route and cargo;
+**inferred** requires an explanation of the inference in `notes`; **illustrative**
+is for scenarios without shipment evidence. `source.reference` can be an HTTP(S)
+evidence URL or a document reference. Status is supplied by the catalog author, not
+independently certified by the app. `updated_at` is the record's review date, not a
+vessel position or departure time. There is no catalog editing UI in this first version.

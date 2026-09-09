@@ -5,6 +5,7 @@
       <div class="counts"><strong>{{ data.mappedCount }}</strong> entities placed <span>·</span> <strong>{{ data.unmappedCount }}</strong> not placed</div>
     </div>
     <form class="news-search" @submit.prevent="news.search()">
+      <v-checkbox v-model="shipping.visible" label="Shipping" density="compact" hide-details class="news-toggle" />
       <v-checkbox v-model="news.visible" label="News" density="compact" hide-details class="news-toggle" />
       <v-text-field v-model="news.query" label="News topic" placeholder="Search recent news…" density="compact" variant="outlined" hide-details maxlength="250" class="news-topic" />
       <v-select v-model="news.timespan" :items="timeWindows" label="News time window" density="compact" variant="outlined" hide-details class="news-window" />
@@ -39,6 +40,7 @@
           <title>{{ place.name }} · {{ place.articles.length }} news articles · Country mentioned in headline</title>
           <path :d="`M0,${-25 / (zoom * mapScale)} l${7 / (zoom * mapScale)},${7 / (zoom * mapScale)} l${-7 / (zoom * mapScale)},${7 / (zoom * mapScale)} l${-7 / (zoom * mapScale)},${-7 / (zoom * mapScale)} Z`" />
         </g>
+        <ShippingLayer :scale="zoom * mapScale" :show-labels="zoom >= 2" />
       </svg>
       <v-sheet class="detail-toggle" rounded>
         <v-checkbox v-model="showRegions" label="States & provinces" density="compact" hide-details />
@@ -49,9 +51,10 @@
         <v-btn icon="mdi-minus" aria-label="Zoom out" size="small" :disabled="zoom <= 1" @click="zoom = Math.max(1, zoom - .5)" />
         <v-btn size="small" @click="zoom = 1; center = [540, 270]">Reset</v-btn>
       </v-btn-group>
-      <p v-if="!places.length && !(news.visible && newsData.places.length)" class="map-empty" role="status">{{ graph.loading ? 'Loading locations…' : graph.filter ? 'No mapped entities match your search.' : 'No geographic locations in this graph scope. Try a deeper traversal or another program.' }}</p>
+      <p v-if="!places.length && !(news.visible && newsData.places.length) && !(shipping.visible && shipping.routes.length)" class="map-empty" role="status">{{ graph.loading ? 'Loading locations…' : graph.filter ? 'No mapped entities match your search.' : 'No geographic locations in this graph scope. Try a deeper traversal or another program.' }}</p>
       <a class="attribution" href="https://www.naturalearthdata.com/about/terms-of-use/" target="_blank" rel="noopener">Natural Earth · illustrative boundaries</a>
     </div>
+    <ShippingPanel />
     <div v-if="news.visible" class="news-details">
       <div class="detail-heading">
         <v-select v-model="news.location" :items="newsLocations" label="News location" density="compact" variant="outlined" hide-details class="location-select" />
@@ -87,6 +90,9 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import ShippingLayer from './ShippingLayer.vue'
+import ShippingPanel from './ShippingPanel.vue'
+import { useShipping } from '../stores/shipping'
 import { useNews } from '../stores/news'
 import { mapNews, newsDate, type NewsArticle } from '../newsMap'
 import { useGraph } from '../stores/graph'
@@ -101,6 +107,7 @@ const props = defineProps<{ locationCode?: string }>()
 const emit = defineEmits<{ select: []; 'select-news': [article: NewsArticle] }>()
 const selectedKey = ref('')
 const news = useNews()
+const shipping = useShipping()
 const timeWindows = [{ title: 'Past 24 hours', value: '24h' }, { title: 'Past 3 days', value: '3d' }, { title: 'Past 7 days', value: '7d' }]
 const newsData = computed(() => mapNews(news.result?.articles || [], world))
 const newsArticles = computed(() => news.location === 'unplaced' ? newsData.value.unmapped
@@ -209,11 +216,11 @@ function movePan(event: PointerEvent) {
 .news-marker.active path,.news-marker:focus path { stroke:white; stroke-width:3; }
 .news-details { flex:0 1 170px; min-height:90px; display:flex; flex-direction:column; padding-top:10px; font-size:12px; }
 .news-article :deep(.v-list-item-title) { white-space:normal; font-size:12px; }
-.geo-view { height:100%; padding:112px 16px 12px; display:flex; flex-direction:column; background:rgb(var(--v-theme-background)); }
+.geo-view { height:calc(100% - 112px); margin-top:112px; overflow-y:auto; padding:0 16px 12px; display:flex; flex-direction:column; background:rgb(var(--v-theme-background)); }
 .map-summary { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 4px 12px; flex-wrap:wrap; }
 .eyebrow { font-size:10px; letter-spacing:.14em; color:rgb(var(--v-theme-primary)); font-weight:800; }
 h2 { font-size:20px; font-weight:600; }.counts { font-size:12px; opacity:.85; }.counts strong { font-size:18px; }.counts span { margin:0 8px; }
-.map-stage { position:relative; flex:1; min-height:180px; border:1px solid rgba(128,128,128,.25); border-radius:10px; overflow:hidden; background:#102b38; }
+.map-stage { position:relative; flex:1; min-height:300px; border:1px solid rgba(128,128,128,.25); border-radius:10px; overflow:hidden; background:#102b38; }
 .world { width:100%; height:100%; display:block; touch-action:none; cursor:grab; }.world:active { cursor:grabbing; }
 .ocean { fill:#102b38; }.country { fill:#294653; stroke:#6c8490; stroke-width:.5; }.country.occupied { fill:#346f78; }
 .marker { cursor:pointer; outline:none; }.marker circle { fill:#f3c97c; stroke:#102b38; stroke-width:2; vector-effect:non-scaling-stroke; }.marker.regional circle { fill:#99bfff; }.marker.precise circle { fill:#79dac7; }.marker.active circle,.marker:focus circle,.marker.traced circle { stroke:#fff; stroke-width:3; }.marker text { fill:#102b38; font-weight:800; pointer-events:none; }
@@ -229,5 +236,5 @@ h2 { font-size:20px; font-weight:600; }.counts { font-size:12px; opacity:.85; }.
 .location-select { flex:0 0 230px; max-width:100%; }
 .detail-heading span { font-size:10px; opacity:.7; }
 .entry-list { overflow:auto; min-height:0; padding:0; }
-@media(max-width:900px) { .geo-view { padding-top:212px; min-height:710px; }.detail-heading { flex-wrap:wrap; gap:4px; }.map-summary { padding-bottom:4px; } h2 { font-size:16px; } .map-details { flex-basis:150px; } }
+@media(max-width:900px) { .geo-view { height:calc(100% - 212px); margin-top:212px; min-height:500px; }.detail-heading { flex-wrap:wrap; gap:4px; }.map-summary { padding-bottom:4px; } h2 { font-size:16px; } .map-details { flex-basis:150px; } }
 </style>

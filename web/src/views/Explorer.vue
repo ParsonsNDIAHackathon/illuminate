@@ -195,7 +195,7 @@ watch(() => ws.depth, () => { if (graph.focusId) reload() })
   .toolbar { right:12px; flex-wrap:wrap; }
   .focus { width:100%; }
   .search { top:100px; width:calc(100% - 24px); }
-  .map-mode :deep(.geo-view) { padding-top:154px; }
+  .map-mode :deep(.geo-view) { margin-top:154px; height:calc(100% - 154px); padding-top:0; }
 }
 @media (max-width: 800px) {
   .gutter { display:none; }
