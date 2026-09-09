@@ -55,18 +55,18 @@ test('disabled layers remain hidden when projected into Cytoscape data', () => {
   assert.equal(cy.getElementById('category-a').data('layer'), 'categories')
 })
 
-test('a generated report is drawn unless the reports layer is turned off', () => {
-  // Every other optional layer defaults off; this one defaults on. A report is on the canvas
-  // because the user asked for it by name, and there are a handful of them, not a thousand —
-  // so an unset toggle draws it, and only an explicit off takes it away.
+test('a generated report is drawn when its layer is on, like every other layer', () => {
+  // Reports are no longer the one layer that defaults on. Nothing optional is drawn until it is
+  // asked for; opening a report from the reports view turns its layer on (views/Reports.vue),
+  // which is what puts the thing the user just generated in front of them.
   const unset = renderedWith({ people: false, countries: false, categories: false, claims: false, sources: false, artifacts: false })
   assert.equal(unset.getElementById('report-a').data('layer'), 'reports')
-  assert.equal(unset.getElementById('report-a').hasClass('layer-hide'), false)
+  assert.equal(unset.getElementById('report-a').hasClass('layer-hide'), true)
 
-  const off = renderedWith({ reports: false })
-  assert.equal(off.getElementById('report-a').hasClass('layer-hide'), true)
+  const on = renderedWith({ reports: true })
+  assert.equal(on.getElementById('report-a').hasClass('layer-hide'), false)
   // and it is never mistaken for the evidence layers it sits next to
-  assert.equal(off.getElementById('document-a').data('layer'), 'artifacts')
+  assert.equal(on.getElementById('document-a').data('layer'), 'artifacts')
 })
 
 test('a report is never pruned as an orphan, whatever its subject is doing', () => {
@@ -131,19 +131,21 @@ const hiddenWith = (layers: Record<string, boolean>, keep: string[] = []) =>
   [...hiddenNodeIds(network.nodes, network.edges, layers, keep)].sort()
 
 test('hiding the people layer also hides the organizations only people reached', () => {
-  const hidden = hiddenWith({ people: false, countries: false })
+  // indirect_orgs on throughout: this is about what the layers strand, and the indirect filter
+  // (off by default now) would otherwise clear the same nodes for its own reasons.
+  const hidden = hiddenWith({ people: false, countries: false, indirect_orgs: true })
   assert.deepEqual(hidden, ['board-seat', 'country', 'director', 'seated-only'])
   // Two companies still joined to each other are an island, not orphans: the indirect filter's job.
   assert.ok(!hidden.includes('club') && !hidden.includes('club-subsidiary'))
 })
 
 test('an organization stays while anything visible still points at it', () => {
-  assert.deepEqual(hiddenWith({ people: true, countries: false }), ['country', 'seated-only'])
-  assert.deepEqual(hiddenWith({ people: false, countries: true }), ['board-seat', 'director'])
+  assert.deepEqual(hiddenWith({ people: true, countries: false, indirect_orgs: true }), ['country', 'seated-only'])
+  assert.deepEqual(hiddenWith({ people: false, countries: true, indirect_orgs: true }), ['board-seat', 'director'])
 })
 
 test('programs, the root and organizations with no edges are never pruned', () => {
-  const hidden = hiddenWith({ people: false, countries: false }, ['board-seat'])
+  const hidden = hiddenWith({ people: false, countries: false, indirect_orgs: true }, ['board-seat'])
   assert.ok(!hidden.includes('program'))
   assert.ok(!hidden.includes('isolated'))
   assert.ok(!hidden.includes('board-seat'), 'the root is kept')
@@ -151,9 +153,12 @@ test('programs, the root and organizations with no edges are never pruned', () =
 
 test('the indirect-orgs toggle hides organizations no contract or ownership chain joins to a program, whatever the layers show', () => {
   // An organization with no edges at all counts as indirect too: nothing joins it to anything.
-  assert.deepEqual(hiddenWith({ people: true, countries: true, indirect_orgs: false }), ['board-seat', 'club', 'club-subsidiary', 'isolated', 'seated-only', 'sister', 'trade-council'])
-  // The default is to show them.
-  assert.deepEqual(hiddenWith({ people: true, countries: true }), [])
+  const indirect = ['board-seat', 'club', 'club-subsidiary', 'isolated', 'seated-only', 'sister', 'trade-council']
+  assert.deepEqual(hiddenWith({ people: true, countries: true, indirect_orgs: false }), indirect)
+  // Off is also the default: the affiliation network is asked for, like every other layer.
+  assert.deepEqual(hiddenWith({ people: true, countries: true }), indirect)
+  // On, nothing is filtered.
+  assert.deepEqual(hiddenWith({ people: true, countries: true, indirect_orgs: true }), [])
 })
 
 test('affiliation to a supplier is not the chain; a contract or an ownership stake is', () => {
