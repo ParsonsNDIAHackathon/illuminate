@@ -78,3 +78,26 @@ Either way the graph and `api/data/` are replaced with the archive's contents. D
 `BACKUP` in `.env` or it will restore on every start.
 
 `make help` lists all targets.
+
+## Deploy with HTTPS
+
+Set the deployment values in `.env`:
+
+```dotenv
+ILLUMINATE_DOMAIN=illuminate.example.com
+LETSENCRYPT_EMAIL=admin@example.com
+```
+
+The domain must resolve to the deployment host, and inbound TCP ports 80 and 443 must
+reach it. Then start the deployment stack:
+
+```bash
+make deploy
+```
+
+This adds Traefik to the normal application stack. Traefik listens on ports 80 and 443,
+redirects HTTP to HTTPS, obtains and renews the domain certificate through Let’s Encrypt,
+and proxies HTTPS traffic to the web UI. Certificate state is kept in the
+`traefik-letsencrypt` Docker volume. `make up` does not include Traefik.
+
+Stop the deployed stack with `make deploy-down`.

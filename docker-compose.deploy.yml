@@ -1,0 +1,35 @@
+services:
+  traefik:
+    image: traefik:v3.7.13
+    container_name: illuminate-traefik
+    restart: unless-stopped
+    command:
+      - --api.dashboard=false
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.email=${LETSENCRYPT_EMAIL:?Set LETSENCRYPT_EMAIL in .env}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-letsencrypt:/letsencrypt
+
+  web:
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.illuminate.rule: "Host(`${ILLUMINATE_DOMAIN:?Set ILLUMINATE_DOMAIN in .env}`)"
+      traefik.http.routers.illuminate.entrypoints: websecure
+      traefik.http.routers.illuminate.tls: "true"
+      traefik.http.routers.illuminate.tls.certresolver: letsencrypt
+      traefik.http.services.illuminate.loadbalancer.server.port: "80"
+
+volumes:
+  traefik-letsencrypt:

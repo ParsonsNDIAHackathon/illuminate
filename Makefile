@@ -6,10 +6,12 @@ NAME    ?=
 export HOST_UID := $(shell id -u)
 export HOST_GID := $(shell id -g)
 
-.PHONY: help up down dev seed backup restore backups
+.PHONY: help up deploy deploy-down down dev seed backup restore backups
 
 help:
 	@echo "make up                 start everything in containers (web :8080, api :8000, neo4j :7474)"
+	@echo "make deploy             start the stack with Traefik HTTPS and Let's Encrypt"
+	@echo "make deploy-down        stop the deployed stack"
 	@echo "make down               stop containers (data volumes are kept)"
 	@echo "make dev                neo4j in docker, api + web on the host with hot reload"
 	@echo "make seed               rebuild the demo graph from committed fixtures (offline)"
@@ -19,6 +21,12 @@ help:
 
 up:
 	$(COMPOSE) up --build -d
+
+deploy:
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.deploy.yml up --build -d
+
+deploy-down:
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.deploy.yml down
 
 down:
 	$(COMPOSE) down

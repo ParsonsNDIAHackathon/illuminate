@@ -1,17 +1,17 @@
 <template>
-  <v-container fluid>
-    <div class="d-flex align-center ga-2 mb-2">
-      <h2 class="text-h6">Risk</h2>
+  <v-container fluid :class="embedded ? 'pa-0' : undefined">
+    <v-toolbar color="transparent" density="compact" class="mb-2">
+      <v-toolbar-title v-if="!embedded" class="text-h6">Risk</v-toolbar-title>
       <v-select v-model="band" :items="bandItems" label="band" hide-details style="max-width: 170px" />
       <v-select v-model="label" :items="[{ title: 'everything', value: '' }, { title: 'organisations', value: 'entity' }, { title: 'people', value: 'person' }]"
                 label="kind" hide-details style="max-width: 170px" />
       <v-spacer />
-      <span class="text-caption mr-2" v-if="bands">
-        <span v-for="b in bandOrder" :key="b" class="ml-2">{{ b }} {{ bands[b] || 0 }}</span>
-        <span class="ml-2" style="opacity:.7">unscored {{ bands.unscored || 0 }}</span>
-      </span>
+      <v-sheet v-if="bands" color="transparent" class="d-flex align-center mr-2">
+        <v-chip v-for="b in bandOrder" :key="b" size="x-small" variant="text">{{ b }} {{ bands[b] || 0 }}</v-chip>
+        <v-chip size="x-small" variant="text">unscored {{ bands.unscored || 0 }}</v-chip>
+      </v-sheet>
       <v-btn size="small" prepend-icon="mdi-refresh" :loading="rescoring" @click="rescore">Rescore graph</v-btn>
-    </div>
+    </v-toolbar>
 
     <v-data-table :items="items" :headers="headers" density="compact" :items-per-page="50" :loading="loading" hover
                   @click:row="(_: any, r: any) => open(r.item)">
@@ -56,6 +56,7 @@ import { api, qs } from '../api/client'
 import { bandChip, isThin, RISK_BANDS } from '../styles/risk'
 import { useOpenOnCanvas } from '../composables/openOnCanvas'
 
+defineProps<{ embedded?: boolean }>()
 const router = useRouter()
 const items = ref<any[]>([]); const bands = ref<Record<string, number> | null>(null)
 const loading = ref(false); const rescoring = ref(false)

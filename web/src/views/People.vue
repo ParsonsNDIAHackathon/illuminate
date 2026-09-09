@@ -1,6 +1,10 @@
 <template>
-  <v-container fluid>
-    <div class="d-flex align-center ga-2 mb-2"><h2 class="text-h6">People</h2><v-text-field v-model="q" placeholder="filter" hide-details style="max-width: 280px" clearable /><v-spacer /><span class="text-caption">{{ items.length }} people · one HELD_ROLE edge per tenure</span></div>
+  <v-container fluid :class="embedded ? 'pa-0' : undefined">
+    <v-toolbar color="transparent" density="compact" class="mb-2">
+      <v-toolbar-title v-if="!embedded" class="text-h6">People</v-toolbar-title>
+      <v-text-field v-model="q" placeholder="filter" hide-details style="max-width: 280px" clearable />
+      <v-spacer /><v-chip size="small" variant="text">{{ items.length }} people · one HELD_ROLE edge per tenure</v-chip>
+    </v-toolbar>
     <RiskUnscoredHint :items="items" @scored="load" />
     <!-- A row opens the person; a link inside it (an employer) goes where it says. -->
     <v-data-table class="people-table" :items="items" :headers="headers" density="compact" :items-per-page="50" :loading="loading" hover
@@ -29,6 +33,7 @@ import { api, qs } from '../api/client'
 import RiskUnscoredHint from '../components/RiskUnscoredHint.vue'
 import { bandChip, bandLabel, confidenceNote, isThin } from '../styles/risk'
 import { useOpenOnCanvas } from '../composables/openOnCanvas'
+defineProps<{ embedded?: boolean }>()
 const router = useRouter(); const { openOnCanvas } = useOpenOnCanvas()
 const q = ref(''); const items = ref<any[]>([]); const loading = ref(false)
 const headers = [{ title: 'Risk', key: 'risk_score', width: 80 }, { title: 'Person', key: 'name' }, { title: 'Roles (tenured)', key: 'roles' },
