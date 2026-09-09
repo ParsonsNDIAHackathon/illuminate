@@ -1,0 +1,119 @@
+{
+  "ports": [
+    {
+      "id": "nagoya",
+      "name": "Nagoya",
+      "country": "JP",
+      "latitude": 35.03,
+      "longitude": 136.85
+    },
+    {
+      "id": "los-angeles",
+      "name": "Los Angeles",
+      "country": "US",
+      "latitude": 33.73,
+      "longitude": -118.26
+    },
+    {
+      "id": "oakland",
+      "name": "Oakland",
+      "country": "US",
+      "latitude": 37.8,
+      "longitude": -122.32
+    }
+  ],
+  "routes": [
+    {
+      "id": "demo-pacific-la",
+      "name": "Pacific example via Los Angeles",
+      "supplier_id": "ent_8e865930d2f5",
+      "customer_id": "ent_6484d4d13b76",
+      "relationship_id": "rel_e7f7822cde4b",
+      "goods": "Example aircraft components \u2014 cargo unverified",
+      "status": "illustrative",
+      "source": {
+        "title": "Illuminate shipping demonstration",
+        "reference": "Bundled shipping_demo.json; authored scenario, no shipment evidence"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Hypothetical alternative linked to the demo supplier relationship. No evidence that SUBARU or the V-22 program uses these ports or lanes. Port positions and ocean waypoints are approximate; inland legs, schedules and transit times are not modeled.",
+      "segments": [
+        {
+          "from_port": "nagoya",
+          "to_port": "los-angeles",
+          "waypoints": [
+            {
+              "latitude": 31,
+              "longitude": 142
+            },
+            {
+              "latitude": 28,
+              "longitude": 165
+            },
+            {
+              "latitude": 28,
+              "longitude": -170
+            },
+            {
+              "latitude": 30,
+              "longitude": -140
+            },
+            {
+              "latitude": 32,
+              "longitude": -122
+            }
+          ],
+          "passages": [
+            "North Pacific"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "demo-pacific-oakland",
+      "name": "Pacific example via Oakland",
+      "supplier_id": "ent_8e865930d2f5",
+      "customer_id": "ent_6484d4d13b76",
+      "relationship_id": "rel_e7f7822cde4b",
+      "goods": "Example aircraft components \u2014 cargo unverified",
+      "status": "illustrative",
+      "source": {
+        "title": "Illuminate shipping demonstration",
+        "reference": "Bundled shipping_demo.json; authored scenario, no shipment evidence"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Hypothetical alternative linked to the demo supplier relationship. No evidence that SUBARU or the V-22 program uses these ports or lanes. Port positions and ocean waypoints are approximate; inland legs, schedules and transit times are not modeled.",
+      "segments": [
+        {
+          "from_port": "nagoya",
+          "to_port": "oakland",
+          "waypoints": [
+            {
+              "latitude": 31,
+              "longitude": 142
+            },
+            {
+              "latitude": 35,
+              "longitude": 165
+            },
+            {
+              "latitude": 38,
+              "longitude": -170
+            },
+            {
+              "latitude": 38,
+              "longitude": -145
+            },
+            {
+              "latitude": 37,
+              "longitude": -125
+            }
+          ],
+          "passages": [
+            "North Pacific"
+          ]
+        }
+      ]
+    }
+  ]
+}
