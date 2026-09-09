@@ -12,7 +12,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { onMounted, onBeforeUnmount, nextTick, ref, watch } from 'vue'
 import cytoscape, { type Core } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import cola from 'cytoscape-cola'
@@ -26,11 +26,18 @@ import { hiddenNodeIds, layerData } from '../stores/graphLayers'
 
 cytoscape.use(fcose)
 cytoscape.use(cola)
+const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
 const el = ref<HTMLElement>()
 const graph = useGraph()
 const ws = useWorkspace()
 let cy: Core | null = null
-const emit = defineEmits<{ (e: 'expand', id: string): void; (e: 'report', id: string): void }>()
+let restoringView = false
+let holdLayout = false
+let staticLayout: any = null
+let renderedScope = ''
+const scopeKey = () => graph.focusId || ''
+let savedView: { scope: string; zoom: number; pan: { x: number; y: number }; positions: Map<string, { x: number; y: number }> } | null = null
+const emit = defineEmits<{ (e: 'expand', id: string): void; (e: 'report', id: string): void; (e: 'select'): void }>()
 
 
 function badgeFor(n: any) {
@@ -113,7 +120,9 @@ function toElements() {
 }
 
 function sync() {
-  if (!cy) return
+  if (!cy || !props.active) return
+  if (renderedScope !== scopeKey()) holdLayout = false
+  renderedScope = scopeKey()
   const existing = new Set(cy.elements().map(e => e.id()))
   const wanted = toElements()
   const wantedIds = new Set(wanted.map(w => w.data.id))
@@ -122,7 +131,7 @@ function sync() {
   wanted.filter(w => existing.has(w.data.id)).forEach(w => cy!.getElementById(w.data.id).data(w.data))
   if (fresh.length) {
     cy.add(fresh as any)
-    if (existing.size === 0) layout(true)
+    if (existing.size === 0 && !restoringView) layout(true)
     else { seedNearNeighbours(fresh.filter(w => w.group === 'nodes').map(w => w.data.id)); startLive() }
   } else if (cy.elements().length === 0) {
     stopLive()
@@ -130,7 +139,7 @@ function sync() {
   restyle()
 }
 function restyle() {
-  if (!cy) return
+  if (!cy || !props.active) return
   clearStyleOps(cy)
   applyStyleOps(cy, graph.styleOps, ws.theme)
   applyFilter()
@@ -189,6 +198,7 @@ function startLive(force = false) {
   const key = groups.map(g => g.map(e => e.id()).sort().join(',')).join('|')
   if (!force && live.length && key === liveKey) return
   stopLive()
+  if (!props.active || restoringView || holdLayout) return
   if (!groups.length) return
   liveKey = key
   live = groups.map(group => {
@@ -232,6 +242,7 @@ function markFresh() {
   freshElements()?.addClass('fresh')
 }
 function revealFresh() {
+  if (!props.active) return
   if (!cy) return
   markFresh()
   const eles = freshElements()
@@ -279,11 +290,13 @@ function applyTrace() {
   }
 }
 function layout(fit = true) {
+  holdLayout = false
   if (!cy || cy.nodes().length === 0) return
   stopLive()
   // A fresh canvas has every node at the origin; fcose must randomise from there or it collapses to a line.
   const l = cy.layout({ name: 'fcose', animate: true, animationDuration: 400, randomize: fit, fit, padding: 40, nodeRepulsion: () => 9000, idealEdgeLength: () => 90, quality: 'default' } as any)
-  l.one('layoutstop', () => startLive())
+  staticLayout = l
+  l.one('layoutstop', () => { staticLayout = null; if (props.active && !restoringView) startLive() })
   l.run()
 }
 function fit() { cy?.fit(undefined, 40) }
@@ -295,9 +308,43 @@ onMounted(() => {
   cy.on('tap', 'edge', (ev) => graph.selectEdge(ev.target.id()))
   cy.on('tap', (ev) => { if (ev.target === cy) { graph.select(null); graph.selectEdge(null) } })
   cy.on('dbltap', 'node', (ev) => { const n = graph.nodes.get(ev.target.id()); if (n && (n.label === 'Entity' || n.label === 'Person')) emit('expand', ev.target.id()) })
+  cy.on('grab', 'node', () => { holdLayout = false; startLive(true) })
   sync()
 })
-onBeforeUnmount(() => { stopLive(); cy?.destroy() })
+onBeforeUnmount(() => { stopLive(); staticLayout?.stop(); cy?.destroy() })
+watch(() => props.active, async active => {
+  if (!cy) return
+  if (!active) {
+    stopLive()
+    staticLayout?.stop()
+    cy.stop(true, false)
+    savedView = { scope: renderedScope, zoom: cy.zoom(), pan: { ...cy.pan() },
+      positions: new Map(cy.nodes().map(node => [node.id(), { ...node.position() }])) }
+    return
+  }
+  await nextTick()
+  if (!cy || !props.active) return
+  cy.resize()
+  const saved = savedView?.scope === scopeKey() ? savedView : null
+  restoringView = !!saved && saved.positions.size > 0
+  holdLayout = restoringView
+  if (!saved && renderedScope !== scopeKey()) cy.elements().remove()
+  sync()
+  if (restoringView && saved) {
+    cy.batch(() => {
+      cy.nodes().forEach(node => {
+        const position = saved.positions.get(node.id())
+        if (!position) return
+        const locked = node.locked()
+        node.unlock().position(position)
+        if (locked) node.lock()
+      })
+      cy.zoom(saved.zoom)
+      cy.pan(saved.pan)
+    })
+  }
+  restoringView = false
+})
 watch(() => graph.version, sync)
 watch(() => graph.freshVersion, revealFresh)
 watch(() => graph.styleVersion, restyle)
