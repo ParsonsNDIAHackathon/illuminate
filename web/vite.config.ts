@@ -1,4 +1,5 @@
 import { defineConfig, type Plugin } from 'vite'
+import { viteStaticCopy } from 'vite-plugin-static-copy'
 import vue from '@vitejs/plugin-vue'
 import vuetify from 'vite-plugin-vuetify'
 import fs from 'node:fs'
@@ -42,7 +43,8 @@ function slides(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [vue(), vuetify({ autoImport: true }), slides()],
+  define: { CESIUM_BASE_URL: JSON.stringify('/cesium/') },
+  plugins: [vue(), vuetify({ autoImport: true }), slides(), viteStaticCopy({ targets: ['Workers', 'ThirdParty', 'Assets', 'Widgets'].map(dir => ({ src: `node_modules/cesium/Build/Cesium/${dir}`, dest: 'cesium', rename: { stripBase: 4 } })) })],
   server: {
     port: 5173,
     proxy: {

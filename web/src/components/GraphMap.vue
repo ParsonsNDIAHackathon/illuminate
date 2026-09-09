@@ -1,74 +1,53 @@
 <template>
   <section class="geo-view" aria-label="Geographic view of the loaded graph">
-    <div class="map-summary">
-      <div><span class="eyebrow">GEOGRAPHIC EXPOSURE</span><h2>{{ graph.focusLabel || 'Across the graph' }}</h2></div>
-      <div class="counts"><strong>{{ data.mappedCount }}</strong> entities placed <span>·</span> <strong>{{ data.unmappedCount }}</strong> not placed</div>
-    </div>
-    <form class="news-search" @submit.prevent="news.search()">
-      <v-checkbox v-model="lanes.enabled" label="Shipping lanes" density="compact" hide-details class="news-toggle" />
-      <v-checkbox v-model="shipping.visible" label="Supplier examples" density="compact" hide-details class="news-toggle" />
-      <v-checkbox v-model="news.visible" label="News" density="compact" hide-details class="news-toggle" />
+    <header class="map-summary">
+      <h2>{{ graph.focusLabel || 'Across the graph' }}</h2>
+      <span class="counts"><strong>{{ data.mappedCount }}</strong> mapped · {{ data.unmappedCount }} unplaced</span>
+    </header>
+    <nav class="map-tools" aria-label="Map layers and filters">
+      <div class="layer-buttons">
+        <v-btn size="small" variant="text" :color="lanes.enabled ? 'primary' : undefined" :aria-pressed="lanes.enabled" prepend-icon="mdi-ferry" @click="lanes.enabled = !lanes.enabled">Shipping</v-btn>
+        <v-btn size="small" variant="text" :color="shipping.visible ? 'primary' : undefined" :aria-pressed="shipping.visible" prepend-icon="mdi-truck-outline" @click="shipping.visible = !shipping.visible">Suppliers</v-btn>
+        <v-btn size="small" variant="text" :color="news.visible ? 'primary' : undefined" :aria-pressed="news.visible" prepend-icon="mdi-newspaper-variant-outline" @click="news.visible = !news.visible">News</v-btn>
+      </div>
+      <div class="filter-buttons">
+        <v-btn size="small" variant="text" :active="controlsPanel === 'news'" :aria-expanded="controlsPanel === 'news'" aria-controls="map-news-search" @click="controlsPanel = controlsPanel === 'news' ? '' : 'news'">News search <v-icon end icon="mdi-chevron-down" /></v-btn>
+        <v-btn size="small" variant="text" :active="controlsPanel === 'transport'" :aria-expanded="controlsPanel === 'transport'" aria-controls="map-transport-controls" @click="controlsPanel = controlsPanel === 'transport' ? '' : 'transport'">Transport <v-icon end icon="mdi-chevron-down" /></v-btn>
+        <v-btn size="small" variant="text" prepend-icon="mdi-map-marker-radius" @click="globe?.focus(-95.5, 37, 6500000)">US</v-btn>
+      </div>
+    </nav>
+    <form id="map-news-search" v-show="controlsPanel === 'news'" class="news-search" @submit.prevent="news.search()">
       <v-text-field v-model="news.query" label="News topic" placeholder="Search recent news…" density="compact" variant="outlined" hide-details maxlength="250" class="news-topic" />
-      <v-select v-model="news.timespan" :items="timeWindows" label="News time window" density="compact" variant="outlined" hide-details class="news-window" />
-      <v-btn type="submit" size="small" color="primary" variant="tonal" prepend-icon="mdi-magnify" :loading="news.loading" :disabled="news.loading || news.query.trim().length < 2">Search news</v-btn>
+      <v-select v-model="news.timespan" :items="timeWindows" label="Time window" density="compact" variant="outlined" hide-details class="news-window" />
+      <v-btn type="submit" size="small" color="primary" variant="tonal" prepend-icon="mdi-magnify" :loading="news.loading" :disabled="news.loading || news.query.trim().length < 2">Search</v-btn>
     </form>
     <v-alert v-if="news.error" type="warning" variant="tonal" density="compact" class="mb-2 news-error" role="alert">
       {{ news.error }} <span v-if="news.result">Previous results are still shown below.</span>
     </v-alert>
-    <v-alert v-if="news.visible && news.result?.notice" type="warning" variant="tonal" density="compact" class="mb-2" role="status">
-      {{ news.result.notice }}
-    </v-alert>
-    <TransportControls @focus-us="zoom = 4.8; center = [253.5, 159]" />
+    <details v-if="news.visible && news.result?.notice" class="coverage-notice">
+      <summary><v-icon icon="mdi-information-outline" size="14" /> News coverage notice</summary>
+      <p>{{ news.result.notice }}</p>
+    </details>
+    <TransportControls id="map-transport-controls" v-show="controlsPanel === 'transport'" @focus-us="globe?.focus(-95.5, 37, 6500000)" />
     <div class="map-stage">
-      <svg ref="svg" :viewBox="viewBox" class="world" aria-label="World map. Scroll to zoom, drag to pan, or select a marker to review its entities." @wheel.prevent="wheelZoom" @pointerdown="startPan" @pointermove="movePan" @pointerup="drag = null" @pointercancel="drag = null">
-        <rect x="0" y="0" width="1080" height="540" class="ocean" />
-        <path v-for="country in world" :key="country.name" :d="country.path" class="country" :class="{ occupied: occupied.has(country.code) }"><title>{{ country.name }}</title></path>
-        <g v-if="showRegions && zoom >= 2" class="subdivisions">
-          <path v-for="region in visibleRegions" :key="region.id" :d="region.path" class="region" :class="{ occupied: occupiedRegions.has(region.code) }"><title>{{ region.name }} ({{ region.code || region.country }})</title></path>
-          <template v-if="zoom >= 4">
-            <text v-for="region in regionLabels" :key="`label:${region.id}`" :x="(region.longitude + 180) * 3" :y="(90 - region.latitude) * 3" :font-size="10.5 / (zoom * mapScale)" class="region-label">{{ region.name }}</text>
-          </template>
-        </g>
-        <TransportLayer />
-        <ShippingLanesLayer :scale="zoom * mapScale" :show-labels="zoom >= 2" />
-        <ShippingLayer :scale="zoom * mapScale" :show-labels="zoom >= 2" />
-        <!-- SVG paint order keeps entity markers above shipping routes and port icons. -->
-        <g v-for="place in places" :key="place.key" :transform="`translate(${(place.longitude + 180) * 3},${(90 - place.latitude) * 3})`"
-           class="marker" :class="{ active: selectedKey === place.key, precise: place.precise, regional: place.region, traced: traced(place) }" tabindex="0" role="button"
-           :aria-label="`${place.name}: ${entityCount(place)} entities, ${place.precise ? 'supplied coordinates' : place.region ? 'state/province-level placement' : 'country-level placement'}`"
-           @pointerdown.stop @click.stop="selectedKey = place.key; detailPanel = 'entities'" @keydown.enter.prevent="selectedKey = place.key; detailPanel = 'entities'" @keydown.space.prevent="selectedKey = place.key; detailPanel = 'entities'">
-          <title>{{ place.name }} · {{ entityCount(place) }} entities</title>
-          <circle :r="(selectedKey === place.key ? 13 : 10) / (zoom * mapScale)" />
-          <text :font-size="11 / (zoom * mapScale)" text-anchor="middle" dominant-baseline="central">{{ entityCount(place) }}</text>
-        </g>
-        <g v-for="place in news.visible ? newsData.places : []" :key="`news:${place.code}`"
-           :transform="`translate(${(place.longitude + 180) * 3},${(90 - place.latitude) * 3})`"
-           class="marker news-marker" :class="{ active: news.location === place.code }" tabindex="0" role="button"
-           :aria-label="`${place.name}: ${place.articles.length} news articles; ${place.precision === 'locality' ? 'approximate town/city location' : 'approximate region center'}`"
-           @pointerdown.stop @click.stop="news.location = place.code; detailPanel = 'news'" @keydown.enter.prevent="news.location = place.code; detailPanel = 'news'" @keydown.space.prevent="news.location = place.code; detailPanel = 'news'">
-          <title>{{ place.name }} · {{ place.articles.length }} news articles · {{ place.precision === 'locality' ? 'Town/city mentioned in headline · approximate event area' : 'Region center · event location unknown' }}</title>
-          <rect :x="-15 / (zoom * mapScale)" :y="-40 / (zoom * mapScale)" :width="30 / (zoom * mapScale)" :height="22 / (zoom * mapScale)" :rx="5 / (zoom * mapScale)" />
-          <text :y="-29 / (zoom * mapScale)" :font-size="11 / (zoom * mapScale)" text-anchor="middle" dominant-baseline="central">{{ place.articles.length }}</text>
-        </g>
-      </svg>
+      <CesiumMap ref="globe" :markers="globeMarkers" :routes="globeRoutes" :show-regions="showRegions" @pick="pickGlobe" @visible-markers="visibleMarkers = new Set($event)" />
       <v-sheet class="detail-toggle" rounded>
         <v-checkbox v-model="showRegions" label="States & provinces" density="compact" hide-details />
-        <div v-if="showRegions && zoom < 2" class="text-caption">Zoom in to see boundaries</div>
       </v-sheet>
       <v-btn-group class="zoom-tools" density="compact" aria-label="Map zoom controls">
-        <v-btn icon="mdi-plus" aria-label="Zoom in" size="small" :disabled="zoom >= 20" @click="zoom = Math.min(20, zoom + .5)" />
-        <v-btn icon="mdi-minus" aria-label="Zoom out" size="small" :disabled="zoom <= 1" @click="zoom = Math.max(1, zoom - .5)" />
-        <v-btn size="small" @click="zoom = 1; center = [540, 270]">Reset</v-btn>
+        <v-btn icon="mdi-plus" aria-label="Zoom in" size="small" @click="globe?.zoomIn()" />
+        <v-btn icon="mdi-minus" aria-label="Zoom out" size="small" @click="globe?.zoomOut()" />
+        <v-btn size="small" @click="globe?.reset()">Reset</v-btn>
       </v-btn-group>
       <p v-if="!places.length && !(news.visible && newsData.places.length) && !(shipping.visible && shipping.routes.length) && !(lanes.enabled && lanes.lanes.length) && !transport.visible.length" class="map-empty" role="status">{{ graph.loading ? 'Loading locations…' : graph.filter ? 'No mapped entities match your search.' : 'No geographic locations in this graph scope. Try a deeper traversal or another program.' }}</p>
       <a class="attribution" href="https://www.naturalearthdata.com/about/terms-of-use/" target="_blank" rel="noopener">Natural Earth · illustrative boundaries</a>
       <a class="news-attribution" href="https://www.geonames.org/" target="_blank" rel="noopener">Town locations: GeoNames</a>
     </div>
     <nav class="map-detail-tabs" aria-label="Map details">
-      <v-btn v-if="news.visible" size="small" variant="text" :active="detailPanel === 'news'" :aria-expanded="detailPanel === 'news'" aria-controls="map-news-details" @click="toggleDetails('news')">News · {{ newsData.mapped }}</v-btn>
-      <v-btn size="small" variant="text" :active="detailPanel === 'entities'" :aria-expanded="detailPanel === 'entities'" aria-controls="map-entity-details" @click="toggleDetails('entities')">Entities · {{ data.mappedCount }}</v-btn>
+      <v-btn v-if="news.visible" size="small" variant="text" :active="detailPanel === 'news'" :aria-expanded="detailPanel === 'news'" aria-controls="map-news-details" @click="toggleDetails('news')">News · {{ visibleNewsUrls.size }}</v-btn>
+      <v-btn size="small" variant="text" :active="detailPanel === 'entities'" :aria-expanded="detailPanel === 'entities'" aria-controls="map-entity-details" @click="toggleDetails('entities')">Entities · {{ visibleEntityCount }}</v-btn>
       <v-btn v-if="lanes.enabled || shipping.visible" size="small" variant="text" :active="detailPanel === 'routes'" :aria-expanded="detailPanel === 'routes'" aria-controls="map-route-details" @click="toggleDetails('routes')">Route details</v-btn>
-      <span class="detail-hint">Select a marker to inspect</span>
+      <span class="detail-hint">In current view · Select a marker</span>
       <v-btn v-if="detailPanel" size="small" variant="text" icon="mdi-chevron-down" aria-label="Collapse map details" @click="detailPanel = ''" />
     </nav>
     <div id="map-route-details" v-show="detailPanel === 'routes'" class="route-details">
@@ -78,7 +57,7 @@
     <div id="map-news-details" v-show="news.visible && detailPanel === 'news'" class="news-details">
       <div class="detail-heading">
         <v-select v-model="news.location" :items="newsLocations" label="News location" density="compact" variant="outlined" hide-details class="location-select" />
-        <v-btn size="small" variant="tonal" :disabled="!newsData.places.length" @click="zoom = 1; center = [540, 270]">Show news on map</v-btn>
+        <v-btn size="small" variant="tonal" :disabled="!newsData.places.length" @click="globe?.reset()">Show news on map</v-btn>
         <details class="news-source-details">
           <summary>Coverage &amp; sources</summary>
           <p>Within {{ NEWS_PROXIMITY_KM }} km of visible entities or routes. Locations use identified towns/cities, otherwise approximate region centers.</p>
@@ -87,7 +66,7 @@
         </details>
       </div>
       <v-progress-linear v-if="news.loading" indeterminate color="primary" aria-label="Searching recent coverage" />
-      <p v-if="news.result && !newsArticles.length" class="text-caption pa-2" role="status">No articles near the visible entities or routes for this selection. Try another topic, a longer time window, or a broader map scope.</p>
+      <p v-if="news.result && !newsArticles.length" class="text-caption pa-2" role="status">No news in the current map view for this selection. Pan or zoom out to see more.</p>
       <v-list class="entry-list" density="compact" aria-label="News articles">
         <v-list-item v-for="article in newsArticles" :key="article.url" class="news-article" :active="news.selectedUrl === article.url" color="primary"
                      :title="article.title || article.url" :subtitle="`${article.domain || article.publisher} · ${article.providers?.join(' + ') || article.provider || 'GDELT'} · ${article.published_at ? 'Published' : 'Seen'} ${newsDate(article.published_at || article.seendate) || 'date unavailable'}`"
@@ -101,6 +80,7 @@
         <v-select v-model="selectedKey" :items="entityLocations" label="Map location" density="compact" variant="outlined" hide-details class="location-select" />
         <span>Gold: country · Blue: state/province · Teal: coordinates. Area markers are approximate.</span>
       </div>
+      <p v-if="!entries.length" class="text-caption pa-2" role="status">No entities in the current map view. Pan or zoom out to see more.</p>
       <v-list class="entry-list" density="compact" aria-label="Mapped entities">
         <v-list-item v-for="{ entry, place } in entries" :key="`${place.key}:${entry.node.id}:${entry.edge?.id || ''}`" :active="graph.selectedId === entry.node.id"
                      :title="entry.node.name" :subtitle="`${place.name} · ${entry.location?.props.code || (place.precise ? 'Supplied coordinates' : 'Country-level')}${entry.node.props.simulated || entry.edge?.props.simulated ? ' · Simulated' : ''}`"
@@ -115,14 +95,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
+import CesiumMap from './CesiumMap.vue'
+import type { GlobeMarker, GlobeRoute } from '../cesiumMap'
 import TransportControls from './TransportControls.vue'
-import TransportLayer from './TransportLayer.vue'
 import { useTransport } from '../stores/transport'
-import ShippingLanesLayer from './ShippingLanesLayer.vue'
 import ShippingLanesPanel from './ShippingLanesPanel.vue'
 import { useShippingLanes } from '../stores/shippingLanes'
-import ShippingLayer from './ShippingLayer.vue'
 import ShippingPanel from './ShippingPanel.vue'
 import { useShipping } from '../stores/shipping'
 import type { ShippingSegment, ShippingPort } from '../shippingMap'
@@ -138,6 +117,8 @@ const graph = useGraph()
 const workspace = useWorkspace()
 const props = defineProps<{ locationCode?: string }>()
 const emit = defineEmits<{ select: []; 'select-news': [article: NewsArticle] }>()
+const visibleMarkers = ref(new Set<string>())
+const controlsPanel = ref<'news' | 'transport' | ''>('')
 const selectedKey = ref('')
 const detailPanel = ref<'news' | 'entities' | 'routes' | ''>('')
 function toggleDetails(panel: 'news' | 'entities' | 'routes') { detailPanel.value = detailPanel.value === panel ? '' : panel }
@@ -161,102 +142,65 @@ const newsData = computed(() => nearbyNews(mapNews(news.result?.articles || [], 
   ...(lanes.enabled ? lanes.lanes.flatMap(lane => routePoints(lane.segments, lanes.catalog.ports)) : []),
   ...(shipping.visible ? shipping.routes.flatMap(item => routePoints(item.route.segments, shipping.catalog.ports)) : []),
 ]))
+const visibleNewsPlaces = computed(() => newsData.value.places.filter(place => visibleMarkers.value.has(`news:${place.code}`)))
+const visibleNewsUrls = computed(() => new Set(visibleNewsPlaces.value.flatMap(place => place.articles.map(article => article.url))))
 const newsArticles = computed(() => news.location
-  ? newsData.value.places.find(place => place.code === news.location)?.articles || []
-  : (news.result?.articles || []).filter(article => newsData.value.urls.has(article.url)))
-const newsLocations = computed(() => [{ title: 'Nearby news', value: '' },
-  ...newsData.value.places.map(place => ({ title: `${place.name} (${place.articles.length})`, value: place.code }))])
+  ? visibleNewsPlaces.value.find(place => place.code === news.location)?.articles || []
+  : (news.result?.articles || []).filter(article => visibleNewsUrls.value.has(article.url)))
+const newsLocations = computed(() => [{ title: 'All news in view', value: '' },
+  ...visibleNewsPlaces.value.map(place => ({ title: `${place.name} (${place.articles.length})`, value: place.code }))])
 onMounted(() => news.ensureLoaded())
-const zoom = ref(1)
+const globe = ref<InstanceType<typeof CesiumMap>>()
 const showRegions = ref(true)
-const center = ref<[number, number]>([540, 270])
-const svg = ref<SVGSVGElement>()
-const mapScale = ref(1)
-let mapObserver: ResizeObserver | undefined
-onMounted(() => {
-  mapObserver = new ResizeObserver(() => {
-    if (svg.value) mapScale.value = Math.max(.01, Math.min(svg.value.clientWidth / 1080, svg.value.clientHeight / 540))
-  })
-  if (svg.value) mapObserver.observe(svg.value)
-})
-onBeforeUnmount(() => mapObserver?.disconnect())
-const drag = ref<{ x: number; y: number; center: [number, number] } | null>(null)
-const viewBox = computed(() => `${center.value[0] - 540 / zoom.value} ${center.value[1] - 270 / zoom.value} ${1080 / zoom.value} ${540 / zoom.value}`)
 const data = computed(() => {
   const hidden = hiddenNodeIds(graph.nodeList, graph.edgeList, { ...workspace.ws.layers, countries: true }, graph.focusId ? [graph.focusId] : [])
   return buildMapPlaces(graph.nodeList.filter(node => !hidden.has(node.id)), graph.edgeList, world, regions)
 })
 const places = computed(() => data.value.places.map(place => ({ ...place, entries: place.entries.filter(entry => matchesMapEntry(entry, graph.filter)) })).filter(place => place.entries.length))
-const entityLocations = computed(() => [{ title: `All locations (${places.value.length})`, value: '' }, ...places.value.map(place => ({ title: `${place.name} (${entityCount(place)})`, value: place.key }))])
-const occupied = computed(() => new Set(places.value.filter(p => p.key.startsWith('country:')).map(p => p.key.slice(8))))
-const occupiedRegions = computed(() => new Set(places.value.filter(p => p.region).map(p => p.key.slice(7))))
-const visibleRegions = computed(() => regions.filter(region => {
-  const [left, top, right, bottom] = region.bounds
-  return right >= center.value[0] - 540 / zoom.value && left <= center.value[0] + 540 / zoom.value
-    && bottom >= center.value[1] - 270 / zoom.value && top <= center.value[1] + 270 / zoom.value
-}))
-const regionLabels = computed(() => {
-  const boxes: number[][] = []
-  const unit = 1 / (zoom.value * mapScale.value)
-  return [...visibleRegions.value].sort((a,b) => Number(occupiedRegions.value.has(b.code)) - Number(occupiedRegions.value.has(a.code))).filter(region => {
-    const x = (region.longitude + 180) * 3, y = (90 - region.latitude) * 3
-    if (x < center.value[0] - 540 / zoom.value || x > center.value[0] + 540 / zoom.value || y < center.value[1] - 270 / zoom.value || y > center.value[1] + 270 / zoom.value) return false
-    const halfWidth = (region.name.length * 3 + 5) * unit
-    const box = [x - halfWidth, y - 12 * unit, x + halfWidth, y + 4 * unit]
-    if (boxes.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) return false
-    boxes.push(box)
-    return true
-  })
-})
-const entries = computed(() => places.value.filter(p => !selectedKey.value || p.key === selectedKey.value).flatMap(place => place.entries.map(entry => ({ entry, place }))))
-watch(() => props.locationCode, code => {
+const visiblePlaces = computed(() => places.value.filter(place => visibleMarkers.value.has(`entity:${place.key}`)))
+const visibleEntityCount = computed(() => new Set(visiblePlaces.value.flatMap(place => place.entries.map(entry => entry.node.id))).size)
+const entityLocations = computed(() => [{ title: `Locations in view (${visiblePlaces.value.length})`, value: '' }, ...visiblePlaces.value.map(place => ({ title: `${place.name} (${entityCount(place)})`, value: place.key }))])
+const entries = computed(() => visiblePlaces.value.filter(p => !selectedKey.value || p.key === selectedKey.value).flatMap(place => place.entries.map(entry => ({ entry, place }))))
+watch(() => [props.locationCode, globe.value] as const, ([code]) => {
   if (!code) return
   const normalized = code.toUpperCase()
   const region = regions.find(r => r.code === normalized)
   const country = world.find(c => c.code === normalized.split('-')[0])
   const location = region || country
   if (!location) return
-  center.value = [(location.longitude + 180) * 3, (90 - location.latitude) * 3]
-  if (region) {
-    const [left, top, right, bottom] = region.bounds
-    zoom.value = Math.max(2, Math.min(20, Math.min(1080 / Math.max(right - left, 1), 540 / Math.max(bottom - top, 1)) * .65))
-    showRegions.value = true
-  } else {
-    const points = country!.path.match(/-?\d+(?:\.\d+)?/g)!.map(Number)
-    const xs = points.filter((_, i) => i % 2 === 0), ys = points.filter((_, i) => i % 2 === 1)
-    zoom.value = Math.max(2, Math.min(12, Math.min(1080 / Math.max(Math.max(...xs) - Math.min(...xs), 1), 540 / Math.max(Math.max(...ys) - Math.min(...ys), 1)) * .8))
-  }
+  globe.value?.focus(location.longitude, location.latitude, region ? 1400000 : 5500000)
   selectedKey.value = `${region ? 'region' : 'country'}:${location.code}`
   detailPanel.value = 'entities'
 }, { immediate: true })
 function entityCount(place: MapPlace) { return new Set(place.entries.map(e => e.node.id)).size }
 function traced(place: MapPlace) { return place.entries.some(e => graph.highlightIds.includes(e.node.id) || (e.edge && graph.highlightIds.includes(e.edge.id)) || graph.selectedId === e.node.id) }
 function inspect(id: string) { graph.select(id); emit('select') }
-watch(newsData, value => { if (!value.places.some(place => place.code === news.location)) news.location = '' })
-watch(places, value => { if (!value.some(p => p.key === selectedKey.value)) selectedKey.value = '' })
-function wheelZoom(event: WheelEvent) {
-  const matrix = svg.value?.getScreenCTM()
-  if (!matrix || !event.deltaY) return
-  // Convert the cursor through the SVG transform, including its letterboxing.
-  const anchor = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse())
-  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? svg.value!.clientHeight : 1
-  const delta = Math.max(-100, Math.min(100, event.deltaY * unit))
-  const nextZoom = Math.max(1, Math.min(20, zoom.value * Math.exp(-delta * .002)))
-  const ratio = zoom.value / nextZoom
-  center.value = [anchor.x + (center.value[0] - anchor.x) * ratio, anchor.y + (center.value[1] - anchor.y) * ratio]
-  zoom.value = nextZoom
-  drag.value = null
-}
-function startPan(event: PointerEvent) {
-  if (event.button !== 0 || !svg.value) return
-  svg.value.setPointerCapture(event.pointerId)
-  drag.value = { x: event.clientX, y: event.clientY, center: [...center.value] }
-}
-function movePan(event: PointerEvent) {
-  if (!drag.value || !svg.value) return
-  const rect = svg.value.getBoundingClientRect()
-  const scale = Math.min(rect.width / (1080 / zoom.value), rect.height / (540 / zoom.value))
-  center.value = [Math.max(0, Math.min(1080, drag.value.center[0] - (event.clientX - drag.value.x) / scale)), Math.max(0, Math.min(540, drag.value.center[1] - (event.clientY - drag.value.y) / scale))]
+watch(visibleNewsPlaces, value => { if (!value.some(place => place.code === news.location)) news.location = '' })
+watch(visiblePlaces, value => { if (!value.some(p => p.key === selectedKey.value)) selectedKey.value = '' })
+const globeMarkers = computed<GlobeMarker[]>(() => [
+  ...places.value.map(place => ({ id: `entity:${place.key}`, longitude: place.longitude, latitude: place.latitude,
+    name: place.name, text: String(entityCount(place)), color: place.precise ? '#79dac7' : place.region ? '#99bfff' : '#f3c97c',
+    selected: selectedKey.value === place.key || traced(place) })),
+  ...(news.visible ? newsData.value.places.map(place => ({ id: `news:${place.code}`, longitude: place.longitude, latitude: place.latitude,
+    name: `${place.name} · news`, text: String(place.articles.length), color: '#ff927f', selected: news.location === place.code, news: true })) : []),
+  ...(lanes.enabled ? lanes.ports.map(port => ({ ...port, id: `lane-port:${port.id}`, color: '#65dfcf', selected: lanes.port === port.id })) : []),
+  ...(shipping.visible ? shipping.ports.map(port => ({ ...port, id: `shipping-port:${port.id}`, color: '#c7a7ff', selected: shipping.port === port.id })) : []),
+])
+const globeRoutes = computed<GlobeRoute[]>(() => [
+  ...transport.visible.map(c => ({ id: `transport:${c.id}`, name: c.name, points: c.points, color: c.mode === 'truck' ? '#59c8f0' : '#ffb76c', dashed: c.mode === 'rail', selected: transport.selectedId === c.id })),
+  ...(lanes.enabled ? lanes.lanes.flatMap(lane => routePoints(lane.segments, lanes.catalog.ports).map((points, i) => ({ id: `lane:${lane.id}:${i}`, name: lane.name, points, color: '#65dfcf', selected: lanes.selectedId === lane.id }))) : []),
+  ...(shipping.visible ? shipping.routes.flatMap(({ route }) => routePoints(route.segments, shipping.catalog.ports).map((points, i) => ({ id: `shipping:${route.id}:${i}`, name: route.name, points,
+    color: route.status === 'confirmed' ? '#65dfcf' : route.status === 'inferred' ? '#ffca80' : '#c7a7ff', dashed: route.status !== 'confirmed', selected: shipping.selectedId === route.id }))) : []),
+])
+function pickGlobe(id: string) {
+  const split = id.indexOf(':'); const kind = id.slice(0, split); const key = id.slice(split + 1)
+  if (kind === 'entity') { selectedKey.value = key; detailPanel.value = 'entities' }
+  if (kind === 'news') { news.location = key; detailPanel.value = 'news' }
+  if (kind === 'transport') transport.selectedId = key
+  if (kind === 'lane') { lanes.selectedId = key.slice(0, key.lastIndexOf(':')); detailPanel.value = 'routes' }
+  if (kind === 'shipping') { shipping.select(key.slice(0, key.lastIndexOf(':'))); detailPanel.value = 'routes' }
+  if (kind === 'lane-port') { lanes.port = lanes.port === key ? '' : key; detailPanel.value = 'routes' }
+  if (kind === 'shipping-port') { shipping.port = shipping.port === key ? '' : key; shipping.selectedId = ''; detailPanel.value = 'routes' }
 }
 </script>
 
@@ -269,32 +213,30 @@ function movePan(event: PointerEvent) {
 .news-source-details p { margin:4px 0; }
 @media(max-width:600px) { .detail-hint { display:none; } .map-detail-tabs { flex-wrap:wrap; } }
 
-.news-search { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:8px; }
+.news-search { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px; margin-bottom:8px; border:1px solid rgba(128,128,128,.2); border-radius:8px; flex-shrink:0; }
 .news-toggle { flex:0 0 auto; }
 .news-topic { flex:1 1 180px; }
 .news-window { flex:0 1 170px; min-width:150px; }
 .news-error { flex-shrink:0; }
-.news-marker text { fill:#102b38; font-weight:800; pointer-events:none; }
-.news-marker rect { fill:#ff927f; stroke:#102b38; stroke-width:1.5; vector-effect:non-scaling-stroke; }
-.news-marker.active rect,.news-marker:focus rect { stroke:white; stroke-width:3; }
 .news-details { flex:0 0 210px; max-height:260px; min-height:90px; display:flex; flex-direction:column; padding-top:10px; font-size:12px; }
 .news-article :deep(.v-list-item-title) { white-space:normal; font-size:12px; }
 .geo-view { height:calc(100% - 112px); margin-top:112px; overflow-y:auto; padding:0 16px 12px; display:flex; flex-direction:column; background:rgb(var(--v-theme-background)); }
-.map-summary { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 4px 12px; flex-wrap:wrap; }
-.eyebrow { font-size:10px; letter-spacing:.14em; color:rgb(var(--v-theme-primary)); font-weight:800; }
-h2 { font-size:20px; font-weight:600; }.counts { font-size:12px; opacity:.85; }.counts strong { font-size:18px; }.counts span { margin:0 8px; }
-.map-stage { position:relative; flex:1; min-height:300px; border:1px solid rgba(128,128,128,.25); border-radius:10px; overflow:hidden; background:#102b38; }
-.world { width:100%; height:100%; display:block; touch-action:none; cursor:grab; }.world:active { cursor:grabbing; }
-.ocean { fill:#102b38; }.country { fill:#294653; stroke:#6c8490; stroke-width:.5; }.country.occupied { fill:#346f78; }
-.marker { cursor:pointer; outline:none; }.marker circle { fill:#f3c97c; stroke:#102b38; stroke-width:2; vector-effect:non-scaling-stroke; }.marker.regional circle { fill:#99bfff; }.marker.precise circle { fill:#79dac7; }.marker.active circle,.marker:focus circle,.marker.traced circle { stroke:#fff; stroke-width:3; }.marker text { fill:#102b38; font-weight:800; pointer-events:none; }
-.region { fill:transparent; stroke:#94afbb; stroke-width:.65; vector-effect:non-scaling-stroke; }
-.region.occupied { fill:#5f8eaa44; }
-.region-label { fill:#d8e5ed; text-anchor:middle; pointer-events:none; paint-order:stroke; stroke:#102b38; stroke-width:2px; vector-effect:non-scaling-stroke; }
+.map-summary { display:flex; align-items:center; gap:12px; padding:2px 2px 4px; flex-shrink:0; flex-wrap:wrap; }
+ .map-tools { display:flex; align-items:center; justify-content:space-between; gap:4px; flex-wrap:wrap; flex-shrink:0; padding:0 0 8px; }
+.layer-buttons,.filter-buttons { display:flex; align-items:center; gap:2px; flex-wrap:wrap; }
+.map-tools :deep(.v-btn) { text-transform:none; letter-spacing:0; padding:0 8px; }
+.layer-buttons :deep(.v-btn[aria-pressed="true"]) { background:rgba(var(--v-theme-primary),.1); }
+.coverage-notice { flex-shrink:0; font-size:11px; color:rgb(var(--v-theme-warning)); margin:0 2px 8px; }
+.coverage-notice summary { cursor:pointer; }
+.coverage-notice p { margin:6px 0; }
+@media(max-width:600px) { .counts { margin-left:0; } .map-tools { gap:6px; } }
+h2 { font-size:15px; font-weight:600; }.counts { font-size:11px; opacity:.65; margin-left:auto; }.counts strong { font-weight:600; }
+.map-stage { position:relative; flex:1 0 320px; min-height:320px; border:1px solid rgba(128,128,128,.25); border-radius:10px; overflow:hidden; background:#102b38; }
 .detail-toggle { position:absolute; left:8px; top:8px; padding:0 8px; max-width:230px; }
 .detail-toggle .text-caption { padding:0 8px 6px; }
 .zoom-tools { position:absolute; right:10px; top:10px; }
-.news-attribution { position:absolute; bottom:4px; left:8px; font-size:9px; color:#d6e4e8; }
-.attribution { position:absolute; bottom:4px; right:8px; font-size:9px; color:#d6e4e8; }.map-empty { position:absolute; left:15%; right:15%; top:40%; padding:15px; background:#102b38e8; color:#fff; text-align:center; font-size:13px; }
+.news-attribution { position:absolute; bottom:30px; left:8px; font-size:9px; color:#d6e4e8; }
+.attribution { position:absolute; bottom:30px; right:8px; font-size:9px; color:#d6e4e8; }.map-empty { position:absolute; left:15%; right:15%; top:40%; padding:15px; background:#102b38e8; color:#fff; text-align:center; font-size:13px; }
 .map-details { flex:0 0 210px; max-height:260px; min-height:100px; display:flex; flex-direction:column; padding-top:12px; }
 .detail-heading { display:flex; align-items:center; gap:12px; padding-bottom:8px; }
 .location-select { flex:0 0 230px; max-width:100%; }
