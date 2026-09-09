@@ -1,7 +1,7 @@
 <template>
   <v-chip-group multiple :model-value="active" @update:model-value="onChange" filter variant="tonal" class="layers">
     <v-chip value="entities" size="small" disabled>Entities</v-chip>
-    <v-chip :value="INDIRECT_ORGS" size="small" title="Organizations no supply, ownership or affiliation chain joins to a program — only a person, place, document or claim does. Turn off to keep them off the canvas.">Indirect orgs</v-chip>
+    <v-chip :value="INDIRECT_ORGS" size="small" title="Organizations no chain of contracts or ownership joins to a program — reached only through a person, place, document or claim, or through a company they merely lobby, sit on a council with or donate to. Turn off to keep them off the canvas; anything scored over 20 that reaches a supplier stays.">Indirect orgs</v-chip>
     <v-chip value="people" size="small">People</v-chip>
     <v-chip value="countries" size="small">Countries</v-chip>
     <v-chip value="categories" size="small" title="Goods / services taxonomy nodes">Categories</v-chip>

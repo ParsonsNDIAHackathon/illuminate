@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import cytoscape from 'cytoscape'
 
-import { hiddenNodeIds, indirectOrganizations, layerData, layerVisible, orphanedOrganizations } from '../src/stores/graphLayers.ts'
+import { hiddenNodeIds, indirectOrganizations, layerData, layerVisible, orphanedOrganizations, riskPinnedOrganizations } from '../src/stores/graphLayers.ts'
 
 const claim = { id: 'claim-a', label: 'Claim', props: {} }
 const source = { id: 'source-a', label: 'Artifact', props: { kind: 'record' } }
@@ -65,29 +65,37 @@ test('source records and documents obey independent layer toggles', () => {
   assert.equal(documentsOnly.getElementById('document-a').hasClass('layer-hide'), false)
 })
 
-// A program, its supplier, a director of that supplier who also sits on two other boards (one of
-// those companies owning a subsidiary), a company known only by where it is incorporated, and a
-// company nothing points at. Person nodes come with the "people" layer; entities always arrive.
+// A program, its supplier and the supplier's own subcontractor (with the holding company that owns
+// it), a director of the supplier who also sits on two other boards (one of those companies owning
+// a subsidiary), a trade council the supplier is only a member of, a company known only by where it
+// is incorporated, and a company nothing points at. Person nodes come with the "people" layer;
+// entities always arrive.
 const org = (id: string) => ({ id, label: 'Entity', layer: null, props: { kind: 'organization' } })
 const network = {
   nodes: [
     { id: 'program', label: 'Entity', layer: null, props: { kind: 'program' } },
     org('supplier'),
+    org('subcontractor'),
+    org('holding'),
     { id: 'director', label: 'Person', layer: 'people', props: {} },
     org('board-seat'),
     org('club'),
     org('club-subsidiary'),
+    org('trade-council'),
     org('seated-only'),
     { id: 'country', label: 'Location', layer: 'countries', props: {} },
     org('isolated'),
   ],
   edges: [
-    { source: 'supplier', target: 'program' },
-    { source: 'director', target: 'supplier' },
-    { source: 'director', target: 'board-seat' },
-    { source: 'director', target: 'club' },
-    { source: 'club', target: 'club-subsidiary' },
-    { source: 'seated-only', target: 'country' },
+    { source: 'supplier', target: 'program', type: 'SUPPLIES' },
+    { source: 'subcontractor', target: 'supplier', type: 'SUPPLIES' },
+    { source: 'holding', target: 'subcontractor', type: 'OWNS' },
+    { source: 'director', target: 'supplier', type: 'HELD_ROLE' },
+    { source: 'director', target: 'board-seat', type: 'HELD_ROLE' },
+    { source: 'director', target: 'club', type: 'HELD_ROLE' },
+    { source: 'club', target: 'club-subsidiary', type: 'OWNS' },
+    { source: 'supplier', target: 'trade-council', type: 'MEMBER_OF' },
+    { source: 'seated-only', target: 'country', type: 'INCORPORATED_IN' },
   ],
 }
 const hiddenWith = (layers: Record<string, boolean>, keep: string[] = []) =>
@@ -112,18 +120,82 @@ test('programs, the root and organizations with no edges are never pruned', () =
   assert.ok(!hidden.includes('board-seat'), 'the root is kept')
 })
 
-test('the indirect-orgs toggle hides organizations no entity chain joins to a program, whatever the layers show', () => {
+test('the indirect-orgs toggle hides organizations no contract or ownership chain joins to a program, whatever the layers show', () => {
   // An organization with no edges at all counts as indirect too: nothing joins it to anything.
-  assert.deepEqual(hiddenWith({ people: true, countries: true, indirect_orgs: false }), ['board-seat', 'club', 'club-subsidiary', 'isolated', 'seated-only'])
+  assert.deepEqual(hiddenWith({ people: true, countries: true, indirect_orgs: false }), ['board-seat', 'club', 'club-subsidiary', 'isolated', 'seated-only', 'trade-council'])
   // The default is to show them.
   assert.deepEqual(hiddenWith({ people: true, countries: true }), [])
+})
+
+test('affiliation to a supplier is not the chain; a contract or an ownership stake is', () => {
+  const hidden = hiddenWith({ people: true, countries: true, indirect_orgs: false })
+  // The trade council hangs straight off the supplier, on MEMBER_OF — the shape of RTX's lobbying
+  // and membership network, none of it on an award.
+  assert.ok(hidden.includes('trade-council'))
+  // A subcontractor and the holding company that owns it are the chain, and stay.
+  assert.ok(!hidden.includes('subcontractor') && !hidden.includes('holding'))
 })
 
 test('the indirect walk starts from the root too, and from nothing when the canvas has no anchor', () => {
   const noProgram = { nodes: network.nodes.filter(n => n.id !== 'program'), edges: network.edges.filter(e => e.target !== 'program') }
   const hidden = new Set<string>()
   assert.deepEqual([...indirectOrganizations(noProgram.nodes, noProgram.edges, hidden)], [])
-  assert.deepEqual([...indirectOrganizations(noProgram.nodes, noProgram.edges, hidden, ['supplier'])].sort(), ['board-seat', 'club', 'club-subsidiary', 'isolated', 'seated-only'])
+  assert.deepEqual(
+    [...indirectOrganizations(noProgram.nodes, noProgram.edges, hidden, ['supplier'])].sort(),
+    ['board-seat', 'club', 'club-subsidiary', 'isolated', 'seated-only', 'trade-council'],
+  )
+})
+
+// The same shape with risk on it: a donor to the trade council, a quiet peer beside it, an offshore
+// company that shares only a country with the supplier, and a risky company nothing points at.
+const risky = (id: string, score: number) => ({ id, label: 'Entity', layer: null, props: { kind: 'organization', risk_score: score } })
+const scored = {
+  nodes: [
+    ...network.nodes,
+    risky('sanctioned-donor', 61),
+    risky('quiet-donor', 12),
+    risky('offshore', 70),
+    risky('unattached', 90),
+  ],
+  edges: [
+    ...network.edges,
+    { source: 'sanctioned-donor', target: 'trade-council', type: 'DONATED_TO' },
+    { source: 'quiet-donor', target: 'trade-council', type: 'DONATED_TO' },
+    { source: 'supplier', target: 'country', type: 'INCORPORATED_IN' },
+    { source: 'offshore', target: 'country', type: 'INCORPORATED_IN' },
+  ],
+}
+const hiddenInScored = (layers: Record<string, boolean>) => [...hiddenNodeIds(scored.nodes, scored.edges, layers)].sort()
+
+test('an organization over the risk floor that reaches a supplier survives the indirect filter', () => {
+  const hidden = hiddenInScored({ people: true, countries: true, indirect_orgs: false })
+  // Two hops off the prime over donation and membership edges — the finding, not the clutter.
+  assert.ok(!hidden.includes('sanctioned-donor'))
+  // Its neighbour on the same council scores 12, so the filter takes it, and the council with it.
+  assert.ok(hidden.includes('quiet-donor') && hidden.includes('trade-council'))
+})
+
+test('a shared country is not a path to a supplier, and neither is no path at all', () => {
+  const hidden = hiddenInScored({ people: true, countries: true, indirect_orgs: false })
+  assert.ok(hidden.includes('offshore'), 'sharing a jurisdiction is not a connection')
+  assert.ok(hidden.includes('unattached'), 'a high score alone does not keep a node')
+})
+
+test('the risk pin also holds against orphan pruning, and against a hidden layer breaking the path', () => {
+  // club-subsidiary reaches the supplier through club and the director. The indirect filter takes
+  // club, which would strand the subsidiary — the pin keeps it, floating.
+  const nodes = scored.nodes.map(n => (n.id === 'club-subsidiary' ? risky(n.id, 55) : n))
+  const hidden = [...hiddenNodeIds(nodes, scored.edges, { people: true, countries: true, indirect_orgs: false })].sort()
+  assert.ok(hidden.includes('club') && !hidden.includes('club-subsidiary'))
+  // With the people layer off, the director no longer conducts and there is no path left to pin on.
+  const peopleOff = [...hiddenNodeIds(nodes, scored.edges, { people: false, countries: true, indirect_orgs: false })].sort()
+  assert.ok(peopleOff.includes('club-subsidiary'))
+})
+
+test('the risk pin needs a supplier on the canvas at all', () => {
+  const noSupply = { nodes: scored.nodes, edges: scored.edges.filter(e => e.type !== 'SUPPLIES') }
+  assert.deepEqual([...riskPinnedOrganizations(noSupply.nodes, noSupply.edges, new Set())], [])
+  assert.deepEqual([...riskPinnedOrganizations(scored.nodes, scored.edges, new Set())].sort(), ['sanctioned-donor'])
 })
 
 test('orphan pruning ignores self-loops and edges to nodes that are not loaded', () => {

@@ -150,8 +150,9 @@ function restyle() {
 // are "sources", documents (filings, news, awards, web pages) are "artifacts".
 // Entities have no layer and are always fetched, so an organization that is in the graph only
 // through a hidden person would be left floating; graphLayers.hiddenNodeIds prunes those, and
-// with the "indirect orgs" toggle off it prunes every organization no entity chain joins to a
-// program or the root.
+// with the "indirect orgs" toggle off it prunes every organization no chain of contracts or
+// ownership joins to a program or the root — affiliation edges (lobbying, memberships) do not
+// count as that chain. Organizations scored over 20 that reach a supplier survive both prunings.
 function applyLayers() {
   if (!cy) return
   const hidden = hiddenNodeIds(graph.nodeList, graph.edgeList, ws.ws.layers || {}, graph.focusId ? [graph.focusId] : [])

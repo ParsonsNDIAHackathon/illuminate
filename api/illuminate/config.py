@@ -57,8 +57,10 @@ settings = Settings()
 # Canvas layers and whether each is drawn by default. "entities" is always on. Artifacts split by
 # kind over "artifacts" (documents: filings, news, awards, web) and "sources" (registry entries and
 # source records); "claims" is the reified assertions those artifacts evidence. "indirect_orgs" is
-# a canvas-side filter, not a fetch layer: off, organizations that only people, places, documents
-# or claims point at are left undrawn (web/src/stores/graphLayers.ts).
+# a canvas-side filter, not a fetch layer: off, an organization is left undrawn unless a chain of
+# contracts or ownership joins it to a program — people, places, documents, claims and affiliation
+# edges (lobbying, memberships, donations) do not carry that chain. A node scored over 20 that
+# reaches a supplier is drawn either way (web/src/stores/graphLayers.ts).
 LAYER_DEFAULTS = {"entities": True, "indirect_orgs": True, "people": True, "countries": False, "categories": False, "artifacts": False, "sources": False, "claims": False}
 
 
