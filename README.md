@@ -78,3 +78,19 @@ Either way the graph and `api/data/` are replaced with the archive's contents. D
 `BACKUP` in `.env` or it will restore on every start.
 
 `make help` lists all targets.
+
+## Recent news on the map
+
+Open the map to load recent GDELT coverage. Search a topic and choose the past 24 hours,
+3 days, or 7 days. Coral diamonds select source articles mentioning that country in their
+headline. These are approximate country mentions, not verified incident locations; articles
+without a recognized country remain available under **Unplaced**. Matching currently uses
+English country names and selected aliases, so other languages often remain unplaced.
+The News checkbox hides the overlay without changing entity locations.
+
+The read-only `/api/news?query=flood&timespan=24h` endpoint uses GDELT DOC 2.0, requests
+up to 250 recent articles, and caches responses for five minutes. No API key is required.
+The API retries a rate-limited request once after six seconds; persistent outages and rate
+limits appear as retryable errors. After code changes, rebuild the running containers with
+`docker compose up -d --build --no-deps api web`. See the
+[GDELT DOC API documentation](https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/).
