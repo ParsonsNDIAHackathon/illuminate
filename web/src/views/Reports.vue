@@ -156,7 +156,10 @@ async function remove() {
 async function openInGraph() {
   if (!current.value) return
   const r = current.value
-  await graph.loadNeighbourhood(r.subject_id, ws.depth, { ...ws.ws.layers, reports: true })
+  // Layers are off until asked for, and asking for this report by name is the asking: without
+  // this the node is fetched and then hidden by the canvas filter, and the button does nothing.
+  ws.setLayer('reports', true)
+  await graph.loadNeighbourhood(r.subject_id, ws.depth, ws.ws.layers)
   graph.select(r.id)
   if (r.element_ids?.length) graph.trace(r.element_ids)
   router.push('/')

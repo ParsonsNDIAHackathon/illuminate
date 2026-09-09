@@ -358,7 +358,7 @@ def _neighbourhood(p):
     # to sixty nodes, and expanding through one would quietly re-import the findings it was written
     # about as if the user had asked for them. Only the apoc filters take these — the risk sweep
     # builds a Cypher pattern, where a direction prefix is not valid syntax.
-    report_rels = ["<REPORTS_ON", "<CITES"] if layers.get("reports", True) else []
+    report_rels = ["<REPORTS_ON", "<CITES"] if layers.get("reports", False) else []
     # Ownership is walked upwards in a program view: who owns a company on the contract is
     # material, its owner's other subsidiaries are not — Raytheon Visual Analytics arrives only
     # because its parent sells to the V-22, which says nothing about the V-22. Two dozen sister
@@ -369,7 +369,7 @@ def _neighbourhood(p):
     rf_up = "|".join([("<" + r if r in ("OWNS", "ULTIMATE_PARENT_OF") else r) for r in rel_filter] + report_rels)
     rf_out = "|".join(rel_filter + report_rels)
     bound = {"id": p["entity_id"], "limit": int(p.get("limit", 400)), "risk_floor": RISK_PIN_FLOOR}
-    tail = _RISKY_PEOPLE_ONLY if not layers.get("people", True) else ""
+    tail = _RISKY_PEOPLE_ONLY if not layers.get("people", False) else ""
     if p.get("program_id"):
         # Keep the walk inside one program. Suppliers sell to several programs, so an
         # unconstrained walk hops supplier -> another program -> that program's own
