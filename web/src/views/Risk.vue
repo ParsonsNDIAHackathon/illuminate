@@ -41,6 +41,9 @@
       A score is the weighted mean of the dimensions that returned data. Dimensions that returned
       nothing are left out rather than counted as clear, so a high score on thin coverage means
       “everything we know is bad”, not “everything is bad” — enrich the node to settle it.
+      A dimension that came back clear counts for a third of what a finding counts for: the
+      screening lists name the parties someone has already designated, so clearing them is much
+      weaker evidence than a hit and should not cancel out a finding elsewhere on the node.
       Proximity is walked up to {{ maxHops }} hops over ownership, personnel and commercial edges.
     </v-alert>
     <p class="text-caption mt-2" style="opacity:.7">{{ reference }}</p>

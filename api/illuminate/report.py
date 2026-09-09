@@ -8,7 +8,7 @@ import re
 from datetime import date
 
 from . import db, risk
-from .risk import SEVERITY_WEIGHT   # noqa: F401 — the grading scale lives with the scorer now
+from .risk import MAX_SEVERITY, SEVERITY_WEIGHT, evidence_weight   # noqa: F401 — the grading scale lives with the scorer now
 
 HOME = risk.riskdata.HOME
 
@@ -492,8 +492,12 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
             "disclaimer": disclaimer,
         }
     with_data = [i for i in inds if not i["no_data"]]
-    total = sum(SEVERITY_WEIGHT[i["severity"]] for i in with_data)
-    maxv = 3.0 * len(with_data) if with_data else 0
+    # Same rule as the scorer: a family that came back clear is weaker evidence than one
+    # that found something, so it takes a smaller share of the ceiling. Otherwise this
+    # fallback would grade the same node differently from the path above it.
+    weights = [evidence_weight(i["severity"]) for i in with_data]
+    total = sum(w * SEVERITY_WEIGHT[i["severity"]] for w, i in zip(weights, with_data))
+    maxv = MAX_SEVERITY * sum(weights)
     composite = round(100 * total / maxv) if maxv else None
     return {
         "indicators": inds,

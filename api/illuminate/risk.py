@@ -39,9 +39,15 @@ Three rules the whole module answers to:
    and the score is the weighted mean over the dimensions that *did* answer. A node with
    one dimension of data gets a score and a loud note about how thin it is, never a
    flattering 8/100 built out of silence.
-2. **Nothing is scored that cannot be shown.** Every component carries the ids of the
+2. **A clear result is not proof.** A screen that finds nothing and a screen that finds a
+   designation are both data, but they are not equally informative: the lists name the
+   parties someone has already decided to name, so clearing them rules out a few thousand
+   known actors and nothing else. A clear grading therefore enters the mean at a third of
+   its dimension's weight — enough to count, not enough to drown the finding beside it.
+   Coverage (`confidence`) still reads the full weight: the dimension did answer.
+3. **Nothing is scored that cannot be shown.** Every component carries the ids of the
    nodes and edges that produced it, so the canvas can light up the reason.
-3. **Simulated data scores exactly like observed data.** The scenario overlay is disclosed
+4. **Simulated data scores exactly like observed data.** The scenario overlay is disclosed
    in the app bar and nowhere else; a scorer that skipped it would be marking its own
    homework.
 """
@@ -56,6 +62,21 @@ from .connectors.base import now_iso
 # Shared with report.py, which grades its narrative families on the same scale.
 SEVERITY_WEIGHT = {"high": 3.0, "medium": 2.0, "low": 1.0, "clear": 0.0}
 MAX_SEVERITY = 3.0
+
+# What a clear grading is worth as evidence, against the weight the same dimension carries
+# when it finds something. Screening lists name the parties someone has already decided to
+# name, so "not on them" is a far weaker claim than "on them" — and at equal weight the
+# weaker claim wins by arithmetic, because a clear dimension contributes nothing to the
+# numerator while taking its full share of the ceiling. A third is the same 3:1 the
+# severity scale already puts between a high finding and a low one. Concretely: a person
+# one hop from a designated group who clears two sanctions lists scored 40 at equal weight
+# — the two clear lists cancelling out the association — and scores 67 here.
+CLEAR_EVIDENCE = 1 / 3
+
+
+def evidence_weight(severity: str | None, weight: float = 1.0) -> float:
+    """A graded signal's share of the mean: full weight for a finding, less for a clear."""
+    return weight * (CLEAR_EVIDENCE if severity == "clear" else 1.0)
 
 # dimension -> (weight, human label). Weight is relative importance among the dimensions
 # that returned data; a node scored on three of seven is scored on those three's weights.
@@ -138,8 +159,9 @@ def composite(components: list[dict]) -> tuple[int | None, list[dict]]:
     scored = [c for c in components if not c["no_data"]]
     if not scored:
         return None, scored
-    total = sum(c["weight"] * SEVERITY_WEIGHT[c["severity"]] for c in scored)
-    ceiling = sum(c["weight"] for c in scored) * MAX_SEVERITY
+    weights = [evidence_weight(c["severity"], c["weight"]) for c in scored]
+    total = sum(w * SEVERITY_WEIGHT[c["severity"]] for w, c in zip(weights, scored))
+    ceiling = sum(weights) * MAX_SEVERITY
     return round(100 * total / ceiling) if ceiling else 0, scored
 
 
@@ -655,6 +677,10 @@ def confidence(components: list[dict]) -> int:
     what answered is the only average that does not impute zeros. That ordering is
     defensible (all we know about it is bad) but only if the thinness travels with it,
     so confidence is stored, returned and drawn everywhere the score is.
+
+    Full dimension weight, not the evidence weight the mean uses: a screen that came back
+    clear answered its question. Discounting it here would report a fully-screened node as
+    thinly covered, which is the opposite of true.
     """
     scored = [c for c in components if not c["no_data"]]
     total = sum(c["weight"] for c in components)
