@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import ValidationError
 
 from ..config import settings
-from ..shipping import ShippingCatalog
+from ..shipping import ShippingCatalog, TransportNetwork
 
 router = APIRouter(prefix="/api/shipping", tags=["shipping"])
 
@@ -19,3 +19,12 @@ async def shipping_catalog():
         return ShippingCatalog.model_validate_json(path.read_text())
     except (OSError, ValidationError) as exc:
         raise HTTPException(503, "Shipping data could not be loaded. Check the shipping catalog and retry.") from exc
+
+
+@router.get("/network", response_model=TransportNetwork)
+async def transport_network():
+    path = Path(__file__).resolve().parents[1] / "transport_network.json"
+    try:
+        return TransportNetwork.model_validate_json(path.read_text())
+    except (OSError, ValidationError) as exc:
+        raise HTTPException(503, "US transport reference could not be loaded. Try again shortly.") from exc

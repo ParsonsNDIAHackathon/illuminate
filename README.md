@@ -102,44 +102,70 @@ artifact viewer for metadata and raw GDELT data, and **Open source** uses the sh
 source viewer. News search results are previews and are not automatically saved as
 graph artifacts. Failed searches retain the previous labelled results.
 
-## Shipping routes on the map
+## Shipping, US highways and rail
 
-In **Map**, enable **Shipping**. Select a square port marker to filter route records
-using that port, or select a route line / **Inspect route** to review goods, linked
-supplier and customer, segment itinerary, evidence source, record date and notes.
-**Route evidence** filters confirmed (solid teal), inferred (dashed amber) and
-illustrative (dotted violet) records. Counts are records and unique linked suppliers /
-destinations, not shipment volumes. Routes follow the loaded graph scope and search;
-both entities and their exact directional `SUPPLIES` relationship must be loaded.
+In **Map**, enable **Shipping** for supplier-linked journeys. **US highways** and
+**US rail** are independent reference layers, available even when no supplier route
+is loaded. Use **US** to fit the contiguous United States; search **Find corridor or
+city**, then select a line or **Inspect US corridor** for its stops, source and notes.
+Blue lines are Interstates; dashed orange lines are freight rail corridors.
 
-The bundled catalog contains **two hypothetical alternatives** from Nagoya to Los
-Angeles or Oakland, linked to the demo SUBARU → V-22 relationship for demonstration.
-Neither route nor its example cargo is a claim about actual supplier logistics.
-Port positions and ocean waypoints are approximate. Inland legs, live AIS positions,
-schedules, travel times and automated disruption scoring are not included. News
-country mentions do not establish route disruptions, and the overlay does not change
-vendor risk scores or create graph assertions.
+The curated reference includes selected stretches of I-5, I-10, I-15, I-20, I-35,
+I-40, I-70, I-75, I-80, I-90 and I-95, plus BNSF Southern Transcon, Union Pacific
+Overland and Norfolk Southern Heartland connections. Geography is a schematic
+sequence of nearby cities, not surveyed road/track centerlines or a complete network.
+Highway coverage is Interstate-only; local streets, port access, drayage and final-mile
+roads are omitted. City/hub markers do not identify actual supplier facilities.
+The reference comes from [FHWA](https://www.fhwa.dot.gov/Planning/national_highway_system/),
+[BNSF](https://www.bnsf.com/ship-with-bnsf/maps-and-shipping-locations/index.page),
+[Union Pacific](https://www.up.com/aboutup/reference/maps/) and
+[Norfolk Southern](https://www.norfolksouthern.com/en/ship-by-rail/our-rail-network).
+No current closure, capacity, operating schedule or guaranteed through service is implied.
 
-`GET /api/shipping` serves the validated catalog. To use your own records, copy
-`api/illuminate/shipping_demo.json` to `api/data/shipping.json` (or `shipping.json`
-inside `ILLUMINATE_DATA_DIR`), replace its contents, and click **Refresh**. The override
-replaces the entire demo catalog; an explicit empty catalog disables the examples.
-A malformed override reports an error instead of silently falling back to demo data.
-The data directory is included in the existing backup workflow.
+### Supplier journeys
 
-Catalog format:
+Select a square port or circular inland hub to filter dependent route records.
+Select a journey to review its supplier/customer link, cargo, ordered ocean/truck/rail
+legs, corridor names, sources and record date. **Journey transport** selects whole
+journeys containing that mode, preserving connecting legs. **Route evidence** filters
+confirmed, inferred and illustrative records. Counts are journey records and unique
+suppliers/destinations, not shipment volumes. Both entities and their exact directional
+`SUPPLIES` relationship must be present in the loaded graph scope; supplier search
+also matches route modes, corridors and connection areas. Reference layers have their
+own search and are not evidence of supplier use.
 
-- `ports`: unique `id`, `name`, two-letter `country`, `latitude`, `longitude`.
-- `routes`: unique `id`, `name`, `supplier_id`, `customer_id`, `relationship_id`,
-  `goods`, `status`, `source: {title, reference}`, `updated_at` (ISO date), `notes`,
-  and an ordered, nonempty `segments` list.
-- Each segment has `from_port`, `to_port`, optional `waypoints` (latitude/longitude)
-  and optional `passages` (names). Adjacent segments must share a connecting port.
-  Pacific crossings are split at the date line when drawn.
+The demo has five **hypothetical alternatives**, all attached to the existing SUBARU
+→ V-22 supplier relationship: Nagoya–Los Angeles and Nagoya–Oakland ocean examples;
+a Los Angeles–Barstow–Oklahoma City–Chicago trucking continuation using I-10/I-15,
+I-40 and I-35/I-80; and two rail continuations to Chicago, via Union Pacific from
+Oakland and BNSF from Los Angeles. Neither cargo nor actual use of these lanes by
+SUBARU is verified. Chicago is a logistics connection area, not the V-22 delivery site.
+Connecting service, terminal transfers and final delivery are not modeled.
 
-Use **confirmed** only when a source documents that supplier's route and cargo;
-**inferred** requires an explanation of the inference in `notes`; **illustrative**
-is for scenarios without shipment evidence. `source.reference` can be an HTTP(S)
-evidence URL or a document reference. Status is supplied by the catalog author, not
-independently certified by the app. `updated_at` is the record's review date, not a
-vessel position or departure time. There is no catalog editing UI in this first version.
+`GET /api/shipping` serves the supplier catalog. Copy `api/illuminate/shipping_demo.json`
+to `api/data/shipping.json` (or `shipping.json` in `ILLUMINATE_DATA_DIR`), replace its
+contents and click **Refresh** to use your own records. The override replaces the demo;
+an empty catalog disables its examples. Invalid overrides report an error, retaining
+previously loaded UI records with a warning. There is no catalog editor in this version.
+`GET /api/shipping/network` separately serves the bundled US reference; overriding
+supplier records does not replace this reference. Both JSON assets ship in the API package.
+
+Catalog format (old ocean-only catalogs remain compatible):
+
+- `ports`: unique `id`, `name`, two-letter `country`, `latitude`, `longitude`, and optional
+  `kind` (`port`, `hub`, `intermodal`; defaults to `port`). The legacy `ports` key now
+  accommodates inland connection areas as well as seaports.
+- `routes`: unique `id`, `name`, `supplier_id`, `customer_id`, `relationship_id`, `goods`,
+  `status`, `source: {title, reference}`, `updated_at` (ISO date), `notes`, and ordered
+  nonempty `segments`.
+- Segments: `from_port`, `to_port`, optional `waypoints`, `passages`, `mode` (defaults
+  to `ocean`) and `source`. Domestic modes (`truck`, `rail`) require US endpoints,
+  corridor names and a source; truck names must be Interstate designations. Ocean
+  segments must connect ports. Adjacent legs must connect, and Pacific geometry is
+  split at the date line.
+
+Use **confirmed** only with shipment evidence, **inferred** with an explained inference,
+and **illustrative** for scenarios. A corridor reference documents infrastructure,
+not shipment evidence. Status is author supplied, not independently certified by the app.
+Dates are record review dates. The overlays do not create graph assertions or change
+vendor risk scores, and nearby news does not establish disruption of a route.

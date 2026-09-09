@@ -14,6 +14,7 @@
     <v-alert v-if="news.error" type="warning" variant="tonal" density="compact" class="mb-2 news-error" role="alert">
       {{ news.error }} <span v-if="news.result">Previous results are still shown below.</span>
     </v-alert>
+    <TransportControls @focus-us="zoom = 4.8; center = [253.5, 159]" />
     <div class="map-stage">
       <svg ref="svg" :viewBox="viewBox" class="world" aria-label="World map. Scroll to zoom, drag to pan, or select a marker to review its entities." @wheel.prevent="wheelZoom" @pointerdown="startPan" @pointermove="movePan" @pointerup="drag = null" @pointercancel="drag = null">
         <rect x="0" y="0" width="1080" height="540" class="ocean" />
@@ -24,6 +25,7 @@
             <text v-for="region in regionLabels" :key="`label:${region.id}`" :x="(region.longitude + 180) * 3" :y="(90 - region.latitude) * 3" :font-size="10.5 / (zoom * mapScale)" class="region-label">{{ region.name }}</text>
           </template>
         </g>
+        <TransportLayer />
         <g v-for="place in places" :key="place.key" :transform="`translate(${(place.longitude + 180) * 3},${(90 - place.latitude) * 3})`"
            class="marker" :class="{ active: selectedKey === place.key, precise: place.precise, regional: place.region, traced: traced(place) }" tabindex="0" role="button"
            :aria-label="`${place.name}: ${entityCount(place)} entities, ${place.precise ? 'supplied coordinates' : place.region ? 'state/province-level placement' : 'country-level placement'}`"
@@ -51,7 +53,7 @@
         <v-btn icon="mdi-minus" aria-label="Zoom out" size="small" :disabled="zoom <= 1" @click="zoom = Math.max(1, zoom - .5)" />
         <v-btn size="small" @click="zoom = 1; center = [540, 270]">Reset</v-btn>
       </v-btn-group>
-      <p v-if="!places.length && !(news.visible && newsData.places.length) && !(shipping.visible && shipping.routes.length)" class="map-empty" role="status">{{ graph.loading ? 'Loading locations…' : graph.filter ? 'No mapped entities match your search.' : 'No geographic locations in this graph scope. Try a deeper traversal or another program.' }}</p>
+      <p v-if="!places.length && !(news.visible && newsData.places.length) && !(shipping.visible && shipping.routes.length) && !transport.visible.length" class="map-empty" role="status">{{ graph.loading ? 'Loading locations…' : graph.filter ? 'No mapped entities match your search.' : 'No geographic locations in this graph scope. Try a deeper traversal or another program.' }}</p>
       <a class="attribution" href="https://www.naturalearthdata.com/about/terms-of-use/" target="_blank" rel="noopener">Natural Earth · illustrative boundaries</a>
     </div>
     <ShippingPanel />
@@ -90,6 +92,9 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import TransportControls from './TransportControls.vue'
+import TransportLayer from './TransportLayer.vue'
+import { useTransport } from '../stores/transport'
 import ShippingLayer from './ShippingLayer.vue'
 import ShippingPanel from './ShippingPanel.vue'
 import { useShipping } from '../stores/shipping'
@@ -108,6 +113,7 @@ const emit = defineEmits<{ select: []; 'select-news': [article: NewsArticle] }>(
 const selectedKey = ref('')
 const news = useNews()
 const shipping = useShipping()
+const transport = useTransport()
 const timeWindows = [{ title: 'Past 24 hours', value: '24h' }, { title: 'Past 3 days', value: '3d' }, { title: 'Past 7 days', value: '7d' }]
 const newsData = computed(() => mapNews(news.result?.articles || [], world))
 const newsArticles = computed(() => news.location === 'unplaced' ? newsData.value.unmapped

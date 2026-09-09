@@ -1,0 +1,1279 @@
+{
+  "corridors": [
+    {
+      "id": "i-5",
+      "name": "I-5",
+      "mode": "truck",
+      "stops": [
+        "San Diego",
+        "Los Angeles",
+        "Buttonwillow",
+        "Stockton",
+        "Sacramento",
+        "Redding",
+        "Medford",
+        "Eugene",
+        "Portland",
+        "Seattle"
+      ],
+      "points": [
+        {
+          "latitude": 32.72,
+          "longitude": -117.16
+        },
+        {
+          "latitude": 34.05,
+          "longitude": -118.24
+        },
+        {
+          "latitude": 35.4,
+          "longitude": -119.47
+        },
+        {
+          "latitude": 37.96,
+          "longitude": -121.29
+        },
+        {
+          "latitude": 38.58,
+          "longitude": -121.49
+        },
+        {
+          "latitude": 40.59,
+          "longitude": -122.39
+        },
+        {
+          "latitude": 42.33,
+          "longitude": -122.87
+        },
+        {
+          "latitude": 44.05,
+          "longitude": -123.09
+        },
+        {
+          "latitude": 45.52,
+          "longitude": -122.68
+        },
+        {
+          "latitude": 47.61,
+          "longitude": -122.33
+        }
+      ],
+      "source": {
+        "title": "FHWA \u2014 National Highway System maps",
+        "reference": "https://www.fhwa.dot.gov/Planning/national_highway_system/"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Selected mainline Interstate corridor, generalized through nearby cities. Not road-centerline geometry, a complete route inventory, or truck navigation. Local port access and final-mile roads are omitted."
+    },
+    {
+      "id": "i-10",
+      "name": "I-10",
+      "mode": "truck",
+      "stops": [
+        "Los Angeles",
+        "Indio",
+        "Phoenix",
+        "Tucson",
+        "Las Cruces",
+        "El Paso",
+        "Fort Stockton",
+        "San Antonio",
+        "Houston",
+        "Baton Rouge",
+        "New Orleans",
+        "Mobile",
+        "Pensacola",
+        "Tallahassee",
+        "Jacksonville"
+      ],
+      "points": [
+        {
+          "latitude": 34.05,
+          "longitude": -118.24
+        },
+        {
+          "latitude": 33.72,
+          "longitude": -116.22
+        },
+        {
+          "latitude": 33.45,
+          "longitude": -112.07
+        },
+        {
+          "latitude": 32.22,
+          "longitude": -110.97
+        },
+        {
+          "latitude": 32.32,
+          "longitude": -106.76
+        },
+        {
+          "latitude": 31.76,
+          "longitude": -106.49
+        },
+        {
+          "latitude": 30.89,
+          "longitude": -102.88
+        },
+        {
+          "latitude": 29.42,
+          "longitude": -98.49
+        },
+        {
+          "latitude": 29.76,
+          "longitude": -95.37
+        },
+        {
+          "latitude": 30.45,
+          "longitude": -91.19
+        },
+        {
+          "latitude": 29.95,
+          "longitude": -90.07
+        },
+        {
+          "latitude": 30.7,
+          "longitude": -88.04
+        },
+        {
+          "latitude": 30.42,
+          "longitude": -87.22
+        },
+        {
+          "latitude": 30.44,
+          "longitude": -84.28
+        },
+        {
+          "latitude": 30.33,
+          "longitude": -81.66
+        }
+      ],
+      "source": {
+        "title": "FHWA \u2014 National Highway System maps",
+        "reference": "https://www.fhwa.dot.gov/Planning/national_highway_system/"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Selected mainline Interstate corridor, generalized through nearby cities. Not road-centerline geometry, a complete route inventory, or truck navigation. Local port access and final-mile roads are omitted."
+    },
+    {
+      "id": "i-15",
+      "name": "I-15",
+      "mode": "truck",
+      "stops": [
+        "San Diego",
+        "Temecula",
+        "San Bernardino",
+        "Victorville",
+        "Barstow",
+        "Las Vegas",
+        "St George",
+        "Beaver",
+        "Provo",
+        "Salt Lake City",
+        "Pocatello",
+        "Idaho Falls",
+        "Butte",
+        "Great Falls",
+        "Sweetgrass"
+      ],
+      "points": [
+        {
+          "latitude": 32.72,
+          "longitude": -117.16
+        },
+        {
+          "latitude": 33.49,
+          "longitude": -117.15
+        },
+        {
+          "latitude": 34.11,
+          "longitude": -117.3
+        },
+        {
+          "latitude": 34.54,
+          "longitude": -117.29
+        },
+        {
+          "latitude": 34.9,
+          "longitude": -117.02
+        },
+        {
+          "latitude": 36.17,
+          "longitude": -115.14
+        },
+        {
+          "latitude": 37.1,
+          "longitude": -113.58
+        },
+        {
+          "latitude": 38.28,
+          "longitude": -112.64
+        },
+        {
+          "latitude": 40.23,
+          "longitude": -111.66
+        },
+        {
+          "latitude": 40.76,
+          "longitude": -111.89
+        },
+        {
+          "latitude": 42.87,
+          "longitude": -112.45
+        },
+        {
+          "latitude": 43.49,
+          "longitude": -112.04
+        },
+        {
+          "latitude": 46.0,
+          "longitude": -112.53
+        },
+        {
+          "latitude": 47.51,
+          "longitude": -111.3
+        },
+        {
+          "latitude": 49.0,
+          "longitude": -111.96
+        }
+      ],
+      "source": {
+        "title": "FHWA \u2014 National Highway System maps",
+        "reference": "https://www.fhwa.dot.gov/Planning/national_highway_system/"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Selected mainline Interstate corridor, generalized through nearby cities. Not road-centerline geometry, a complete route inventory, or truck navigation. Local port access and final-mile roads are omitted."
+    },
+    {
+      "id": "i-20",
+      "name": "I-20",
+      "mode": "truck",
+      "stops": [
+        "Dallas",
+        "Shreveport",
+        "Jackson",
+        "Birmingham",
+        "Atlanta",
+        "Augusta",
+        "Columbia",
+        "Florence"
+      ],
+      "points": [
+        {
+          "latitude": 32.78,
+          "longitude": -96.8
+        },
+        {
+          "latitude": 32.53,
+          "longitude": -93.75
+        },
+        {
+          "latitude": 32.3,
+          "longitude": -90.18
+        },
+        {
+          "latitude": 33.52,
+          "longitude": -86.8
+        },
+        {
+          "latitude": 33.75,
+          "longitude": -84.39
+        },
+        {
+          "latitude": 33.47,
+          "longitude": -81.97
+        },
+        {
+          "latitude": 34.0,
+          "longitude": -81.03
+        },
+        {
+          "latitude": 34.2,
+          "longitude": -79.77
+        }
+      ],
+      "source": {
+        "title": "FHWA \u2014 National Highway System maps",
+        "reference": "https://www.fhwa.dot.gov/Planning/national_highway_system/"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Selected mainline Interstate corridor, generalized through nearby cities. Not road-centerline geometry, a complete route inventory, or truck navigation. Local port access and final-mile roads are omitted."
+    },
+    {
+      "id": "i-35",
+      "name": "I-35",
+      "mode": "truck",
+      "stops": [
+        "Laredo",
+        "San Antonio",
+        "Austin",
+        "Waco",
+        "Dallas",
+        "Oklahoma City",
+        "Wichita",
+        "Emporia",
+        "Kansas City",
+        "Des Moines",
+        "Minneapolis",
+        "Duluth"
+      ],
+      "points": [
+        {
+          "latitude": 27.5,
+          "longitude": -99.51
+        },
+        {
+          "latitude": 29.42,
+          "longitude": -98.49
+        },
+        {
+          "latitude": 30.27,
+          "longitude": -97.74
+        },
+        {
+          "latitude": 31.55,
+          "longitude": -97.15
+        },
+        {
+          "latitude": 32.78,
+          "longitude": -96.8
+        },
+        {
+          "latitude": 35.47,
+          "longitude": -97.52
+        },
+        {
+          "latitude": 37.69,
+          "longitude": -97.34
+        },
+        {
+          "latitude": 38.4,
+          "longitude": -96.18
+        },
+        {
+          "latitude": 39.1,
+          "longitude": -94.58
+        },
+        {
+          "latitude": 41.59,
+          "longitude": -93.62
+        },
+        {
+          "latitude": 44.98,
+          "longitude": -93.27
+        },
+        {
+          "latitude": 46.79,
+          "longitude": -92.1
+        }
+      ],
+      "source": {
+        "title": "FHWA \u2014 National Highway System maps",
+        "reference": "https://www.fhwa.dot.gov/Planning/national_highway_system/"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Selected mainline Interstate corridor, generalized through nearby cities. Not road-centerline geometry, a complete route inventory, or truck navigation. Local port access and final-mile roads are omitted."
+    },
+    {
+      "id": "i-40",
+      "name": "I-40",
+      "mode": "truck",
+      "stops": [
+        "Barstow",
+        "Needles",
+        "Kingman",
+        "Flagstaff",
+        "Gallup",
+        "Albuquerque",
+        "Santa Rosa",
+        "Amarillo",
+        "Oklahoma City",
+        "Fort Smith",
+        "Little Rock",
+        "Memphis",
+        "Nashville",
+        "Knoxville",
+        "Asheville",
+        "Winston-Salem",
+        "Raleigh",
+        "Wilmington"
+      ],
+      "points": [
+        {
+          "latitude": 34.9,
+          "longitude": -117.02
+        },
+        {
+          "latitude": 34.85,
+          "longitude": -114.61
+        },
+        {
+          "latitude": 35.19,
+          "longitude": -114.05
+        },
+        {
+          "latitude": 35.2,
+          "longitude": -111.65
+        },
+        {
+          "latitude": 35.53,
+          "longitude": -108.74
+        },
+        {
+          "latitude": 35.08,
+          "longitude": -106.65
+        },
+        {
+          "latitude": 34.94,
+          "longitude": -104.68
+        },
+        {
+          "latitude": 35.22,
+          "longitude": -101.83
+        },
+        {
+          "latitude": 35.47,
+          "longitude": -97.52
+        },
+        {
+          "latitude": 35.39,
+          "longitude": -94.4
+        },
+        {
+          "latitude": 34.75,
+          "longitude": -92.29
+        },
+        {
+          "latitude": 35.15,
+          "longitude": -90.05
+        },
+        {
+          "latitude": 36.16,
+          "longitude": -86.78
+        },
+        {
+          "latitude": 35.96,
+          "longitude": -83.92
+        },
+        {
+          "latitude": 35.6,
+          "longitude": -82.55
+        },
+        {
+          "latitude": 36.1,
+          "longitude": -80.24
+        },
+        {
+          "latitude": 35.78,
+          "longitude": -78.64
+        },
+        {
+          "latitude": 34.23,
+          "longitude": -77.94
+        }
+      ],
+      "source": {
+        "title": "FHWA \u2014 National Highway System maps",
+        "reference": "https://www.fhwa.dot.gov/Planning/national_highway_system/"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Selected mainline Interstate corridor, generalized through nearby cities. Not road-centerline geometry, a complete route inventory, or truck navigation. Local port access and final-mile roads are omitted."
+    },
+    {
+      "id": "i-70",
+      "name": "I-70",
+      "mode": "truck",
+      "stops": [
+        "Cove Fort",
+        "Green River UT",
+        "Grand Junction",
+        "Glenwood Springs",
+        "Vail",
+        "Denver",
+        "Salina",
+        "Topeka",
+        "Kansas City",
+        "St Louis",
+        "Indianapolis",
+        "Dayton",
+        "Columbus",
+        "Wheeling",
+        "Washington PA",
+        "New Stanton",
+        "Breezewood",
+        "Hagerstown",
+        "Frederick",
+        "Baltimore"
+      ],
+      "points": [
+        {
+          "latitude": 38.6,
+          "longitude": -112.53
+        },
+        {
+          "latitude": 38.99,
+          "longitude": -110.16
+        },
+        {
+          "latitude": 39.06,
+          "longitude": -108.55
+        },
+        {
+          "latitude": 39.55,
+          "longitude": -107.32
+        },
+        {
+          "latitude": 39.64,
+          "longitude": -106.37
+        },
+        {
+          "latitude": 39.74,
+          "longitude": -104.99
+        },
+        {
+          "latitude": 38.84,
+          "longitude": -97.61
+        },
+        {
+          "latitude": 39.05,
+          "longitude": -95.68
+        },
+        {
+          "latitude": 39.1,
+          "longitude": -94.58
+        },
+        {
+          "latitude": 38.63,
+          "longitude": -90.2
+        },
+        {
+          "latitude": 39.77,
+          "longitude": -86.16
+        },
+        {
+          "latitude": 39.76,
+          "longitude": -84.19
+        },
+        {
+          "latitude": 39.96,
+          "longitude": -83.0
+        },
+        {
+          "latitude": 40.06,
+          "longitude": -80.72
+        },
+        {
+          "latitude": 40.17,
+          "longitude": -80.25
+        },
+        {
+          "latitude": 40.22,
+          "longitude": -79.61
+        },
+        {
+          "latitude": 40.0,
+          "longitude": -78.24
+        },
+        {
+          "latitude": 39.64,
+          "longitude": -77.72
+        },
+        {
+          "latitude": 39.41,
+          "longitude": -77.41
+        },
+        {
+          "latitude": 39.29,
+          "longitude": -76.61
+        }
+      ],
+      "source": {
+        "title": "FHWA \u2014 National Highway System maps",
+        "reference": "https://www.fhwa.dot.gov/Planning/national_highway_system/"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Selected mainline Interstate corridor, generalized through nearby cities. Not road-centerline geometry, a complete route inventory, or truck navigation. Local port access and final-mile roads are omitted."
+    },
+    {
+      "id": "i-75",
+      "name": "I-75",
+      "mode": "truck",
+      "stops": [
+        "Fort Lauderdale",
+        "Naples",
+        "Fort Myers",
+        "Tampa",
+        "Ocala",
+        "Gainesville",
+        "Macon",
+        "Atlanta",
+        "Chattanooga",
+        "Knoxville",
+        "Lexington",
+        "Cincinnati",
+        "Dayton",
+        "Toledo",
+        "Detroit",
+        "Flint",
+        "Saginaw",
+        "Mackinaw City",
+        "Sault Ste Marie"
+      ],
+      "points": [
+        {
+          "latitude": 26.12,
+          "longitude": -80.14
+        },
+        {
+          "latitude": 26.14,
+          "longitude": -81.79
+        },
+        {
+          "latitude": 26.64,
+          "longitude": -81.87
+        },
+        {
+          "latitude": 27.95,
+          "longitude": -82.46
+        },
+        {
+          "latitude": 29.19,
+          "longitude": -82.14
+        },
+        {
+          "latitude": 29.65,
+          "longitude": -82.32
+        },
+        {
+          "latitude": 32.84,
+          "longitude": -83.63
+        },
+        {
+          "latitude": 33.75,
+          "longitude": -84.39
+        },
+        {
+          "latitude": 35.05,
+          "longitude": -85.31
+        },
+        {
+          "latitude": 35.96,
+          "longitude": -83.92
+        },
+        {
+          "latitude": 38.04,
+          "longitude": -84.5
+        },
+        {
+          "latitude": 39.1,
+          "longitude": -84.51
+        },
+        {
+          "latitude": 39.76,
+          "longitude": -84.19
+        },
+        {
+          "latitude": 41.65,
+          "longitude": -83.54
+        },
+        {
+          "latitude": 42.33,
+          "longitude": -83.05
+        },
+        {
+          "latitude": 43.01,
+          "longitude": -83.69
+        },
+        {
+          "latitude": 43.42,
+          "longitude": -83.95
+        },
+        {
+          "latitude": 45.78,
+          "longitude": -84.73
+        },
+        {
+          "latitude": 46.5,
+          "longitude": -84.35
+        }
+      ],
+      "source": {
+        "title": "FHWA \u2014 National Highway System maps",
+        "reference": "https://www.fhwa.dot.gov/Planning/national_highway_system/"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Selected mainline Interstate corridor, generalized through nearby cities. Not road-centerline geometry, a complete route inventory, or truck navigation. Local port access and final-mile roads are omitted."
+    },
+    {
+      "id": "i-80",
+      "name": "I-80",
+      "mode": "truck",
+      "stops": [
+        "Oakland",
+        "Sacramento",
+        "Reno",
+        "Winnemucca",
+        "Elko",
+        "Salt Lake City",
+        "Rock Springs",
+        "Cheyenne",
+        "North Platte",
+        "Omaha",
+        "Des Moines",
+        "Davenport",
+        "Chicago",
+        "Toledo",
+        "Northern Ohio",
+        "Youngstown",
+        "Clarion",
+        "Clearfield",
+        "Bellefonte",
+        "White Haven",
+        "Delaware Water Gap",
+        "Teaneck NJ"
+      ],
+      "points": [
+        {
+          "latitude": 37.8,
+          "longitude": -122.27
+        },
+        {
+          "latitude": 38.58,
+          "longitude": -121.49
+        },
+        {
+          "latitude": 39.53,
+          "longitude": -119.81
+        },
+        {
+          "latitude": 40.97,
+          "longitude": -117.74
+        },
+        {
+          "latitude": 40.83,
+          "longitude": -115.76
+        },
+        {
+          "latitude": 40.76,
+          "longitude": -111.89
+        },
+        {
+          "latitude": 41.59,
+          "longitude": -109.2
+        },
+        {
+          "latitude": 41.14,
+          "longitude": -104.82
+        },
+        {
+          "latitude": 41.14,
+          "longitude": -100.76
+        },
+        {
+          "latitude": 41.26,
+          "longitude": -95.94
+        },
+        {
+          "latitude": 41.59,
+          "longitude": -93.62
+        },
+        {
+          "latitude": 41.52,
+          "longitude": -90.58
+        },
+        {
+          "latitude": 41.88,
+          "longitude": -87.63
+        },
+        {
+          "latitude": 41.65,
+          "longitude": -83.54
+        },
+        {
+          "latitude": 41.39,
+          "longitude": -82.02
+        },
+        {
+          "latitude": 41.1,
+          "longitude": -80.65
+        },
+        {
+          "latitude": 41.21,
+          "longitude": -79.39
+        },
+        {
+          "latitude": 41.03,
+          "longitude": -78.44
+        },
+        {
+          "latitude": 40.91,
+          "longitude": -77.78
+        },
+        {
+          "latitude": 41.06,
+          "longitude": -75.77
+        },
+        {
+          "latitude": 40.98,
+          "longitude": -75.14
+        },
+        {
+          "latitude": 40.9,
+          "longitude": -74.0
+        }
+      ],
+      "source": {
+        "title": "FHWA \u2014 National Highway System maps",
+        "reference": "https://www.fhwa.dot.gov/Planning/national_highway_system/"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Selected mainline Interstate corridor, generalized through nearby cities. Not road-centerline geometry, a complete route inventory, or truck navigation. Local port access and final-mile roads are omitted."
+    },
+    {
+      "id": "i-90",
+      "name": "I-90",
+      "mode": "truck",
+      "stops": [
+        "Seattle",
+        "Spokane",
+        "Missoula",
+        "Butte",
+        "Billings",
+        "Rapid City",
+        "Sioux Falls",
+        "Albert Lea",
+        "La Crosse",
+        "Madison",
+        "Rockford",
+        "Chicago",
+        "South Bend",
+        "Toledo",
+        "Cleveland",
+        "Erie",
+        "Buffalo",
+        "Syracuse",
+        "Albany",
+        "Boston"
+      ],
+      "points": [
+        {
+          "latitude": 47.61,
+          "longitude": -122.33
+        },
+        {
+          "latitude": 47.66,
+          "longitude": -117.43
+        },
+        {
+          "latitude": 46.87,
+          "longitude": -114.0
+        },
+        {
+          "latitude": 46.0,
+          "longitude": -112.53
+        },
+        {
+          "latitude": 45.78,
+          "longitude": -108.5
+        },
+        {
+          "latitude": 44.08,
+          "longitude": -103.23
+        },
+        {
+          "latitude": 43.55,
+          "longitude": -96.73
+        },
+        {
+          "latitude": 43.65,
+          "longitude": -93.37
+        },
+        {
+          "latitude": 43.8,
+          "longitude": -91.24
+        },
+        {
+          "latitude": 43.07,
+          "longitude": -89.4
+        },
+        {
+          "latitude": 42.27,
+          "longitude": -89.09
+        },
+        {
+          "latitude": 41.88,
+          "longitude": -87.63
+        },
+        {
+          "latitude": 41.68,
+          "longitude": -86.25
+        },
+        {
+          "latitude": 41.65,
+          "longitude": -83.54
+        },
+        {
+          "latitude": 41.5,
+          "longitude": -81.69
+        },
+        {
+          "latitude": 42.13,
+          "longitude": -80.09
+        },
+        {
+          "latitude": 42.89,
+          "longitude": -78.88
+        },
+        {
+          "latitude": 43.05,
+          "longitude": -76.15
+        },
+        {
+          "latitude": 42.65,
+          "longitude": -73.75
+        },
+        {
+          "latitude": 42.36,
+          "longitude": -71.06
+        }
+      ],
+      "source": {
+        "title": "FHWA \u2014 National Highway System maps",
+        "reference": "https://www.fhwa.dot.gov/Planning/national_highway_system/"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Selected mainline Interstate corridor, generalized through nearby cities. Not road-centerline geometry, a complete route inventory, or truck navigation. Local port access and final-mile roads are omitted."
+    },
+    {
+      "id": "i-95",
+      "name": "I-95",
+      "mode": "truck",
+      "stops": [
+        "Miami",
+        "West Palm Beach",
+        "Daytona Beach",
+        "Jacksonville",
+        "Savannah",
+        "Florence",
+        "Fayetteville",
+        "Richmond",
+        "Washington",
+        "Baltimore",
+        "Philadelphia",
+        "New York",
+        "New Haven",
+        "Providence",
+        "Boston",
+        "Portsmouth",
+        "Portland ME",
+        "Bangor",
+        "Houlton"
+      ],
+      "points": [
+        {
+          "latitude": 25.76,
+          "longitude": -80.19
+        },
+        {
+          "latitude": 26.72,
+          "longitude": -80.05
+        },
+        {
+          "latitude": 29.21,
+          "longitude": -81.02
+        },
+        {
+          "latitude": 30.33,
+          "longitude": -81.66
+        },
+        {
+          "latitude": 32.08,
+          "longitude": -81.09
+        },
+        {
+          "latitude": 34.2,
+          "longitude": -79.77
+        },
+        {
+          "latitude": 35.05,
+          "longitude": -78.88
+        },
+        {
+          "latitude": 37.54,
+          "longitude": -77.44
+        },
+        {
+          "latitude": 38.91,
+          "longitude": -77.04
+        },
+        {
+          "latitude": 39.29,
+          "longitude": -76.61
+        },
+        {
+          "latitude": 39.95,
+          "longitude": -75.17
+        },
+        {
+          "latitude": 40.71,
+          "longitude": -74.01
+        },
+        {
+          "latitude": 41.31,
+          "longitude": -72.93
+        },
+        {
+          "latitude": 41.82,
+          "longitude": -71.41
+        },
+        {
+          "latitude": 42.36,
+          "longitude": -71.06
+        },
+        {
+          "latitude": 43.07,
+          "longitude": -70.76
+        },
+        {
+          "latitude": 43.66,
+          "longitude": -70.26
+        },
+        {
+          "latitude": 44.8,
+          "longitude": -68.77
+        },
+        {
+          "latitude": 46.12,
+          "longitude": -67.84
+        }
+      ],
+      "source": {
+        "title": "FHWA \u2014 National Highway System maps",
+        "reference": "https://www.fhwa.dot.gov/Planning/national_highway_system/"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Selected mainline Interstate corridor, generalized through nearby cities. Not road-centerline geometry, a complete route inventory, or truck navigation. Local port access and final-mile roads are omitted."
+    },
+    {
+      "id": "rail-bnsf-transcon",
+      "name": "BNSF Southern Transcon",
+      "mode": "rail",
+      "stops": [
+        "Los Angeles",
+        "Barstow",
+        "Winslow",
+        "Belen",
+        "Clovis",
+        "Amarillo",
+        "Wellington",
+        "Emporia",
+        "Kansas City",
+        "Fort Madison",
+        "Galesburg",
+        "Chicago"
+      ],
+      "points": [
+        {
+          "latitude": 34.05,
+          "longitude": -118.24
+        },
+        {
+          "latitude": 34.9,
+          "longitude": -117.02
+        },
+        {
+          "latitude": 35.02,
+          "longitude": -110.7
+        },
+        {
+          "latitude": 34.66,
+          "longitude": -106.78
+        },
+        {
+          "latitude": 34.4,
+          "longitude": -103.2
+        },
+        {
+          "latitude": 35.22,
+          "longitude": -101.83
+        },
+        {
+          "latitude": 37.27,
+          "longitude": -97.37
+        },
+        {
+          "latitude": 38.4,
+          "longitude": -96.18
+        },
+        {
+          "latitude": 39.1,
+          "longitude": -94.58
+        },
+        {
+          "latitude": 40.63,
+          "longitude": -91.32
+        },
+        {
+          "latitude": 40.95,
+          "longitude": -90.37
+        },
+        {
+          "latitude": 41.88,
+          "longitude": -87.63
+        }
+      ],
+      "source": {
+        "title": "BNSF \u2014 network maps",
+        "reference": "https://www.bnsf.com/ship-with-bnsf/maps-and-shipping-locations/index.page"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Generalized freight corridor based on the railroad network reference. City markers are connection areas, not exact ramps. Does not verify through service, interchange access, capacity, schedules, or use by a particular supplier."
+    },
+    {
+      "id": "rail-up-overland",
+      "name": "Union Pacific Overland corridor",
+      "mode": "rail",
+      "stops": [
+        "Oakland",
+        "Sacramento",
+        "Reno",
+        "Winnemucca",
+        "Elko",
+        "Ogden",
+        "Green River",
+        "Cheyenne",
+        "North Platte",
+        "Omaha",
+        "Clinton",
+        "Rochelle",
+        "Chicago"
+      ],
+      "points": [
+        {
+          "latitude": 37.8,
+          "longitude": -122.27
+        },
+        {
+          "latitude": 38.58,
+          "longitude": -121.49
+        },
+        {
+          "latitude": 39.53,
+          "longitude": -119.81
+        },
+        {
+          "latitude": 40.97,
+          "longitude": -117.74
+        },
+        {
+          "latitude": 40.83,
+          "longitude": -115.76
+        },
+        {
+          "latitude": 41.22,
+          "longitude": -111.97
+        },
+        {
+          "latitude": 41.53,
+          "longitude": -109.47
+        },
+        {
+          "latitude": 41.14,
+          "longitude": -104.82
+        },
+        {
+          "latitude": 41.14,
+          "longitude": -100.76
+        },
+        {
+          "latitude": 41.26,
+          "longitude": -95.94
+        },
+        {
+          "latitude": 41.84,
+          "longitude": -90.19
+        },
+        {
+          "latitude": 41.92,
+          "longitude": -89.07
+        },
+        {
+          "latitude": 41.88,
+          "longitude": -87.63
+        }
+      ],
+      "source": {
+        "title": "Union Pacific \u2014 system maps",
+        "reference": "https://www.up.com/aboutup/reference/maps/"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Generalized freight corridor based on the railroad network reference. City markers are connection areas, not exact ramps. Does not verify through service, interchange access, capacity, schedules, or use by a particular supplier."
+    },
+    {
+      "id": "rail-ns-heartland",
+      "name": "Norfolk Southern Heartland corridor",
+      "mode": "rail",
+      "stops": [
+        "Norfolk",
+        "Petersburg",
+        "Lynchburg",
+        "Roanoke",
+        "Bluefield",
+        "Portsmouth OH",
+        "Columbus",
+        "Bellevue",
+        "Fort Wayne",
+        "Chicago"
+      ],
+      "points": [
+        {
+          "latitude": 36.85,
+          "longitude": -76.29
+        },
+        {
+          "latitude": 37.23,
+          "longitude": -77.4
+        },
+        {
+          "latitude": 37.41,
+          "longitude": -79.14
+        },
+        {
+          "latitude": 37.27,
+          "longitude": -79.94
+        },
+        {
+          "latitude": 37.27,
+          "longitude": -81.22
+        },
+        {
+          "latitude": 38.73,
+          "longitude": -82.997
+        },
+        {
+          "latitude": 39.96,
+          "longitude": -83.0
+        },
+        {
+          "latitude": 41.27,
+          "longitude": -82.84
+        },
+        {
+          "latitude": 41.08,
+          "longitude": -85.14
+        },
+        {
+          "latitude": 41.88,
+          "longitude": -87.63
+        }
+      ],
+      "source": {
+        "title": "Norfolk Southern \u2014 rail network",
+        "reference": "https://www.norfolksouthern.com/en/ship-by-rail/our-rail-network"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Generalized freight corridor based on the railroad network reference. City markers are connection areas, not exact ramps. Does not verify through service, interchange access, capacity, schedules, or use by a particular supplier."
+    }
+  ]
+}

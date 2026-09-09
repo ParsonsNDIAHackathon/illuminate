@@ -9,11 +9,12 @@
     <p v-if="shipping.routes.some(x => x.route.status === 'illustrative')" class="shipping-notice">Illustrative routes are hypothetical examples, not evidence of actual shipments. Alternative records do not represent separate shipments.</p>
     <div class="shipping-controls">
       <v-select v-model="shipping.status" :items="statuses" label="Route evidence" density="compact" variant="outlined" hide-details />
-      <v-select v-model="shipping.port" :items="ports" label="Port dependency" density="compact" variant="outlined" hide-details />
+      <v-select v-model="shipping.mode" :items="modes" label="Journey transport" density="compact" variant="outlined" hide-details />
+      <v-select v-model="shipping.port" :items="ports" label="Port / hub dependency" density="compact" variant="outlined" hide-details />
       <v-select :model-value="shipping.selectedId" :items="routeOptions" label="Inspect route" density="compact" variant="outlined" hide-details @update:model-value="shipping.select($event)" />
     </div>
-    <p v-if="!shipping.loading && !shipping.routes.length" role="status" class="shipping-notice">{{ shipping.error ? 'No shipping records available.' : 'No linked routes match this graph scope and filters. Try Everything, clear search, or change the evidence and port filters.' }}</p>
-    <p v-else class="shipping-legend">Solid teal: confirmed · Dashed amber: inferred · Dotted violet: illustrative. Lines show approximate ocean corridors, not live vessel tracks.</p>
+    <p v-if="!shipping.loading && !shipping.routes.length" role="status" class="shipping-notice">{{ shipping.error ? 'No shipping records available.' : 'No linked routes match this graph scope and filters. Try Everything, clear search, or change the evidence, transport and port filters.' }}</p>
+    <p v-else class="shipping-legend">Solid teal: confirmed · Dashed amber: inferred · Dotted violet: illustrative. Transport filters select whole journeys, including connecting legs. Paths are schematic, not live vehicle tracks.</p>
     <v-dialog :model-value="!!shipping.selected" max-width="660" @update:model-value="!$event && shipping.select('')">
       <v-card v-if="shipping.selected" class="route-card">
         <v-card-title class="route-title">{{ shipping.selected.route.name }}</v-card-title>
@@ -23,7 +24,7 @@
           <p class="text-caption mt-1">Linked SUPPLIES relationship. Route evidence is separate from evidence of the supplier relationship.</p>
           <dl class="route-facts">
             <dt>Goods</dt><dd>{{ shipping.selected.route.goods }}</dd>
-            <dt>Journey</dt><dd><div v-for="(segment, i) in shipping.selected.route.segments" :key="i">{{ portName(segment.from_port) }} → {{ portName(segment.to_port) }}<span v-if="segment.passages.length"> · {{ segment.passages.join(', ') }}</span></div></dd>
+            <dt>Journey</dt><dd><div v-for="(segment, i) in shipping.selected.route.segments" :key="i"><strong>{{ modeName(segment.mode) }}</strong> · {{ portName(segment.from_port) }} → {{ portName(segment.to_port) }}<span v-if="segment.passages.length"> · {{ segment.passages.join(', ') }}</span><p v-if="segment.source" class="text-caption"><a v-if="safeSourceLink(segment.source.reference)" :href="safeSourceLink(segment.source.reference)" target="_blank" rel="noopener noreferrer">{{ segment.source.title }} ↗</a><span v-else>{{ segment.source.title }} · {{ segment.source.reference }}</span> · Corridor reference, not shipment evidence</p></div></dd>
             <dt>Source</dt><dd>{{ shipping.selected.route.source.title }}<br><a v-if="sourceLink" :href="sourceLink" target="_blank" rel="noopener noreferrer">Open route evidence ↗</a><span v-else>{{ shipping.selected.route.source.reference }}</span></dd>
             <dt>Updated</dt><dd>{{ shipping.selected.route.updated_at }} · Record date, not a live position</dd>
             <dt>Evidence notes</dt><dd>{{ shipping.selected.route.notes }}</dd>
@@ -43,10 +44,12 @@
 import { computed, onMounted, watch } from 'vue'
 import { useShipping } from '../stores/shipping'
 import { useGraph } from '../stores/graph'
-import { usesPort } from '../shippingMap'
+import { usesPort, safeSourceLink } from '../shippingMap'
 const shipping = useShipping(), graph = useGraph()
+const modes = [{ title: 'All transport', value: '' }, { title: 'Includes ocean', value: 'ocean' }, { title: 'Includes trucking', value: 'truck' }, { title: 'Includes rail', value: 'rail' }]
+function modeName(mode?: string) { return mode === 'truck' ? 'Truck' : mode === 'rail' ? 'Rail' : 'Ocean' }
 const statuses = [{ title: 'All evidence', value: '' }, { title: 'Confirmed', value: 'confirmed' }, { title: 'Inferred', value: 'inferred' }, { title: 'Illustrative', value: 'illustrative' }]
-const ports = computed(() => [{ title: 'All ports', value: '' }, ...shipping.ports.map(p => ({ title: `${p.name} (${shipping.filtered.filter(x => usesPort(x.route, p.id)).length})`, value: p.id }))])
+const ports = computed(() => [{ title: 'All ports & hubs', value: '' }, ...shipping.ports.map(p => ({ title: `${p.name} (${shipping.filtered.filter(x => usesPort(x.route, p.id)).length})`, value: p.id }))])
 const routeOptions = computed(() => [{ title: 'Select a route', value: '' }, ...shipping.routes.map(x => ({ title: `${x.route.name} · ${x.route.status}`, value: x.route.id }))])
 const suppliers = computed(() => new Set(shipping.routes.map(x => x.supplier.id)).size)
 const customers = computed(() => new Set(shipping.routes.map(x => x.customer.id)).size)
@@ -64,8 +67,8 @@ onMounted(() => { if (!shipping.attempted) shipping.load() })
 .shipping-panel { flex-shrink:0; padding:10px 0 4px; border-bottom:1px solid rgba(128,128,128,.25); }
 .shipping-heading { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:12px; }
 .shipping-heading span { opacity:.75; font-size:11px; }
-.shipping-controls { display:flex; gap:8px; margin-top:8px; }
-.shipping-controls > * { min-width:0; flex:1; }
+.shipping-controls { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+.shipping-controls > * { min-width:150px; flex:1; }
 .shipping-controls > :last-child { flex:1.6; }
 .shipping-notice,.shipping-legend { font-size:11px; margin-top:6px; line-height:1.5; }
 .shipping-notice { color:rgb(var(--v-theme-warning)); }

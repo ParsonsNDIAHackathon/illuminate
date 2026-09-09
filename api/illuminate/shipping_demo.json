@@ -20,6 +20,30 @@
       "country": "US",
       "latitude": 37.8,
       "longitude": -122.32
+    },
+    {
+      "id": "barstow",
+      "name": "Barstow connection area",
+      "country": "US",
+      "kind": "hub",
+      "latitude": 34.9,
+      "longitude": -117.02
+    },
+    {
+      "id": "oklahoma-city",
+      "name": "Oklahoma City connection area",
+      "country": "US",
+      "kind": "hub",
+      "latitude": 35.47,
+      "longitude": -97.52
+    },
+    {
+      "id": "chicago",
+      "name": "Chicago connection area",
+      "country": "US",
+      "kind": "hub",
+      "latitude": 41.88,
+      "longitude": -87.63
     }
   ],
   "routes": [
@@ -65,7 +89,8 @@
           ],
           "passages": [
             "North Pacific"
-          ]
+          ],
+          "mode": "ocean"
         }
       ]
     },
@@ -111,7 +136,369 @@
           ],
           "passages": [
             "North Pacific"
-          ]
+          ],
+          "mode": "ocean"
+        }
+      ]
+    },
+    {
+      "id": "demo-pacific-truck",
+      "name": "Port to Midwest \u00b7 major Interstate example",
+      "supplier_id": "ent_8e865930d2f5",
+      "customer_id": "ent_6484d4d13b76",
+      "relationship_id": "rel_e7f7822cde4b",
+      "goods": "Example aircraft components \u2014 cargo unverified",
+      "status": "illustrative",
+      "source": {
+        "title": "Illuminate shipping demonstration",
+        "reference": "Bundled shipping_demo.json; authored scenario, no shipment evidence"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Illustrative logistics alternative for the existing demo supplier relationship, not an actual SUBARU shipment. Domestic endpoints are approximate connection areas, not known supplier facilities or the program delivery address. Geometry omits local port access, drayage and final-mile delivery. Highway and railroad references support corridor context only, not this supplier journey.",
+      "segments": [
+        {
+          "from_port": "nagoya",
+          "to_port": "los-angeles",
+          "waypoints": [
+            {
+              "latitude": 31,
+              "longitude": 142
+            },
+            {
+              "latitude": 28,
+              "longitude": 165
+            },
+            {
+              "latitude": 28,
+              "longitude": -170
+            },
+            {
+              "latitude": 30,
+              "longitude": -140
+            },
+            {
+              "latitude": 32,
+              "longitude": -122
+            }
+          ],
+          "passages": [
+            "North Pacific"
+          ],
+          "mode": "ocean"
+        },
+        {
+          "from_port": "los-angeles",
+          "to_port": "barstow",
+          "mode": "truck",
+          "waypoints": [
+            {
+              "latitude": 34.05,
+              "longitude": -118.24
+            },
+            {
+              "latitude": 34.06,
+              "longitude": -117.65
+            },
+            {
+              "latitude": 34.31,
+              "longitude": -117.47
+            },
+            {
+              "latitude": 34.54,
+              "longitude": -117.29
+            }
+          ],
+          "passages": [
+            "I-10",
+            "I-15"
+          ],
+          "source": {
+            "title": "FHWA \u2014 National Highway System maps",
+            "reference": "https://www.fhwa.dot.gov/Planning/national_highway_system/"
+          }
+        },
+        {
+          "from_port": "barstow",
+          "to_port": "oklahoma-city",
+          "mode": "truck",
+          "waypoints": [
+            {
+              "latitude": 34.85,
+              "longitude": -114.61
+            },
+            {
+              "latitude": 35.19,
+              "longitude": -114.05
+            },
+            {
+              "latitude": 35.2,
+              "longitude": -111.65
+            },
+            {
+              "latitude": 35.53,
+              "longitude": -108.74
+            },
+            {
+              "latitude": 35.08,
+              "longitude": -106.65
+            },
+            {
+              "latitude": 34.94,
+              "longitude": -104.68
+            },
+            {
+              "latitude": 35.22,
+              "longitude": -101.83
+            }
+          ],
+          "passages": [
+            "I-40"
+          ],
+          "source": {
+            "title": "FHWA \u2014 National Highway System maps",
+            "reference": "https://www.fhwa.dot.gov/Planning/national_highway_system/"
+          }
+        },
+        {
+          "from_port": "oklahoma-city",
+          "to_port": "chicago",
+          "mode": "truck",
+          "waypoints": [
+            {
+              "latitude": 37.69,
+              "longitude": -97.34
+            },
+            {
+              "latitude": 38.4,
+              "longitude": -96.18
+            },
+            {
+              "latitude": 39.1,
+              "longitude": -94.58
+            },
+            {
+              "latitude": 41.59,
+              "longitude": -93.62
+            },
+            {
+              "latitude": 41.52,
+              "longitude": -90.58
+            }
+          ],
+          "passages": [
+            "I-35",
+            "I-80"
+          ],
+          "source": {
+            "title": "FHWA \u2014 National Highway System maps",
+            "reference": "https://www.fhwa.dot.gov/Planning/national_highway_system/"
+          }
+        }
+      ]
+    },
+    {
+      "id": "demo-pacific-rail",
+      "name": "Oakland to Chicago \u00b7 rail connection example",
+      "supplier_id": "ent_8e865930d2f5",
+      "customer_id": "ent_6484d4d13b76",
+      "relationship_id": "rel_e7f7822cde4b",
+      "goods": "Example aircraft components \u2014 cargo unverified",
+      "status": "illustrative",
+      "source": {
+        "title": "Illuminate shipping demonstration",
+        "reference": "Bundled shipping_demo.json; authored scenario, no shipment evidence"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Illustrative logistics alternative for the existing demo supplier relationship, not an actual SUBARU shipment. Domestic endpoints are approximate connection areas, not known supplier facilities or the program delivery address. Geometry omits local port access, drayage and final-mile delivery. Highway and railroad references support corridor context only, not this supplier journey.",
+      "segments": [
+        {
+          "from_port": "nagoya",
+          "to_port": "oakland",
+          "waypoints": [
+            {
+              "latitude": 31,
+              "longitude": 142
+            },
+            {
+              "latitude": 35,
+              "longitude": 165
+            },
+            {
+              "latitude": 38,
+              "longitude": -170
+            },
+            {
+              "latitude": 38,
+              "longitude": -145
+            },
+            {
+              "latitude": 37,
+              "longitude": -125
+            }
+          ],
+          "passages": [
+            "North Pacific"
+          ],
+          "mode": "ocean"
+        },
+        {
+          "from_port": "oakland",
+          "to_port": "chicago",
+          "mode": "rail",
+          "waypoints": [
+            {
+              "latitude": 38.58,
+              "longitude": -121.49
+            },
+            {
+              "latitude": 39.53,
+              "longitude": -119.81
+            },
+            {
+              "latitude": 40.97,
+              "longitude": -117.74
+            },
+            {
+              "latitude": 40.83,
+              "longitude": -115.76
+            },
+            {
+              "latitude": 41.22,
+              "longitude": -111.97
+            },
+            {
+              "latitude": 41.53,
+              "longitude": -109.47
+            },
+            {
+              "latitude": 41.14,
+              "longitude": -104.82
+            },
+            {
+              "latitude": 41.14,
+              "longitude": -100.76
+            },
+            {
+              "latitude": 41.26,
+              "longitude": -95.94
+            },
+            {
+              "latitude": 41.84,
+              "longitude": -90.19
+            },
+            {
+              "latitude": 41.92,
+              "longitude": -89.07
+            }
+          ],
+          "passages": [
+            "Union Pacific Overland corridor"
+          ],
+          "source": {
+            "title": "Union Pacific \u2014 system maps",
+            "reference": "https://www.up.com/aboutup/reference/maps/"
+          }
+        }
+      ]
+    },
+    {
+      "id": "demo-pacific-bnsf",
+      "name": "Los Angeles to Chicago \u00b7 rail connection example",
+      "supplier_id": "ent_8e865930d2f5",
+      "customer_id": "ent_6484d4d13b76",
+      "relationship_id": "rel_e7f7822cde4b",
+      "goods": "Example aircraft components \u2014 cargo unverified",
+      "status": "illustrative",
+      "source": {
+        "title": "Illuminate shipping demonstration",
+        "reference": "Bundled shipping_demo.json; authored scenario, no shipment evidence"
+      },
+      "updated_at": "2026-09-09",
+      "notes": "Illustrative logistics alternative for the existing demo supplier relationship, not an actual SUBARU shipment. Domestic endpoints are approximate connection areas, not known supplier facilities or the program delivery address. Geometry omits local port access, drayage and final-mile delivery. Highway and railroad references support corridor context only, not this supplier journey.",
+      "segments": [
+        {
+          "from_port": "nagoya",
+          "to_port": "los-angeles",
+          "waypoints": [
+            {
+              "latitude": 31,
+              "longitude": 142
+            },
+            {
+              "latitude": 28,
+              "longitude": 165
+            },
+            {
+              "latitude": 28,
+              "longitude": -170
+            },
+            {
+              "latitude": 30,
+              "longitude": -140
+            },
+            {
+              "latitude": 32,
+              "longitude": -122
+            }
+          ],
+          "passages": [
+            "North Pacific"
+          ],
+          "mode": "ocean"
+        },
+        {
+          "from_port": "los-angeles",
+          "to_port": "chicago",
+          "mode": "rail",
+          "waypoints": [
+            {
+              "latitude": 34.9,
+              "longitude": -117.02
+            },
+            {
+              "latitude": 35.02,
+              "longitude": -110.7
+            },
+            {
+              "latitude": 34.66,
+              "longitude": -106.78
+            },
+            {
+              "latitude": 34.4,
+              "longitude": -103.2
+            },
+            {
+              "latitude": 35.22,
+              "longitude": -101.83
+            },
+            {
+              "latitude": 37.27,
+              "longitude": -97.37
+            },
+            {
+              "latitude": 38.4,
+              "longitude": -96.18
+            },
+            {
+              "latitude": 39.1,
+              "longitude": -94.58
+            },
+            {
+              "latitude": 40.63,
+              "longitude": -91.32
+            },
+            {
+              "latitude": 40.95,
+              "longitude": -90.37
+            }
+          ],
+          "passages": [
+            "BNSF Southern Transcon"
+          ],
+          "source": {
+            "title": "BNSF \u2014 network maps",
+            "reference": "https://www.bnsf.com/ship-with-bnsf/maps-and-shipping-locations/index.page"
+          }
         }
       ]
     }

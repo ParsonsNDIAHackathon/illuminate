@@ -18,7 +18,7 @@ def demo():
 
 def test_demo_is_explicitly_illustrative():
     catalog = ShippingCatalog.model_validate(demo())
-    assert len(catalog.routes) == 2
+    assert len(catalog.routes) == 5
     assert all(r.status == 'illustrative' and r.source.reference and r.notes for r in catalog.routes)
 
 
@@ -37,7 +37,7 @@ def test_invalid_routes_rejected(change):
 
 async def test_catalog_override_and_invalid_file(monkeypatch, tmp_path):
     monkeypatch.setattr(shipping, 'settings', SimpleNamespace(data_dir=tmp_path))
-    assert len((await shipping.shipping_catalog()).routes) == 2
+    assert len((await shipping.shipping_catalog()).routes) == 5
     path = tmp_path / 'shipping.json'
     path.write_text('{"ports":[],"routes":[]}')
     assert (await shipping.shipping_catalog()).routes == []
@@ -45,3 +45,43 @@ async def test_catalog_override_and_invalid_file(monkeypatch, tmp_path):
     with pytest.raises(HTTPException) as error:
         await shipping.shipping_catalog()
     assert error.value.status_code == 503
+
+
+def test_legacy_ocean_records_remain_valid():
+    data = demo()
+    data['routes'] = data['routes'][:2]
+    for route in data['routes']:
+        for segment in route['segments']: segment.pop('mode', None)
+    assert ShippingCatalog.model_validate(data).routes[0].segments[0].mode == 'ocean'
+
+
+@pytest.mark.parametrize('change', ['bad_mode', 'no_source', 'local_road', 'ocean_hub', 'foreign_endpoint'])
+def test_domestic_constraints(change):
+    data = demo()
+    segment = data['routes'][2]['segments'][1]
+    if change == 'bad_mode': segment['mode'] = 'air'
+    elif change == 'no_source': segment.pop('source')
+    elif change == 'local_road': segment['passages'] = ['Main Street']
+    elif change == 'ocean_hub': segment['mode'] = 'ocean'
+    elif change == 'foreign_endpoint': data['ports'][1]['country'] = 'CA'
+    with pytest.raises(ValidationError): ShippingCatalog.model_validate(data)
+
+
+async def test_reference_network_is_valid_and_separate():
+    network = await shipping.transport_network()
+    assert sum(c.mode == 'truck' for c in network.corridors) == 11
+    assert sum(c.mode == 'rail' for c in network.corridors) == 3
+    assert all(c.source.reference.startswith('https://') for c in network.corridors)
+    assert all('supplier_id' not in c.model_dump() for c in network.corridors)
+
+
+@pytest.mark.parametrize('change', ['local_road', 'unknown_mode', 'bad_geometry', 'duplicate', 'outside_us'])
+async def test_bad_network_rejected(change):
+    from illuminate.shipping import TransportNetwork
+    data = (await shipping.transport_network()).model_dump()
+    if change == 'local_road': data['corridors'][0]['name'] = 'US-1'
+    elif change == 'unknown_mode': data['corridors'][0]['mode'] = 'air'
+    elif change == 'bad_geometry': data['corridors'][0]['points'].pop()
+    elif change == 'duplicate': data['corridors'].append(data['corridors'][0])
+    elif change == 'outside_us': data['corridors'][0]['points'][0]['longitude'] = 100
+    with pytest.raises(ValidationError): TransportNetwork.model_validate(data)
