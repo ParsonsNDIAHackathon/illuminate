@@ -1,6 +1,7 @@
 <template>
   <v-container fluid>
     <div class="d-flex align-center ga-2 mb-2"><h2 class="text-h6">People</h2><v-text-field v-model="q" placeholder="filter" hide-details style="max-width: 280px" clearable /><v-spacer /><span class="text-caption">{{ items.length }} people · one HELD_ROLE edge per tenure</span></div>
+    <RiskUnscoredHint :items="items" @scored="load" />
     <v-data-table class="people-table" :items="items" :headers="headers" density="compact" :items-per-page="50" :loading="loading">
       <template #item.risk_score="{ item }">
         <v-chip size="x-small" variant="tonal" :color="bandChip(item.risk_band)"
@@ -21,6 +22,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import { api, qs } from '../api/client'
+import RiskUnscoredHint from '../components/RiskUnscoredHint.vue'
 import { bandChip, bandLabel, confidenceNote, isThin } from '../styles/risk'
 const q = ref(''); const items = ref<any[]>([]); const loading = ref(false)
 const headers = [{ title: 'Risk', key: 'risk_score', width: 80 }, { title: 'Person', key: 'name' }, { title: 'Roles (tenured)', key: 'roles' },

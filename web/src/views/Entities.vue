@@ -8,6 +8,7 @@
       <v-select v-model="band" :items="bandItems" label="risk band" hide-details style="max-width: 150px" />
       <v-spacer /><span class="text-caption">{{ total }} entities</span>
     </div>
+    <RiskUnscoredHint :items="items" @scored="load" />
     <v-data-table class="entities-table" :items="items" :headers="headers" density="compact" :items-per-page="50" :loading="loading" hover @click:row="(_: any, r: any) => router.push(`/entities/${r.item.id}`)">
       <template #item.risk_score="{ item }">
         <v-chip size="x-small" variant="tonal" :color="bandChip(item.risk_band)"
@@ -25,6 +26,7 @@
 import { onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, qs } from '../api/client'
+import RiskUnscoredHint from '../components/RiskUnscoredHint.vue'
 import { bandChip, bandLabel, confidenceNote, isThin, RISK_BANDS } from '../styles/risk'
 const router = useRouter()
 const q = ref(''); const kind = ref(''); const flagged = ref(false); const band = ref('')
