@@ -30,6 +30,9 @@
           </template>
         </g>
         <TransportLayer />
+        <ShippingLanesLayer :scale="zoom * mapScale" :show-labels="zoom >= 2" />
+        <ShippingLayer :scale="zoom * mapScale" :show-labels="zoom >= 2" />
+        <!-- SVG paint order keeps entity markers above shipping routes and port icons. -->
         <g v-for="place in places" :key="place.key" :transform="`translate(${(place.longitude + 180) * 3},${(90 - place.latitude) * 3})`"
            class="marker" :class="{ active: selectedKey === place.key, precise: place.precise, regional: place.region, traced: traced(place) }" tabindex="0" role="button"
            :aria-label="`${place.name}: ${entityCount(place)} entities, ${place.precise ? 'supplied coordinates' : place.region ? 'state/province-level placement' : 'country-level placement'}`"
@@ -46,8 +49,6 @@
           <title>{{ place.name }} · {{ place.articles.length }} news articles · Country mentioned in headline</title>
           <path :d="`M0,${-25 / (zoom * mapScale)} l${7 / (zoom * mapScale)},${7 / (zoom * mapScale)} l${-7 / (zoom * mapScale)},${7 / (zoom * mapScale)} l${-7 / (zoom * mapScale)},${-7 / (zoom * mapScale)} Z`" />
         </g>
-        <ShippingLanesLayer :scale="zoom * mapScale" :show-labels="zoom >= 2" />
-        <ShippingLayer :scale="zoom * mapScale" :show-labels="zoom >= 2" />
       </svg>
       <v-sheet class="detail-toggle" rounded>
         <v-checkbox v-model="showRegions" label="States & provinces" density="compact" hide-details />
