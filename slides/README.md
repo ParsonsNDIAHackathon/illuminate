@@ -52,7 +52,7 @@ adds a scrubber; `data-once` stops the loop.
 | --- | --- | --- |
 | `media/birdsnest.png` | The big picture — whole program graph | **your capture** (V-22, every layer, no depth limit) |
 | `media/employee-risk.png` | Employee of a sub-contractor — person risk tab | **your capture** (R. Ostrowski) |
-| `media/risk-graph.*` | **Canvas coloured by risk** — the money slide | ⬜ empty — png or a short mp4 |
+| `media/risk-graph.*` | **Canvas coloured by risk** — the money slide | **your capture** — swap in an mp4 under the same name if you want it moving |
 | `media/risk-path.*` | Clicking a dimension lights its path up | ⬜ empty — optional slide, cut it if short |
 | `media/chat-ask.png` | Chat: a template answer on the canvas | from `docs/screenshots/02-chat-sole-source.png` |
 | `media/chat-styles.png` | Chat: goods purple, services yellow | from `docs/screenshots/03-chat-goods-services.png` |
