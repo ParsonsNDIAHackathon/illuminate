@@ -15,7 +15,12 @@ HOME = risk.riskdata.HOME
 # Families the scorer computes better than this module can, because it walks the whole
 # graph rather than one entity's neighbourhood. When a scored breakdown is supplied they
 # are dropped in its favour; the rest survive as context.
-SUPERSEDED_BY_SCORER = ("ownership", "sanctions", "financial", "media", "concentration")
+#
+# 'concentration' is deliberately not on this list. Being a sole source is not a risk this
+# entity carries — it is one its customers carry — so the scorer grades it on the consumer
+# side as `dependency` and this module keeps describing it here as what it is for the
+# supplier: a fact about the award, and a lead.
+SUPERSEDED_BY_SCORER = ("ownership", "sanctions", "financial", "media")
 
 
 """How far up a control chain the ultimate-parent walk will go before giving up."""
@@ -312,13 +317,20 @@ async def risk_indicators(entity_id: str, core: dict, supply: dict, ppl: dict, s
                          dp["name"] + (f" ({dp['pct']}%)" if dp.get("pct") else ""), ids=[dp["id"]]))
     else:
         inds.append(_ind("ownership", "Ownership chain", None, None, "No parent records resolved"))
-    # 2. Concentration / sole source
+    # 2. Sole-source position. Whose risk this is matters: being irreplaceable says nothing
+    # about whether *this* company will fail, so it is described here and scored on the
+    # customer, as risk.py's `dependency` dimension.
     if supply["supplies"]:
         ss = [s for s in supply["supplies"] if s.get("sole_source")]
         if ss:
             s0 = ss[0]
-            inds.append(_ind("concentration", f"Sole source at tier {s0.get('tier') or '?'}" + (f" for PSC {s0['psc']}" if s0.get("psc") else ""),
-                             "medium", s0.get("source") or "USAspending", s0.get("contract_ref"), s0.get("source_url")))
+            customers = ", ".join(sorted({s["name"] for s in ss if s.get("name")})[:3])
+            inds.append(_ind("concentration",
+                             f"Sole source at tier {s0.get('tier') or '?'}" + (f" for PSC {s0['psc']}" if s0.get("psc") else ""),
+                             "medium", s0.get("source") or "USAspending",
+                             f"Irreplaceable for {customers or 'its customer'} — exposure carried by the customer, "
+                             "not by this entity" + (f" · {s0['contract_ref']}" if s0.get("contract_ref") else ""),
+                             s0.get("source_url")))
         else:
             inds.append(_ind("concentration", "No sole-source awards on record", "clear", "USAspending"))
     else:
